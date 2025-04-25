@@ -1,0 +1,24 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --foreground-rgb: #000501;
+  --background-rgb: 245, 245, 245;
+	--primary-color: #002868;
+	--primary-light: #0f3d83;
+	--secondary-color: #87CEEB;
+	--secondary-dark: #6fbbda;
+	--font-family: 'Manrope', sans-serif;
+}
+
+body {
+  background: rgb(var(--background-rgb));
+	font-family: var(--font-family);
+}
+
+@layer base {
+  :root {
+    --radius: 0.5rem;
+  }
+}

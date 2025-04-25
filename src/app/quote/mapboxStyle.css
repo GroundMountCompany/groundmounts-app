@@ -1,0 +1,85 @@
+.mapboxgl-ctrl-bottom-right .mapboxgl-ctrl-group {
+  flex-direction: column;
+  gap: 8px;
+  border:none;
+  background:transparent;
+  display: flex;
+  margin-right: 16px;
+  margin-bottom: 107px;
+}
+
+@media (min-width: 1024px) {
+  .mapboxgl-ctrl-bottom-right .mapboxgl-ctrl-group {
+    margin-right: 27px;
+    margin-bottom: 10px;
+  }
+}
+
+.mapboxgl-ctrl-bottom-right .mapboxgl-ctrl-group:first-child button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.mapboxgl-ctrl-bottom-right .mapboxgl-ctrl-group:first-child button:nth-child(3) {
+  order: -1;
+}
+
+.mapboxgl-ctrl-bottom-right .mapboxgl-ctrl-group:first-child button:nth-child(3) span {
+  width: 20px;
+  height: 20px;
+  background: url('/images/icons/nav-1.png') no-repeat center center !important;
+  background-size: 100% !important;
+}
+
+.mapboxgl-ctrl-bottom-right .mapboxgl-ctrl-group:first-child button:nth-child(1) span {
+  width: 20px;
+  height: 20px;
+  background: url('/images/icons/nav-2.png') no-repeat center center !important;
+  background-size: 100% !important;
+}
+
+.mapboxgl-ctrl-bottom-right .mapboxgl-ctrl-group:first-child button:nth-child(2) span {
+  width: 20px;
+  height: 20px;
+  background: url('/images/icons/nav-3.png') no-repeat center center !important;
+  background-size: 100% !important;
+}
+
+.mapboxgl-ctrl-bottom-right .mapboxgl-ctrl button {
+  background-color: rgba(255, 255, 255, 0.73);
+  border-radius: 4px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+  color: #000501; /* Ubah warna ikon */
+  transition: background-color 0.3s ease;
+  box-sizing: border-box;
+  width: 40px;
+  height: 40px;
+}
+
+.mapboxgl-ctrl-bottom-right .mapboxgl-ctrl button:not(:disabled):hover {
+  background-color: #fff;
+}
+
+/* Mobile touch handling */
+@media (max-width: 767px) {
+  /* When map is not interactive, ensure page scrolling works */
+  .mapboxgl-map {
+    touch-action: pan-y pinch-zoom;
+    pointer-events: none; /* Disable map interactions by default on mobile */
+  }
+  
+  /* Apply a slight visual indicator when map is interactive */
+  .mapboxgl-map.interactive {
+    touch-action: manipulation;
+    outline: 2px solid rgba(25, 118, 210, 0.5);
+    pointer-events: auto; /* Enable map interactions when interactive */
+  }
+  
+  /* Ensure all map controls are visible and clickable when in interactive mode */
+  .mapboxgl-map.interactive .mapboxgl-control-container,
+  .mapboxgl-map.interactive .mapboxgl-popup,
+  .mapboxgl-map.interactive .mapboxgl-marker {
+    pointer-events: auto !important;
+  }
+}

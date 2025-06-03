@@ -12,6 +12,7 @@ const nextConfig = {
               "frame-ancestors",
               "'self'",
               "http://localhost:3000",
+              "http://192.168.29.68:*",
               "https://www.groundmounts.com/",
             ].join(' '),
           },

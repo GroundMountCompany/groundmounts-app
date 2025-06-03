@@ -5,11 +5,11 @@
       "headers": [
         {
           "key": "X-Frame-Options",
-          "value": "ALLOW-FROM https://groundmounts.com"
+          "value": "ALLOW-FROM https://groundmounts.com http://192.168.29.68:* http://localhost:*"
         },
         {
           "key": "Content-Security-Policy",
-          "value": "frame-ancestors 'self' https://groundmounts.com http://localhost:* http://192.168.1.50:3000"
+          "value": "frame-ancestors 'self' https://groundmounts.com http://192.168.29.68:* http://localhost:*"
         }
       ]
     }

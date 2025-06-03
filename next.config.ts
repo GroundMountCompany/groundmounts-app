@@ -14,6 +14,7 @@ const nextConfig = {
               "http://localhost:3000",
               "http://192.168.29.68:*",
               "https://www.groundmounts.com/",
+              "https://transcendent-empanada-380557.netlify.app/",
             ].join(' '),
           },
 

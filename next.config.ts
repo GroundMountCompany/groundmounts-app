@@ -1,20 +1,26 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   async headers() {
+
     return [
       {
-        source: "/(.*)",
+        source: '/(.*)',         // every route
         headers: [
           {
-            key: "X-Frame-Options",
-            value: "" // Clear or override default DENY
+            key: 'Content-Security-Policy',
+            value: [
+              "frame-ancestors",
+              "'self'",
+              "http://localhost:3000",
+              "https://www.groundmounts.com/",
+            ].join(' '),
           },
-          {
-            key: "Content-Security-Policy",
-            value: "frame-ancestors 'self' https://groundmounts.com http://localhost:3000 http://192.168.29.68:5500"
-          }
-        ]
-      }
+
+          // Optional fallback for very old browsers
+          // REMOVE if you only need modern browsers
+          // { key: 'X-Frame-Options', value: 'SAMEORIGIN' },
+        ],
+      },
     ];
   },
   reactStrictMode: true,

@@ -5,7 +5,7 @@
       "headers": [
         {
           "key": "Content-Security-Policy",
-          "value": "frame-ancestors 'self' https://groundmounts.com http://192.168.29.68"
+          "value": "frame-ancestors 'self' https://groundmounts.com http://127.0.0.1:5500"
         }
       ]
     }

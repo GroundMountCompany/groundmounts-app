@@ -1,28 +1,36 @@
+import { twMerge } from "tailwind-merge";
 import { type ClassValue, clsx } from 'clsx';
-import { twMerge } from 'tailwind-merge';
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-export function debounce<T extends (...args: unknown[]) => void>(func: T, delay: number): (...args: Parameters<T>) => void {
-  let timeoutId: ReturnType<typeof setTimeout>;
-  return (...args: Parameters<T>) => {
-    clearTimeout(timeoutId);
-    timeoutId = setTimeout(() => {
-      func(...args);
-    }, delay);
-  };
-}
+export const updateSheet = async (column: string, value: string, cb?: () => void) => {
+  let leadId = '';
+  if (typeof window !== 'undefined') {
+    leadId = localStorage.getItem('lead_id') || '';
+    if (!leadId) {
+      const timestamp = new Date().getTime();
+      const randomNum = Math.floor(Math.random() * 1000000);
+      leadId = `LEAD_${timestamp}_${randomNum}`;
+      localStorage.setItem('lead_id', leadId);
+    }
+  }
+  try {
+    const response = await fetch('/api/submit', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ tabName: 'Sheet1', leadId, column, value }),
+    });
 
-export function formatNumber(
-  value: number | string,
-  separator: ',' | '.' = ',',
-): string {
-  // Convert to string and remove any existing non-digit characters
-  const numStr = value.toString().replace(/\D/g, '');
+    if (!response.ok) {
+      throw new Error('Failed to update sheet with leadId');
+    }
+    cb && cb()
 
-  // Add separator for every 3 digits from right
-  const pattern = /(\d)(?=(\d{3})+(?!\d))/g;
-  return numStr.replace(pattern, `$1${separator}`);
-}
+  } catch (error) {
+    console.error('Error updating sheet with leadId:', error);
+  }
+};

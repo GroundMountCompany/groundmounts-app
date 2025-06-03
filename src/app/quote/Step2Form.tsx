@@ -1,14 +1,22 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react";
-import { cn } from "@/lib/utils";
+import { cn, updateSheet } from "@/lib/utils";
 import * as Slider from "@radix-ui/react-slider";
 import "./sliderStyle.css";
 import Button from "@/components/common/Button";
 import { useQuoteContext } from "@/contexts/quoteContext";
+import Image from "next/image";
 
-export default function Step2Form({showForm,
-  setShowForm}) {
+interface Step2FormProps {
+  showForm: boolean;
+  setShowForm: React.Dispatch<React.SetStateAction<boolean>>;
+}
+
+export default function Step2Form({
+  showForm,
+  setShowForm
+}: Step2FormProps) {
   const {
     setCurrentStepIndex,
     setQuotation,
@@ -23,6 +31,8 @@ export default function Step2Form({showForm,
     setHighestValue,
     electricalMeter,
     electricalMeterPosition,
+    coordinates,
+    quotation
   } = useQuoteContext();
   const [showTooltip, setShowTooltip] = useState<boolean>(false);
   const [meterBtn, setMeterBtn] = useState<boolean>(false);
@@ -67,8 +77,27 @@ export default function Step2Form({showForm,
     }
   }, [electricalMeterPosition])
   
+  const totalCost = useMemo(() => quotation + (additionalCost || 0), [quotation, additionalCost]);
 
-  const handleContinue = (): void => {
+  const handleContinue = async () => {
+    const vals = [{
+            col: "G", val: String(avgValue),
+          },{
+            col: "H", val: String(highestValue),
+          },{
+            col: "I", val: String(percentage),
+          },{
+            col: "J", val: "Long: " + coordinates.longitude + ", Lat: " + coordinates.latitude,
+          },{
+            col: "K", val: String(totalCost),
+          },{
+            col: "L", val: `Trenching: Distance = ${electricalMeter?.distanceInFeet}ft, Cost = $${additionalCost} ($45/ft)`,
+          },{
+            col: "M", val: String(Math.floor(totalCost * 0.3)),
+          }]
+    vals.forEach(async val => {
+      await updateSheet(val.col, val.val)
+    })
     setCurrentStepIndex(2);
   }
 
@@ -78,8 +107,20 @@ export default function Step2Form({showForm,
         !showForm ? (
           <div className="mt-10">
             <div className="flex gap-2">
-              <img src="/images/meter-img.png" className="w-1/2" alt="" />
-              <img src="/images/meter-img2.png" className="w-1/2" alt="" />
+              <Image 
+                src="/images/meter-img.png" 
+                className="w-1/2"
+                width={210}
+                height={52}
+                alt="Meter1" 
+              />
+              <Image 
+                src="/images/meter-img2.png" 
+                className="w-1/2" 
+                alt="Meter2" 
+                width={210}
+                height={52}
+              />
             </div>
             <div className="mt-8 p-4 border border-[#638ED2] bg-[#F0F6FF] rounded-lg flex flex-row justify-between items-start">
               <div className="flex items-start w-full">
@@ -172,16 +213,16 @@ export default function Step2Form({showForm,
 
           {additionalCost > 0 && (
             <div className="mt-10">
-              <p className="text-xs font-medium leading-[18px] tracking-[6%] uppercase">trenching to meter cost</p>
+              <p className="text-xs font-medium leading-[18px] tracking-[6%] uppercase">trenching to meter distance</p>
               <div className="mt-2 py-2 px-4 rounded-lg bg-[#F0F6FF]">
                 <div className="flex flex-row justify-between items-center">
-                  <div className="flex flex-1 grow shrink-0 border-r border-neutral-300 pr-4 h-[37px] items-center">
+                  <div className="flex flex-1 grow shrink-0 border-neutral-300 pr-4 h-[37px] items-center">
                     <p className="text-sm leading-[21px] font-medium text-custom-primary">Distance: {electricalMeter?.distanceInFeet} feet</p>
                   </div>
-                  <p className="flex items-center text-sm font-medium text-neutral-700 leading-[21px] pl-[28.5px]">+ ${additionalCost.toLocaleString()}</p>
+                  {/* <p className="flex items-center text-sm font-medium text-neutral-700 leading-[21px] pl-[28.5px]">+ ${additionalCost.toLocaleString()}</p> */}
                 </div>
               </div>
-              <div className="lg:flex lg:flex-row lg:justify-between lg:items-center mt-2 lg:mt-[9.5px]">
+              {/* <div className="lg:flex lg:flex-row lg:justify-between lg:items-center mt-2 lg:mt-[9.5px]">
                 <p className="w-full lg:w-auto text-sm leading-[21px] inline-flex items-center">
                   <svg width="20" height="21" viewBox="0 0 20 21" className="inline-block mr-2" fill="none" xmlns="http://www.w3.org/2000/svg">
                     <path d="M10.625 13.7676H11.1667C11.7083 13.7676 12.1583 13.2842 12.1583 12.7009C12.1583 11.9759 11.9 11.8342 11.475 11.6842L10.6333 11.3926V13.7676H10.625Z" fill="#214A8B"/>
@@ -190,7 +231,7 @@ export default function Step2Form({showForm,
                   </svg>
                   Electrical Meter Distance Cost $45 per foot
                 </p>
-              </div>
+              </div> */}
             </div>
           )}
         </>

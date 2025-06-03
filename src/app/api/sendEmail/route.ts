@@ -1,8 +1,6 @@
 import EmailTemplate from '@/components/common/EmailTemplate';
 import { Resend } from 'resend';
 import type { ReactElement } from 'react';
-import { saveToSpreadsheet } from '@/lib/spreadsheetUtils';
-import { SPREADSHEET_ID, TAB_NAME } from '@/constants/quote';
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 
@@ -15,7 +13,6 @@ export async function POST(request: Request) {
       quotation,
       totalPanels,
       paymentMethod,
-      quoteId,
       additionalCost,
       electricalMeter,
       percentage
@@ -34,7 +31,8 @@ export async function POST(request: Request) {
       address: `Address: ${address}, Coordinates: ${coordinates.latitude.toFixed(2)}° N, ${coordinates.longitude.toFixed(2)}° W`,
       coordinates: `Lon: ${coordinates.longitude}, Lat: ${coordinates.latitude}`,
       materials: `${totalPanels} Panels (${systemSizeWatts}W) - ${percentage}% Offset`,
-      estimatedCost: `$${totalCost} (Federal Tax Credit: $${federalTaxCredit})`,
+      estimatedCost: `$${totalCost}`,
+      fedralTax: federalTaxCredit?.toString(),
       totalCost: `Net Out-of-Pocket Cost: $${paymentMethod === 'cash' ? netCostAfterTax : 0}`,
       trenching: trenchingSection(electricalMeter?.distanceInFeet || 0, additionalCost),
       date: formattedDate,

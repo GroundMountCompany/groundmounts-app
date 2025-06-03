@@ -2,12 +2,12 @@
 
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ReferenceArea } from 'recharts';
 import { useState, useRef, useEffect, JSX, useMemo } from 'react';
-import { cn } from '@/lib/utils';
+import { cn, updateSheet } from '@/lib/utils';
 import Step2Table from './Step2Table';
 import { useQuoteContext } from '@/contexts/quoteContext';
-import { SPREADSHEET_ID, TAB_NAME } from '@/constants/quote';
-import { saveToSpreadsheet } from '@/lib/spreadsheetUtils';
-import { sendEmail } from '@/lib/api/email';
+import { TAB_NAME } from '@/constants/quote';
+// import { saveToSpreadsheet } from '@/lib/spreadsheetUtils';
+// import { sendEmail } from '@/lib/api/email';
 import { useToast } from '@/components/ui/toast';
 
 export default function Step3Content(): JSX.Element {
@@ -28,14 +28,14 @@ export default function Step3Content(): JSX.Element {
     setCurrentStepIndex
   } = useQuoteContext();
 
-  const [email, setEmail] = useState<string>("");
-  const [isSavingQuote, setIsSavingQuote] = useState<boolean>(false);
+  // const [email] = useState<string>("");
+  // const [isSavingQuote, setIsSavingQuote] = useState<boolean>(false);
   const [isSavingToSpreadsheet, setIsSavingToSpreadsheet] = useState<boolean>(false);
   const { Toast, showToast } = useToast();
 
-  const isEmailValid = useMemo(() => {
-    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
-  }, [email]);
+  // const isEmailValid = useMemo(() => {
+  //   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+  // }, [email]);
 
   const data = [
     { year: 2005, solar: 16.5, regular: 20 },
@@ -77,61 +77,80 @@ export default function Step3Content(): JSX.Element {
   // Calculate monthly tax credit
   const federalTaxCreditMonthly = useMemo(() => Math.floor(monthlyPayment * 0.3), [monthlyPayment]);
 
-  const handleSaveQuote = async () => {
-    try {
-      setIsSavingQuote(true);
-      await sendEmail(email);
-      showToast("Quote has been sent to your email", "success");
-    } catch (error) {
-      console.error("Error saving quote:", error);
-      showToast("Failed to send quote to email", "error");
-    } finally {
-      setIsSavingQuote(false);
-    }
-  };
+  // const handleSaveQuote = async () => {
+  //   try {
+  //     setIsSavingQuote(true);
+  //     await sendEmail(email);
+  //     showToast("Quote has been sent to your email", "success");
+  //   } catch (error) {
+  //     console.error("Error saving quote:", error);
+  //     showToast("Failed to send quote to email", "error");
+  //   } finally {
+  //     setIsSavingQuote(false);
+  //   }
+  // };
 
   const handleContinue = async () => {
     try {
       setIsSavingToSpreadsheet(true);
-      const emailPayload = {
-        email,
-        date: new Intl.DateTimeFormat(navigator.language, {
-          day: '2-digit',
-          month: '2-digit',
-          year: '2-digit',
-          hour: '2-digit',
-          minute: '2-digit',
-          second: '2-digit',
-          hour12: false
-        }).format(new Date()),
-        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-      };
-
-      const quotationPayload = {
-        quoteId,
-        address,
-        latitude: coordinates.latitude,
-        longitude: coordinates.longitude,
-        quotation,
-        totalPanels,
-        paymentMethod,
-        percentage,
-        avgValue,
-        highestValue,
-        additionalCost,
-        electricalMeterDistance: electricalMeter?.distanceInFeet || 0,
-        electricalMeterLatitude: electricalMeter?.coordinates?.latitude || null,
-        electricalMeterLongitude: electricalMeter?.coordinates?.longitude || null,
-        totalCost: totalCost
-      };
-      console.log("quotationPayload", quotationPayload)
-      const response = await fetch('/api/submit', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({tabName: TAB_NAME.QUOTATION, data: [Object.values(quotationPayload)]}),
-      });
+      // const emailPayload = {
+      //   email,
+      //   date: new Intl.DateTimeFormat(navigator.language, {
+      //     day: '2-digit',
+      //     month: '2-digit',
+      //     year: '2-digit',
+      //     hour: '2-digit',
+      //     minute: '2-digit',
+      //     second: '2-digit',
+      //     hour12: false
+      //   }).format(new Date()),
+      //   timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      // };
+      const vals = [{
+        col: "G", val: String(avgValue),
+      },{
+        col: "H", val: String(highestValue),
+      },{
+        col: "I", val: String(percentage),
+      },{
+        col: "J", val: "Long: " + coordinates.longitude + ", Lat: " + coordinates.latitude,
+      },{
+        col: "K", val: String(totalCost),
+      },{
+        col: "L", val: `Trenching: Distance = ${electricalMeter?.distanceInFeet}ft, Cost = $${additionalCost} ($45/ft)`,
+      },{
+        col: "M", val: String(Math.floor(totalCost * 0.3)),
+      },{
+        col: "N", val: paymentMethod,
+      }]
+      vals.forEach(async val => {
+        await updateSheet(val.col, val.val)
+      })
+      // const quotationPayload = {
+      //   quoteId,
+      //   address,
+      //   latitude: coordinates.latitude,
+      //   longitude: coordinates.longitude,
+      //   quotation,
+      //   totalPanels,
+      //   paymentMethod,
+      //   percentage,
+      //   avgValue,
+      //   highestValue,
+      //   additionalCost,
+      //   electricalMeterDistance: electricalMeter?.distanceInFeet || 0,
+      //   electricalMeterLatitude: electricalMeter?.coordinates?.latitude || null,
+      //   electricalMeterLongitude: electricalMeter?.coordinates?.longitude || null,
+      //   totalCost: totalCost
+      // };
+      // console.log("quotationPayload", quotationPayload)
+      // await fetch('/api/submit', {
+      //   method: 'POST',
+      //   headers: {
+      //     'Content-Type': 'application/json',
+      //   },
+      //   body: JSON.stringify({tabName: TAB_NAME.QUOTATION, data: [Object.values(quotationPayload)]}),
+      // });
 
       // await Promise.all([
       //   // saveToSpreadsheet(SPREADSHEET_ID, TAB_NAME.EMAIL, emailPayload),
@@ -335,7 +354,7 @@ export default function Step3Content(): JSX.Element {
         </div>
       </div>
 
-      <Step2Table />
+      {/* <Step2Table /> */}
     </div>
   )
 }

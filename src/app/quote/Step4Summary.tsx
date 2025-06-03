@@ -1,10 +1,9 @@
 // Step4Summary.tsx
 import { useQuoteContext } from "@/contexts/quoteContext";
 import { format } from "date-fns";
-import { formatNumber } from "@/lib/utils";
+import { formatNumber, updateSheet } from "@/lib/utils";
 import { useState } from "react";
-import { saveToSpreadsheet } from "@/lib/spreadsheetUtils";
-import { SPREADSHEET_ID, TAB_NAME } from "@/constants/quote";
+import { TAB_NAME } from "@/constants/quote";
 
 export default function Step4Summary() {
   const {
@@ -54,32 +53,33 @@ export default function Step4Summary() {
 
       if (res.ok) {
         setStatus("Email sent!");
+        await updateSheet("O", email)
 
-        await fetch('/api/submit', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({tabName: TAB_NAME.EMAIL, data: [Object.values({
-            email,
-            address,
-            latitude: coordinates.latitude,
-            longitude: coordinates.longitude,
-            quotation,
-            totalPanels,
-            paymentMethod,
-            quoteId,
-            additionalCost,
-            electricalMeterDistance: electricalMeter?.distanceInFeet || 0,
-            electricalMeterLatitude: electricalMeter?.coordinates?.latitude || null,
-            electricalMeterLongitude: electricalMeter?.coordinates?.longitude || null,
-            percentage
-          })]}),
-        });
+        // await fetch('/api/submit', {
+        //   method: 'POST',
+        //   headers: {
+        //     'Content-Type': 'application/json',
+        //   },
+        //   body: JSON.stringify({tabName: TAB_NAME.EMAIL, data: [Object.values({
+        //     email,
+        //     address,
+        //     latitude: coordinates.latitude,
+        //     longitude: coordinates.longitude,
+        //     quotation,
+        //     totalPanels,
+        //     paymentMethod,
+        //     quoteId,
+        //     additionalCost,
+        //     electricalMeterDistance: electricalMeter?.distanceInFeet || 0,
+        //     electricalMeterLatitude: electricalMeter?.coordinates?.latitude || null,
+        //     electricalMeterLongitude: electricalMeter?.coordinates?.longitude || null,
+        //     percentage
+        //   })]}),
+        // });
       } else {
         setStatus("Failed to send email.");
       }
-    } catch (error) {
+    } catch {
       setStatus("Failed to send email.");
     }
   };

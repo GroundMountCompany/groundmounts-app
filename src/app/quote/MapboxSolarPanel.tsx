@@ -2,7 +2,7 @@
 
 import { useQuoteContext } from '@/contexts/quoteContext';
 import MapboxDraw from '@mapbox/mapbox-gl-draw';
-import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
+import { useEffect, useMemo, useRef, useCallback } from 'react';
 import mapboxgl from 'mapbox-gl';
 import ElectricalMeter from './ElectricalMeter';
 
@@ -34,11 +34,12 @@ const MapboxSolarPanel = ({ map, mapLoaded }: Props) => {
     drawRef,
     setElectricalMeter,
     setAdditionalCost,
-    setElectricalMeterPosition
+    setElectricalMeterPosition,
+    currentStepIndex
   } = useQuoteContext();
 
   const solarMarkerRef = useRef<mapboxgl.Marker | null>(null);
-  const [showDragNotice, setShowDragNotice] = useState(false);
+  // const [showDragNotice, setShowDragNotice] = useState(false);
 
   // Calculate the actual number of panels (rounded up to multiple of 4)
   const actualPanels = useMemo(() => {
@@ -46,17 +47,40 @@ const MapboxSolarPanel = ({ map, mapLoaded }: Props) => {
   }, [totalPanels]);
 
   console.log('actualPanels', actualPanels)
+  const getMetersPerPixel = (latitude: number, zoom: number) => {
+    const earthCircumference = 40075016.686; // in meters
+    const latitudeRadians = latitude * (Math.PI / 180);
+    return earthCircumference * Math.cos(latitudeRadians) / Math.pow(2, zoom + 8);
+  };
+  
   const scaleFactor = useMemo(() => {
-    if (mapZoomPercentage < 50) {
-      return 0.4;
-    } else if (mapZoomPercentage < 100) {
-      return 0.6;
-    } else if (mapZoomPercentage < 150) {
-      return 1;
-    } else {
-      return 1.2;
-    }
-  }, [mapZoomPercentage]);
+    if (!map) return 1;
+    const zoom = map.getZoom();
+    const center = map.getCenter();
+    const metersPerPixel = getMetersPerPixel(center.lat, zoom);
+  
+    // Your panel system real-world size
+    const panelWidthFeet = 6; // 1 panel = 6 feet wide
+    // const panelHeightFeet = 2.5; // assume height like 2.5 feet
+    const systemRows = 4; // always 4 rows = height fixed
+    const systemCols = Math.ceil(totalPanels / systemRows); // columns based on total panels
+  
+    const systemWidthFeet = systemCols * panelWidthFeet;
+    // const systemHeightFeet = systemRows * panelHeightFeet;
+  
+    // Convert feet to meters
+    const feetToMeters = 0.3048;
+    const systemWidthMeters = systemWidthFeet * feetToMeters;
+    // const systemHeightMeters = systemHeightFeet * feetToMeters;
+  
+    // Calculate desired pixel size based on meters
+    const desiredWidthPixels = systemWidthMeters / metersPerPixel;
+    const baseSvgWidthPixels = systemCols * 37; // 37 is your <svg width="37"> you set per panel
+    const scale = desiredWidthPixels / baseSvgWidthPixels;
+  
+    return scale * 1.8;
+  }, [map?.getZoom(), map?.getCenter(), totalPanels]);
+  
 
   // Create panel marker
   const createPanelMarker = useCallback((coordinates: [number, number]) => {
@@ -221,10 +245,11 @@ const MapboxSolarPanel = ({ map, mapLoaded }: Props) => {
       } else {
         createPanelMarker([center.lng, center.lat]);
       }
-      setShowDragNotice(true);
+      // setShowDragNotice(true);
     } else {
-      setShowDragNotice(false);
-      drawRef.current?.delete(lineFeatureIdRef.current);
+      // setShowDragNotice(false);
+      // eslint-disable-next-line @typescript-eslint/no-unused-expressions
+      lineFeatureIdRef.current && drawRef.current?.delete(lineFeatureIdRef.current);
       lineFeatureIdRef.current = null;
     }
   }, [actualPanels, map, mapLoaded]);
@@ -245,8 +270,9 @@ const MapboxSolarPanel = ({ map, mapLoaded }: Props) => {
       if (!solarMarkerRef.current) return;
       const solarMarkerLngLat = solarMarkerRef.current.getLngLat();
       const newCoords = [solarMarkerLngLat.lng, solarMarkerLngLat.lat];
-      console.log('newCoords2', newCoords)
-      setPanelPosition(newCoords);
+      if (newCoords.length === 2) {
+        setPanelPosition([newCoords[0], newCoords[1]]);
+      }
     };
 
     // Use requestAnimationFrame for smoother updates
@@ -322,9 +348,22 @@ const MapboxSolarPanel = ({ map, mapLoaded }: Props) => {
     });
   }, [map, panelPosition]);
 
+  const systemSizeFeet = useMemo(() => {
+    const panelWidthFeet = 6; // each panel 6 feet width
+    const panelHeightFeet = 2.5; // height for 1 panel (estimate)
+    const systemRows = 4; // fixed
+    const systemCols = Math.ceil(totalPanels / systemRows);
+  
+    const widthFeet = systemCols * panelWidthFeet;
+    const heightFeet = systemRows * panelHeightFeet;
+  
+    return { widthFeet, heightFeet };
+  }, [totalPanels]);
+  
+
   return (
     <>
-      {!electricalMeterPosition && (
+      {!electricalMeterPosition && (currentStepIndex !== 0) && (
         <div className="absolute top-[30px] left-1/2 transform -translate-x-1/2 z-10">
           <div className="bg-white/70 backdrop-blur-md px-4 py-2 rounded-full shadow-lg text-sm text-gray-700 flex items-center gap-2 transition-opacity duration-300">
           <svg width="12" height="13" viewBox="0 0 12 13" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -349,30 +388,35 @@ const MapboxSolarPanel = ({ map, mapLoaded }: Props) => {
         </div>
       )}
       { actualPanels > 0 && (
-        <div className="absolute bottom-[30px] left-1/2 transform -translate-x-1/2 z-10">
-          <button
-            onClick={focusOnPanels}
-            onTouchEnd={(e) => {
-              e.preventDefault();
-              focusOnPanels();
-            }}
-            className="flex items-center gap-2 px-4 py-2 bg-white/70 backdrop-blur-md rounded-full shadow-lg text-sm font-medium text-gray-700 hover:bg-white/90 transition-all duration-200"
-          >
-            <svg
-              className="w-4 h-4"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-            >
-              <circle cx="12" cy="12" r="3" />
-              <path d="M12 2v3m0 14v3M2 12h3m14 0h3" />
-              <path d="M19 19l-1.5-1.5M19 5l-1.5 1.5M5 19l1.5-1.5M5 5l1.5 1.5" strokeLinecap="round" />
-            </svg>
-            Focus on Panels
-          </button>
-        </div>
-      )}
+  <div className="absolute bottom-[30px] left-1/2 transform -translate-x-1/2 z-10 flex flex-col items-center gap-2">
+    <div className="bg-white/70 backdrop-blur-md px-4 py-2 rounded-full shadow-lg text-sm font-medium text-gray-700">
+      System Size: {systemSizeFeet.widthFeet} ft x {systemSizeFeet.heightFeet} ft
+    </div>
+
+    <button
+      onClick={focusOnPanels}
+      onTouchEnd={(e) => {
+        e.preventDefault();
+        focusOnPanels();
+      }}
+      className="flex items-center gap-2 px-4 py-2 bg-white/70 backdrop-blur-md rounded-full shadow-lg text-sm font-medium text-gray-700 hover:bg-white/90 transition-all duration-200"
+    >
+      <svg
+        className="w-4 h-4"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+      >
+        <circle cx="12" cy="12" r="3" />
+        <path d="M12 2v3m0 14v3M2 12h3m14 0h3" />
+        <path d="M19 19l-1.5-1.5M19 5l-1.5 1.5M5 19l1.5-1.5M5 5l1.5 1.5" strokeLinecap="round" />
+      </svg>
+      Focus on Panels
+    </button>
+  </div>
+)}
+
       <ElectricalMeter map={map} mapLoaded={mapLoaded} />
     </>
   );

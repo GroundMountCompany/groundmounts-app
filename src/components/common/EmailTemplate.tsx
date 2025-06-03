@@ -3,7 +3,6 @@ import {
   Body,
   Container,
   Head,
-  Heading,
   Hr,
   Html,
   Img,
@@ -13,7 +12,6 @@ import {
   Tailwind,
   Row,
   Column,
-  Button,
 } from '@react-email/components';
 
 interface EmailTemplateProps {
@@ -28,6 +26,7 @@ interface EmailTemplateProps {
   totalCost?: string;
   date?: string;
   calendlyUrl?: string;
+  fedralTax?: string;
 }
 
 interface BodyStyle {
@@ -48,7 +47,8 @@ export default function EmailTemplate({
   coordinates,
   totalCost,
   date,
-  calendlyUrl
+  calendlyUrl,
+  fedralTax
 }: EmailTemplateProps): React.JSX.Element {
   const body: BodyStyle = {
     fontFamily: "'Manrope', 'Helvetica', 'Arial', sans-serif",
@@ -63,7 +63,7 @@ export default function EmailTemplate({
       <Tailwind>
         <Body style={body}>
           <Container className="bg-[#002868] w-full max-w-[656px]">
-            <Section>
+            {/* <Section>
               <Img
                 src={`${baseUrl}/images/logo-email.png`}
                 alt="The Ground Mount Company Logo"
@@ -85,7 +85,7 @@ export default function EmailTemplate({
                 height={409.55}
                 className='relative z-20 w-full h-auto'
               />
-            </Section>
+            </Section> */}
             <Section className='p-10 bg-white'>
               <div className='text-[16px] leading-[24px] text-left font-bold text-[#183776] my-0'>
                 Dear {client},
@@ -96,7 +96,11 @@ export default function EmailTemplate({
                 and sustainability for your home.
               </div>
             </Section>
-
+              <div className="flex justify-center mt-10">
+                <a href={calendlyUrl} target='_blank' className='flex gap-2 justify-center items-center btn bg-blue-600 text-white px-4 py-2 rounded rounded-sm text-xl mx-auto text-decoration-none border-radius-4' style={{textDecoration: "none", fontSize: "26px", borderRadius: "20px"}}>
+                  <span className='text-white'>&#128241;</span> Book a Calendly call
+                </a>
+              </div>
             <Section className='p-[32px]'>
               <Section className='py-6 px-5 bg-white rounded-[12px]'>
                 <Row>
@@ -136,10 +140,26 @@ export default function EmailTemplate({
                 </Row>
                 <Row>
                   <Column className='w-1/2 relative'>
+                    <div className='text-[16px] leading-[24px] text-left font-normal text-[#46586B] mt-6 mb-0 absolute top-0 left-0'>Trenching Cost:</div>
+                  </Column>
+                  <Column className='w-1/2'>
+                    <div className='text-[16px] leading-[24px] tracking-[-0.02em] text-left font-bold text-[#183776] mt-6 mb-0'>{trenching}</div>
+                  </Column>
+                </Row>
+                <Row>
+                  <Column className='w-1/2 relative'>
                     <div className='text-[16px] leading-[24px] text-left font-normal text-[#46586B] mt-6 mb-0 absolute top-0 left-0'>Estimated Cost:</div>
                   </Column>
                   <Column className='w-1/2'>
                     <div className='text-[16px] leading-[24px] tracking-[-0.02em] text-left font-bold text-[#183776] mt-6 mb-0'>{estimatedCost}</div>
+                  </Column>
+                </Row>
+                <Row>
+                  <Column className='w-1/2 relative'>
+                    <div className='text-[16px] leading-[24px] text-left font-normal text-[#46586B] mt-6 mb-0 absolute top-0 left-0'>Fedral Tax Credit:</div>
+                  </Column>
+                  <Column className='w-1/2'>
+                    <div className='text-[16px] leading-[24px] tracking-[-0.02em] text-left font-bold text-[#183776] mt-6 mb-0'>${fedralTax}</div>
                   </Column>
                 </Row>
                 <Row>
@@ -152,28 +172,21 @@ export default function EmailTemplate({
                 </Row>
                 <Row>
                   <Column className='w-1/2 relative'>
-                    <div className='text-[16px] leading-[24px] text-left font-normal text-[#46586B] mt-6 mb-0 absolute top-0 left-0'>Installation Timeline:</div>
-                  </Column>
-                  <Column className='w-1/2'>
-                    <div className='text-[16px] leading-[24px] tracking-[-0.02em] text-left font-bold text-[#183776] mt-6 mb-0'>{installationTimeline}</div>
-                  </Column>
-                </Row>
-                <Row>
-                  <Column className='w-1/2 relative'>
-                    <div className='text-[16px] leading-[24px] text-left font-normal text-[#46586B] mt-6 mb-0 absolute top-0 left-0'>Warranty:</div>
-                  </Column>
-                  <Column className='w-1/2'>
-                    <div className='text-[16px] leading-[24px] tracking-[-0.02em] text-left font-bold text-[#183776] mt-6 mb-0'>{trenching}</div>
-                  </Column>
-                </Row>
-                <Row>
-                  <Column className='w-1/2 relative'>
                     <div className='text-[16px] leading-[24px] text-left font-normal text-[#46586B] mt-6 mb-0 absolute top-0 left-0'>Date:</div>
                   </Column>
                   <Column className='w-1/2'>
                     <div className='text-[16px] leading-[24px] tracking-[-0.02em] text-left font-bold text-[#183776] mt-6 mb-0'>{date}</div>
                   </Column>
                 </Row>
+                <Row>
+                  <Column className='w-1/2 relative'>
+                    <div className='text-[16px] leading-[24px] text-left font-normal text-[#46586B] mt-6 mb-0 absolute top-0 left-0'>Installation Timeline:</div>
+                  </Column>
+                  <Column className='w-1/2'>
+                    <div className='text-[16px] leading-[24px] tracking-[-0.02em] text-left font-bold text-[#183776] mt-6 mb-0'>{installationTimeline}</div>
+                  </Column>
+                </Row>
+                
                 <Section className='bg-[#D5F1FC66] rounded-[12px] p-4 mt-10'>
                   <div className='text-[16px] leading-[24px] tracking-[-0.02em] text-left font-bold text-[#183776] flex items-center'>
                     <Img src={`${baseUrl}/images/bulb.png`} alt="Pro Tips" width={24} height={24} className='inline-block mr-2' />

@@ -3,6 +3,7 @@
 import { useQuoteContext } from '@/contexts/quoteContext';
 import { useEffect, useRef, useCallback, useMemo, useState } from 'react';
 import mapboxgl from 'mapbox-gl';
+import { updateSheet } from '@/lib/utils';
 
 interface Props {
   map: mapboxgl.Map | null;
@@ -68,16 +69,11 @@ const ElectricalMeter = ({ map, mapLoaded }: Props) => {
   const [isDragging, setIsDragging] = useState(false);
 
   const scaleFactor = useMemo(() => {
-    if (mapZoomPercentage < 50) {
-      return 0.5;
-    } else if (mapZoomPercentage < 100) {
-      return 0.8;
-    } else if (mapZoomPercentage < 150) {
-      return 1.5;
-    } else {
-      return 2;
-    }
-  }, [mapZoomPercentage]);
+    if (!map) return 1;
+    const zoom = map.getZoom(); // this gives live map zoom
+    // For example, at zoom 17 => small, zoom 20 => bigger
+    return Math.pow(2, zoom - 18); 
+  }, [map?.getZoom()]);
 
   // Modifikasi fungsi createCustomMarker untuk menerapkan scaleFactor
   const createCustomMarker = useCallback((coordinates: [number, number]) => {
@@ -288,8 +284,23 @@ const ElectricalMeter = ({ map, mapLoaded }: Props) => {
     // Add both click and touchend event handlers
     map.on('click', handleMapInteraction);
     map.on('touchend', handleMapInteraction);
+    console.log("electricalMeterPosition", electricalMeterPosition)
+    if (!electricalMeterPosition) return;
 
+    const timeout = setTimeout(() => {
+      const [lng, lat] = electricalMeterPosition;
+
+      // Call async function safely
+      (async () => {
+        try {
+          await updateSheet('F', `Long: ${lng}, Lat: ${lat}`);
+        } catch (err) {
+          console.error('Failed to update sheet:', err);
+        }
+      })();
+    }, 500);
     return () => {
+      clearTimeout(timeout)
       if (map && map.loaded()) {
         try {
           map.off('click', handleMapInteraction);

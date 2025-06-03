@@ -17,7 +17,7 @@ type PaymentMethod = 'unselected' | 'cash' | 'finance';
 
 type PanelorMeterCoordinates = [number, number];
 
-interface QuoteContextValues {
+export interface QuoteContextValues {
   currentStepIndex: number;
   address: string;
   coordinates: Coordinates;
@@ -37,8 +37,8 @@ interface QuoteContextValues {
   additionalCost: number;
   panelPosition: PanelorMeterCoordinates | null;
   electricalMeterPosition: PanelorMeterCoordinates | null;
-  lineFeatureIdRef: React.RefObject<string | null>;
-  drawRef: React.RefObject<MapboxDraw | null>;
+  lineFeatureIdRef: React.MutableRefObject<string | null>;
+  drawRef: React.MutableRefObject<MapboxDraw | null>;
   setIsAutoLocationError: (value: boolean) => void;
   setCurrentStepIndex: (value: number) => void;
   setAddress: (value: string) => void;

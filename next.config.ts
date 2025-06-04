@@ -12,7 +12,7 @@ const nextConfig = {
               "frame-ancestors",
               "'self'",
               "http://localhost:3000",
-              "https://www.groundmounts.com/",
+              "https://www.groundmounts.com",
               "https://transcendent-empanada-380557.netlify.app",
             ].join(' '),
           }

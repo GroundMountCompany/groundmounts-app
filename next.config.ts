@@ -15,10 +15,10 @@ const nextConfig = {
               "https://www.groundmounts.com",
               "https://transcendent-empanada-380557.netlify.app",
             ].join(' '),
-          }
+          },
           // Optional fallback for very old browsers
           // REMOVE if you only need modern browsers
-          // { key: 'X-Frame-Options', value: 'SAMEORIGIN' },
+          { key: 'X-Frame-Options', value: 'ALLOW-FROM https://transcendent-empanada-380557.netlify.app https://www.groundmounts.com' },
         ],
       },
     ];

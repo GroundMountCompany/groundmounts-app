@@ -60,8 +60,9 @@ export async function POST(request: Request) {
   try {
     const sheets = google.sheets({ version: 'v4', auth });
     const body = await request.json();
-
+    console.log("stp1", { version: 'v4', auth }, sheets)
     const { tabName, leadId, column, value } = body;
+    console.log("stp1 body", body)
 
     if (!tabName || !leadId) {
       return NextResponse.json(
@@ -72,6 +73,7 @@ export async function POST(request: Request) {
 
     // Step 1: Ensure leadId exists in column A, get its row
     const row = await ensureLeadRow(tabName, leadId);
+    console.log("stp1 row", tabName, leadId, row)
 
     if (!column || typeof value === 'undefined') {
       // Step 2: No quiz data — just inserting leadId
@@ -95,6 +97,12 @@ export async function POST(request: Request) {
         values: [[value]],
       },
     });
+    console.log("stp1 updateRes", colLetter, cell, leadId, updateRes)
+    console.log("stp1 updateRes ret", {
+      success: true,
+      updatedCell: cell,
+      response: updateRes.data,
+    })
 
     return NextResponse.json({
       success: true,

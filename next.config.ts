@@ -9,7 +9,7 @@ const nextConfig = {
           
           // Optional fallback for very old browsers
           // REMOVE if you only need modern browsers
-          { key: 'X-Frame-Options', value: 'ALLOW-FROM https://transcendent-empanada-380557.netlify.app https://www.groundmounts.com http://192.168.29.68:3000' },
+          { key: 'X-Frame-Options', value: 'ALLOW-FROM https://transcendent-empanada-380557.netlify.app https://www.groundmounts.com http://192.168.29.68:3000 http://192.168.29.68:5500' },
         ],
       },
     ];

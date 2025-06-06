@@ -6,19 +6,10 @@ const nextConfig = {
       {
         source: '/(.*)',         // every route
         headers: [
-          {
-            key: 'Content-Security-Policy',
-            value: [
-              "frame-ancestors",
-              "'self'",
-              "http://localhost:3000",
-              "https://www.groundmounts.com",
-              "https://transcendent-empanada-380557.netlify.app",
-            ].join(' '),
-          },
+          
           // Optional fallback for very old browsers
           // REMOVE if you only need modern browsers
-          { key: 'X-Frame-Options', value: 'ALLOW-FROM https://transcendent-empanada-380557.netlify.app https://www.groundmounts.com' },
+          { key: 'X-Frame-Options', value: 'ALLOW-FROM https://transcendent-empanada-380557.netlify.app https://www.groundmounts.com http://192.168.29.68:3000' },
         ],
       },
     ];

@@ -6,16 +6,11 @@ const nextConfig = {
       {
         source: '/(.*)',         // every route
         headers: [
-          {
-            "source": "/(.*)",
-            "headers": [
-              {
-                "key": "Content-Security-Policy",
-                "value": "frame-ancestors 'self' https://www.groundmounts.com https://transcendent-empanada-380557.netlify.app"
-              }
-            ]
-          }
-        ]
+            {
+              "key": "Content-Security-Policy",
+              "value": "frame-ancestors 'self' https://www.groundmounts.com https://transcendent-empanada-380557.netlify.app"
+            }
+          ]
       },
     ];
   },

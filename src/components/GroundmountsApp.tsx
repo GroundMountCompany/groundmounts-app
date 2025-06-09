@@ -8,16 +8,8 @@ import {
 import { motion } from "framer-motion";
 import Image from "next/image";
 
-export default function Home() {
-
-  // useEffect(() => {
-  //   const sheetsInit = async () => {
-  //     await fetch('/api/setupSheets');
-  //   }
-  //   sheetsInit()
-  // }, [])
-  
-
+// src/components/GroundmountsApp.tsx
+export default function GroundmountsApp() {
   return (
     <main className="bg-white overflow-clip">
       {/* hero section */}

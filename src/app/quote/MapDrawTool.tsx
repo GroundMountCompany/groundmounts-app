@@ -17,9 +17,9 @@ mapboxgl.accessToken = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
 
 export const MapDrawTool = () => {
   const { coordinates, currentStepIndex, isAutoLocationError, shouldDrawPanels, setMapZoomPercentage, mapZoomPercentage, address } = useQuoteContext();
-  const mapContainer = useRef<HTMLDivElement>(null);
+  const mapContainer = useRef<HTMLDivElement | null>(null);
   const map = useRef<mapboxgl.Map | null>(null);
-  const [zoom, setZoom] = useState(18);
+  const [zoom, setZoom] = useState(18.5);
   const [mapLoaded, setMapLoaded] = useState(false);
   const [marker, setMarker] = useState<mapboxgl.Marker | null>(null);
   const [showLocationText, setShowLocationText] = useState(true);

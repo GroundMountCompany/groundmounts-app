@@ -2,7 +2,7 @@
 
 import { useDebounce } from '@/lib/hooks';
 import { searchAddress, reverseGeocode } from '@/lib/mapbox';
-import { cn } from '@/lib/utils';
+import { cn, updateSheet } from '@/lib/utils';
 import { GeocodingFeature } from '@/types';
 import { useEffect, useRef, useState, FormEvent, ChangeEvent, JSX } from 'react';
 import { useQuoteContext } from '@/contexts/quoteContext';
@@ -120,8 +120,9 @@ export const AddressInput = (): JSX.Element => {
     inputAddressRef.current?.blur();
   };
 
-  const handleSubmit = (e: FormEvent): void => {
+  const handleSubmit = async (e: FormEvent): Promise<void> => {
     e.preventDefault();
+    await updateSheet("E", localAddress)
     setCurrentStepIndex(1);
   };
 

@@ -8,7 +8,7 @@ const nextConfig = {
         headers: [
             {
               "key": "Content-Security-Policy",
-              "value": "frame-ancestors 'self' https://www.groundmounts.com https://transcendent-empanada-380557.netlify.app"
+              "value": "frame-ancestors 'self' " + process.env.WHILELIST_DOMAINS
             }
           ]
       },

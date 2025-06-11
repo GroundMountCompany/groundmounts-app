@@ -22,6 +22,9 @@ const nextConfig = {
   env: {
     NEXT_PUBLIC_MAPBOX_TOKEN: process.env.NEXT_PUBLIC_MAPBOX_TOKEN,
   },
+  images: {
+    unoptimized: true
+  }
 };
 
 export default nextConfig;

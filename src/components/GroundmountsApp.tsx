@@ -17,11 +17,9 @@ export default function GroundmountsApp() {
         <div className="max-w-7xl mx-auto flex flex-col lg:flex-row px-4 py-[60px] lg:px-10 lg:py-5 lg:justify-between lg:items-center relative z-10">
           <div className="flex flex-col w-full lg:w-[669px]">
             <div className="flex flex-row items-center text-xs font-medium tracking-widest w-fit border border-neutral-300 px-4 py-2">
-              <Image
+              <img
                 src="/images/icons/solar-icon.svg"
                 alt="solar icon"
-                width={20}
-                height={20}
               />
               <div className="ml-3 text-xs font-medium tracking-[0.06em]">
                 SAVE YOUR ROOF

@@ -108,14 +108,14 @@ export default function Step2Form({
           <div className="mt-10">
             <div className="flex gap-2">
               <Image 
-                src="/images/meter-img.png" 
+                src="/images/meter-img.PNG" 
                 className="w-1/2"
                 width={210}
                 height={52}
                 alt="Meter1" 
               />
               <Image 
-                src="/images/meter-img2.png" 
+                src="/images/meter-img2.PNG" 
                 className="w-1/2" 
                 alt="Meter2" 
                 width={210}

@@ -46,6 +46,7 @@ export default function StateDropdown({
       const testCode = params.get('test_event_code');           // <- present only when Test-events tab opened
       const options = testCode ? { eventID: testCode } : {};
       (window as any).fbq('track', 'Lead', {}, options);
+      (window as any).fbq('trackCustom', 'DesignStart');
     }
     /* -------------------------------- */
 

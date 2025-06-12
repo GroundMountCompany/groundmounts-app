@@ -46,13 +46,15 @@ export default function StateDropdown({
       const testCode = params.get('test_event_code');           // <- present only when Test-events tab opened
       const options = testCode ? { eventID: testCode } : {};
       window.fbq('track', 'Lead', {}, options);
-      window.fbq('trackCustom', 'DesignStart');
     }
     /* -------------------------------- */
 
     setTimeout(() => {
+      if (typeof window !== 'undefined' && typeof window.fbq === 'function') {
+        window.fbq('trackCustom', 'DesignStart');
+      }
       router.push(`/quiz?state=${encodeURIComponent(selectedState)}`);
-    }, 300);
+    }, 150);
   };
 
   return (

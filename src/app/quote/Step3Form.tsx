@@ -60,19 +60,17 @@ export default function Step3Form({}: Step3FormProps) {
 
   return (
     <div>
-      <div className="mt-6 mb-8 rounded-xl bg-blue-50 border border-blue-200 p-4 text-sm text-blue-800">
-        <p className="font-semibold mb-1">We will NEVER sell your info.</p>
+      <div className="mt-6 mb-8 rounded-xl bg-white border border-blue-300 p-5 text-sm text-gray-800 shadow-sm">
+        <p className="font-semibold text-blue-700 mb-2">We will NEVER sell your info.</p>
         <p className="mb-2">
           This design tool wasn't free to build—we just ask for your email in return (fair, right?).
         </p>
         <p className="mb-2">
           You'll get your full custom quote instantly. Then we may follow up with a quick email or
-          text to offer a <strong>free, no-pressure meeting</strong> to walk through the numbers.
+          text to offer a <span className="font-semibold text-gray-900">free, no-pressure meeting</span> to walk through the numbers.
         </p>
         <p>
-          Not interested? Just reply{" "}
-          <code className="bg-blue-100 px-1 py-0.5 rounded text-blue-700">STOP</code>. Low stakes.
-          Big savings.
+          Not interested? Just reply <code className="bg-gray-200 px-1 py-0.5 rounded text-gray-800">STOP</code>. Low stakes. Big savings.
         </p>
       </div>
 

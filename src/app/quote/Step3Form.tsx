@@ -120,7 +120,7 @@ export default function Step3Form({}: Step3FormProps) {
 
   // Phase 2: Modal Form
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+    <div className="fixed inset-0 bg-black bg-opacity-50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
       <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden">
         {/* Header with image */}
         <div className="relative h-48 bg-gradient-to-br from-blue-600 to-blue-800">
@@ -193,7 +193,7 @@ export default function Step3Form({}: Step3FormProps) {
             </button>
 
             {/* Trust copy */}
-            <p className="text-xs text-gray-600 mt-6 leading-relaxed text-center">
+            <p className="text-base text-gray-700 font-semibold text-center mt-8 leading-relaxed">
               <span className="font-semibold">We will NEVER sell your info.</span><br />
               This design tool wasn't free to build—we just ask for your email in return (fair, right?).<br />
               You'll get your full custom quote instantly. Then we may follow up with a quick email or text to offer a <strong>free, no-pressure meeting</strong> to walk through the numbers.<br />

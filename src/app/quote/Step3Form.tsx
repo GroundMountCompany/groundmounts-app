@@ -123,21 +123,21 @@ export default function Step3Form({}: Step3FormProps) {
     <div className="fixed inset-0 bg-black bg-opacity-50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
       <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden">
         {/* Header with image */}
-        <div className="relative h-48 bg-gradient-to-br from-blue-600 to-blue-800">
+        <div className="relative h-32">
           <img
             src="/images/quote-email-preview.png"
             alt="Custom ground mount quote preview"
-            className="w-full h-full object-cover opacity-20"
+            className="w-full h-full object-cover"
           />
-          <div className="absolute inset-0 flex items-center justify-center">
-            <h2 className="text-2xl font-bold text-white text-center px-6">
-              Get Your Custom Ground Mount Quote
-            </h2>
-          </div>
+        </div>
+        <div className="p-6 text-center">
+          <h2 className="text-2xl font-bold text-gray-900">
+            Get Your Custom Ground Mount Quote
+          </h2>
         </div>
 
         {/* Form content */}
-        <div className="p-6">
+        <div className="p-6 pt-0">
           <form onSubmit={(e) => { e.preventDefault(); handleSendEmail(); }}>
             {/* Email input */}
             <div className="mb-4">

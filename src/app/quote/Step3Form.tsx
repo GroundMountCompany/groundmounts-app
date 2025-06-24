@@ -158,7 +158,7 @@ export default function Step3Form({}: Step3FormProps) {
             {/* Phone input */}
             <div className="mb-4">
               <label htmlFor="phone" className="block text-sm font-medium text-gray-700 mb-2">
-                Phone Number (Optional)
+                Phone Number
               </label>
               <input
                 type="tel"
@@ -168,19 +168,6 @@ export default function Step3Form({}: Step3FormProps) {
                 value={phone}
                 onChange={(e) => setPhone(e.target.value)}
               />
-            </div>
-
-            {/* Text me checkbox */}
-            <div className="mb-6">
-              <label className="flex items-center">
-                <input
-                  type="checkbox"
-                  checked={textMe}
-                  onChange={(e) => setTextMe(e.target.checked)}
-                  className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
-                />
-                <span className="ml-2 text-sm text-gray-700">Text me my quote</span>
-              </label>
             </div>
 
             {/* Submit button */}

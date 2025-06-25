@@ -14,7 +14,7 @@ const loadingMessages = [
 ];
 
 export default function Step3Form({}: Step3FormProps) {
-  const [currentPhase, setCurrentPhase] = useState<'loading' | 'form'>('loading');
+  const [currentPhase, setCurrentPhase] = useState<'loading' | 'form' | 'success'>('loading');
   const [currentMessageIndex, setCurrentMessageIndex] = useState(0);
   const [showMessage, setShowMessage] = useState(true);
   const [phone, setPhone] = useState("");
@@ -86,6 +86,11 @@ export default function Step3Form({}: Step3FormProps) {
         setStatus("Email sent!");
         await updateSheet("O", email);
         await updateSheet("P", phone);
+        
+        // Wait 1.5 seconds then show success state
+        setTimeout(() => {
+          setCurrentPhase('success');
+        }, 1500);
       } else {
         setStatus("Failed to send email.");
       }
@@ -112,6 +117,29 @@ export default function Step3Form({}: Step3FormProps) {
             >
               {loadingMessages[currentMessageIndex]}
             </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Phase 3: Success State
+  if (currentPhase === 'success') {
+    return (
+      <div className="fixed inset-0 bg-black bg-opacity-50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden">
+          <div className="p-8 text-center">
+            <h2 className="text-2xl font-bold text-gray-900 mb-6">
+              Check out our official website for Texas homeowners
+            </h2>
+            <a
+              href="https://www.groundmounts.com"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-block w-full bg-red-600 hover:bg-red-700 text-white font-bold py-4 px-6 rounded-lg transition-colors duration-200"
+            >
+              GroundMounts.com
+            </a>
           </div>
         </div>
       </div>

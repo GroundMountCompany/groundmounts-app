@@ -1,5 +1,4 @@
 import { google } from 'googleapis';
-import { OAuth2Client } from 'google-auth-library';
 import fs from 'fs';
 import path from 'path';
 
@@ -11,7 +10,7 @@ const SCOPES = [
 const TOKEN_PATH = path.join(process.cwd(), '.credentials', 'gmail-token.json');
 const CREDENTIALS_PATH = path.join(process.cwd(), '.credentials', 'gmail-oauth-client.json');
 
-export function getOAuth2Client(): OAuth2Client {
+export function getOAuth2Client() {
   try {
     const credentials = JSON.parse(fs.readFileSync(CREDENTIALS_PATH, 'utf8'));
     const { client_secret, client_id, redirect_uris } = credentials.web;
@@ -55,7 +54,7 @@ export async function getTokens(code: string) {
   }
 }
 
-export function getAuthenticatedClient(): OAuth2Client {
+export function getAuthenticatedClient() {
   const oAuth2Client = getOAuth2Client();
   
   try {

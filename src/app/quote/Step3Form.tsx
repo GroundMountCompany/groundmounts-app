@@ -87,6 +87,34 @@ export default function Step3Form({}: Step3FormProps) {
         await updateSheet("O", email);
         await updateSheet("P", phone);
         
+        // Schedule follow-up email for 15 minutes later
+        setTimeout(async () => {
+          try {
+            await fetch("/api/sendFollowUpEmail", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                email,
+                phone,
+                address,
+                coordinates,
+                quotation,
+                totalPanels,
+                paymentMethod,
+                quoteId,
+                additionalCost,
+                electricalMeter,
+                percentage,
+              }),
+            });
+            console.log('Follow-up email scheduled successfully');
+          } catch (error) {
+            console.error('Failed to send follow-up email:', error);
+          }
+        }, 15 * 60 * 1000); // 15 minutes in milliseconds
+        
         // Wait 1.5 seconds then show success state
         setTimeout(() => {
           setCurrentPhase('success');

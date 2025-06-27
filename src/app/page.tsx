@@ -56,7 +56,7 @@ export default function Home() {
                 src="/images/panels.png"
                 alt="panels background"
                 fill
-                className="object-contain"
+                className="object-contain pointer-events-none"
                 priority
               />
             </div>

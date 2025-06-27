@@ -41,12 +41,12 @@ export default function GroundmountsApp() {
             <StateDropdown />
           </div>
           <div className="relative mt-[60px] lg:mt-0">
-            <div className="absolute inset-0 z-0 w-[596px] lg:w-[1153px] h-[431px] lg:h-[834px] left-[-126px] lg:left-[-163px] bottom-[-48px] lg:bottom-[-158px]">
+            <div className="absolute inset-0 z-0 w-[596px] lg:w-[1153px] h-[431px] lg:h-[834px] left-[-126px] lg:left-[-163px] bottom-[-48px] lg:bottom-[-158px] pointer-events-none">
               <Image
                 src="/images/panels.png"
                 alt="panels background"
                 fill
-                className="object-contain"
+                className="object-contain pointer-events-none"
                 priority
               />
             </div>

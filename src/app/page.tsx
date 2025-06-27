@@ -23,7 +23,7 @@ export default function Home() {
       {/* hero section */}
       <div className="border-b border-neutral-300 relative">
         <div className="max-w-7xl mx-auto flex flex-col lg:flex-row px-4 py-[60px] lg:px-10 lg:py-5 lg:justify-between lg:items-center relative z-10">
-          <div className="flex flex-col w-full lg:w-[669px]">
+          <div className="flex flex-col w-full lg:w-[669px] relative z-20">
             <div className="flex flex-row items-center text-xs font-medium tracking-widest w-fit border border-neutral-300 px-4 py-2">
               <Image
                 src="/images/icons/solar-icon.svg"
@@ -51,7 +51,7 @@ export default function Home() {
             <StateDropdown />
           </div>
           <div className="relative mt-[60px] lg:mt-0">
-            <div className="absolute inset-0 z-0 w-[596px] lg:w-[1153px] h-[431px] lg:h-[834px] left-[-126px] lg:left-[-163px] bottom-[-48px] lg:bottom-[-158px]">
+            <div className="absolute inset-0 z-0 w-[596px] lg:w-[1153px] h-[431px] lg:h-[834px] left-[-126px] lg:left-[-163px] bottom-[-48px] lg:bottom-[-158px] pointer-events-none">
               <Image
                 src="/images/panels.png"
                 alt="panels background"

@@ -26,11 +26,11 @@ export default function StateDropdown({
   buttonClassName
 }: Props) {
   const defaultClass =
-    'flex flex-row items-center lg:justify-between mt-4 bg-white rounded-full p-2 pl-6 shadow-md border border-neutral-200 w-full lg:w-[540px]';
+    'flex flex-row items-center lg:justify-between mt-4 bg-white rounded-full p-2 pl-6 shadow-md border border-neutral-200 w-full lg:w-[540px] relative z-20';
   const defaultSelect =
     'w-1/2 lg:w-auto shrink grow-0 lg:shrink-0 lg:grow outline-none pr-2 text-base lg:text-lg text-neutral-500';
   const defaultButton =
-    'text-base lg:text-lg grow shrink-0 lg:grow-0 lg:shrink capitalize lg:normal-case px-[12px] lg:px-6';
+    'text-base lg:text-lg grow shrink-0 lg:grow-0 lg:shrink capitalize lg:normal-case px-[12px] lg:px-6 relative z-30';
 
   const [selectedState, setSelectedState] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);

@@ -1,0 +1,58 @@
+import { NextResponse } from "next/server";
+import { fetchDueFollowups, markFollowupSent } from "@/lib/followups";
+import { getResendOrThrow } from "@/lib/resendSafe";
+import FollowUpEmailTemplate from "@/components/common/FollowUpEmailTemplate";
+
+export const dynamic = "force-dynamic";
+
+export async function GET() {
+  try {
+    if (!process.env.RESEND_API_KEY) {
+      return NextResponse.json({ ok: false, error: "RESEND_API_KEY missing" }, { status: 500 });
+    }
+    
+    const resend = getResendOrThrow();
+    const now = Date.now();
+    const due = await fetchDueFollowups(now);
+
+    let sent = 0;
+    for (const f of due) {
+      try {
+        // Use minimal template props since we don't have full context stored
+        const emailTemplate = FollowUpEmailTemplate({
+          client: f.email,
+          phone: 'Not provided',
+          systemType: 'Ground Mount Solar System',
+          address: 'Your property location',
+          coordinates: 'GPS coordinates on file',
+          materials: 'Custom solar panel system',
+          estimatedCost: 'See original quote',
+          fedralTax: 'Federal tax credit available',
+          totalCost: 'Net cost after incentives',
+          trenching: 'Trenching cost included',
+          date: new Date().toLocaleDateString('en-US', { day: '2-digit', month: 'short', year: 'numeric' }),
+          calendlyUrl: process.env.NEXT_PUBLIC_CALENDLY_URL || '#'
+        });
+
+        await resend.emails.send({
+          from: "Ground Mounts Solar System <info@groundmounts.com>",
+          to: f.email,
+          subject: "Your Ground Mount Quote - Ready to Move Forward?",
+          react: emailTemplate,
+        });
+        
+        await markFollowupSent(f.lead_id);
+        sent++;
+        console.log("[FOLLOWUP_SENT]", f.lead_id, f.email);
+      } catch (e: any) {
+        console.error("[FOLLOWUP_SEND_FAIL]", f.lead_id, f.email, e?.message || e);
+      }
+    }
+
+    console.log("[FOLLOWUP_SCHEDULED_SUCCESS]", "queued:", due.length, "sent:", sent);
+    return NextResponse.json({ ok: true, queued: due.length, sent });
+  } catch (e: any) {
+    console.error("[FOLLOWUP_SCHEDULED_ERROR]", e?.message || e, e?.stack);
+    return NextResponse.json({ ok: false, error: e?.message || "scheduled_failed" }, { status: 500 });
+  }
+}

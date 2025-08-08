@@ -1,43 +1,72 @@
 import { NextResponse } from 'next/server';
-import { ensureLeadRow, updateSheetCell } from '@/lib/sheets';
+import { findLeadById, ensureLeadIndexed, updateLeadRow, writeLeadToSheet } from '@/lib/sheets';
+import { getClientIp, rateLimitOk, isBotHoneypot, minTimeOk } from '@/lib/guard';
 
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { tabName, leadId, column, value } = body;
 
-    if (!tabName || !leadId) {
+    // Apply guards before processing (except for legacy format)
+    if (!body.tabName) { // Only apply guards to new format
+      const ip = getClientIp({ headers: request.headers });
+      if (!rateLimitOk(ip)) {
+        return NextResponse.json({ ok: false, error: "rate_limited" }, { status: 429 });
+      }
+
+      if (isBotHoneypot((body as any).honeypot)) {
+        return NextResponse.json({ ok: true, ignored: true });
+      }
+
+      if ((body as any).ttc_ms !== undefined && !minTimeOk((body as any).ttc_ms)) {
+        return NextResponse.json({ ok: false, error: "too_fast" }, { status: 400 });
+      }
+    }
+
+    // Handle both old format (tabName, leadId, column, value) and new format (full lead object)
+    if (body.tabName && body.leadId) {
+      // Legacy format - keep for backwards compatibility
+      const { tabName, leadId, column, value } = body;
+      const { ensureLeadRow, updateSheetCell } = await import('@/lib/sheets');
+      
+      const row = await ensureLeadRow(tabName, leadId);
+
+      if (!column || typeof value === 'undefined') {
+        return NextResponse.json({
+          ok: true,
+          message: 'Lead ID ensured',
+          leadId,
+          row,
+        });
+      }
+
+      const updateResult = await updateSheetCell(tabName, row, column, value);
+      return NextResponse.json({
+        ok: true,
+        updatedCell: `${tabName}!${column}${row}`,
+        response: updateResult,
+      });
+    }
+
+    // New format - full lead object with idempotent handling
+    const { id } = body;
+    if (!id) {
       return NextResponse.json(
-        { error: 'tabName and leadId are required' },
+        { error: 'id is required' },
         { status: 400 }
       );
     }
 
-    // Step 1: Ensure leadId exists in column A, get its row (with retry)
-    const row = await ensureLeadRow(tabName, leadId);
-
-    if (!column || typeof value === 'undefined') {
-      // Step 2: No additional data — just inserting leadId
-      return NextResponse.json({
-        ok: true,
-        message: 'Lead ID ensured',
-        leadId,
-        row,
-      });
+    const existing = await findLeadById(id);
+    if (existing) {
+      await updateLeadRow(existing.rowRef, body);
+      console.log("[LEAD_UPDATED]", id, "row:", existing.rowRef);
+      return NextResponse.json({ ok: true, updated: true });
+    } else {
+      const { rowRef } = await writeLeadToSheet(body);
+      await ensureLeadIndexed(id, rowRef);
+      console.log("[LEAD_CREATED]", id, "row:", rowRef);
+      return NextResponse.json({ ok: true, created: true, rowRef });
     }
-
-    // Step 3: Update specified cell (with retry)
-    const updateResult = await updateSheetCell(tabName, row, column, value);
-
-    if (!updateResult) {
-      throw new Error('Sheets update failed: no result returned');
-    }
-
-    return NextResponse.json({
-      ok: true,
-      updatedCell: `${tabName}!${column}${row}`,
-      response: updateResult,
-    });
 
   } catch (e: any) {
     console.error('[SUBMIT_ROUTE_ERROR]', e?.message || e, e?.stack);

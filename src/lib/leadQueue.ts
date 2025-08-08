@@ -9,6 +9,8 @@ type Payload = {
   address?: string;
   quote?: any;
   ts: number;
+  honeypot?: string;     // spam prevention
+  ttc_ms?: number;       // time to complete (milliseconds)
 };
 
 const load = (): Payload[] => {

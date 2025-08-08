@@ -25,6 +25,7 @@ function Step3Form({}: Step3FormProps) {
   const [textMe, setTextMe] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [company, setCompany] = useState(""); // Honeypot field
   const searchParams = useSearchParams();
   const selectedState = searchParams.get('state') || 'TX';
 
@@ -39,6 +40,7 @@ function Step3Form({}: Step3FormProps) {
     electricalMeter,
     percentage,
     leadId,
+    startedAt,
   } = useQuoteContext();
 
   // Phase 1: Loading sequence
@@ -86,6 +88,8 @@ function Step3Form({}: Step3FormProps) {
           additionalCost,
           electricalMeter,
           percentage,
+          honeypot: company,
+          ttc_ms: Date.now() - startedAt,
         }),
       });
 
@@ -112,6 +116,8 @@ function Step3Form({}: Step3FormProps) {
               coordinates,
             },
             ts: Date.now(),
+            honeypot: company,
+            ttc_ms: Date.now() - startedAt,
           });
           console.log("[FINAL_LEAD_CAPTURED]", leadId, email);
         } catch (error) {
@@ -208,8 +214,10 @@ function Step3Form({}: Step3FormProps) {
               <input
                 type="email"
                 id="email"
+                inputMode="email"
+                autoComplete="email"
                 required
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="h-12 w-full px-4 text-base border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 placeholder="Enter your email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
@@ -224,12 +232,25 @@ function Step3Form({}: Step3FormProps) {
               <input
                 type="tel"
                 id="phone"
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                inputMode="tel"
+                autoComplete="tel"
+                className="h-12 w-full px-4 text-base border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 placeholder="Enter your phone number"
                 value={phone}
                 onChange={(e) => setPhone(e.target.value)}
               />
             </div>
+
+            {/* Honeypot: hidden from humans, visible to bots */}
+            <input
+              name="company"
+              aria-hidden="true"
+              tabIndex={-1}
+              autoComplete="off"
+              className="absolute left-[-9999px] top-auto w-px h-px overflow-hidden"
+              value={company}
+              onChange={(e) => setCompany(e.target.value)}
+            />
 
             {/* Submit button */}
             <button

@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
+import { findLeadById, ensureLeadIndexed, writeLeadToSheet } from "@/lib/sheets";
+import { getClientIp, rateLimitOk, isBotHoneypot, minTimeOk } from "@/lib/guard";
 
 interface Lead {
   id: string;
@@ -32,48 +34,36 @@ function validateLead(data: any): Lead {
   };
 }
 
-// If you have a way to check for existing id in Sheets, call it here
-async function isDuplicate(id: string) {
-  // Optional: implement via Sheets lookup; for now return false to just append
-  return false;
-}
-
-async function writeLeadToSheet(lead: any) {
-  // Import the Sheets utility from your existing utils
-  const { updateSheet } = await import("@/lib/utils");
-  
-  try {
-    // Write to different columns based on what data we have
-    // This is a simplified approach - in a real system you'd want proper row management
-    if (lead.id) await updateSheet("A", lead.id);
-    if (lead.state) await updateSheet("B", lead.state);  
-    if (lead.address) await updateSheet("C", lead.address);
-    if (lead.email) await updateSheet("D", lead.email);
-    if (lead.phone) await updateSheet("E", lead.phone);
-    if (lead.quote) await updateSheet("F", JSON.stringify(lead.quote));
-    if (lead.ts) await updateSheet("G", new Date(lead.ts).toISOString());
-    
-    return true;
-  } catch (error) {
-    console.error("[WRITE_LEAD_ERROR]", error);
-    return false;
-  }
-}
-
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
+    
+    // Apply guards before processing
+    const ip = getClientIp(req);
+    if (!rateLimitOk(ip)) {
+      return NextResponse.json({ ok: false, error: "rate_limited" }, { status: 429 });
+    }
+
+    if (isBotHoneypot((body as any).honeypot)) {
+      return NextResponse.json({ ok: true, ignored: true }); // pretend success, do nothing
+    }
+
+    if ((body as any).ttc_ms !== undefined && !minTimeOk((body as any).ttc_ms)) {
+      return NextResponse.json({ ok: false, error: "too_fast" }, { status: 400 });
+    }
+
     const lead = validateLead(body);
 
-    if (await isDuplicate(lead.id)) {
+    const dup = await findLeadById(lead.id);
+    if (dup) {
       return NextResponse.json({ ok: true, dedup: true });
     }
 
-    const res = await writeLeadToSheet(lead);
-    if (!res) throw new Error("sheet_write_failed");
+    const { rowRef } = await writeLeadToSheet(lead);
+    await ensureLeadIndexed(lead.id, rowRef);
 
-    console.log("[LEAD_CAPTURED]", lead.id, lead.state, lead.address || "no_address");
-    return NextResponse.json({ ok: true });
+    console.log("[LEAD_CAPTURED]", lead.id, lead.state, lead.address || "no_address", "row:", rowRef);
+    return NextResponse.json({ ok: true, rowRef });
   } catch (e: any) {
     console.error("[LEADS_ROUTE_ERROR]", e?.message || e, e?.stack);
     return NextResponse.json({ ok: false, error: e?.message || "bad_request" }, { status: 400 });

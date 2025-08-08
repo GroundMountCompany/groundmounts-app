@@ -30,6 +30,7 @@ export interface QuoteContextValues {
   highestValue: number;
   quoteId: string;
   leadId: string;
+  startedAt: number;
   isAutoLocationError: boolean;
   shouldContinueButtonDisabled: boolean;
   isAddressCoordinatesCompleted: boolean;
@@ -96,6 +97,10 @@ export const QuoteContextProvider = ({ children }: QuoteContextProviderProps): J
   // PERSISTENT LEAD ID FOR EARLY CAPTURE
   const leadIdRef = useRef<string>(uuid());
   const leadId = leadIdRef.current;
+
+  // TIME TRACKING FOR SPAM PREVENTION
+  const startedAtRef = useRef<number>(Date.now());
+  const startedAt = startedAtRef.current;
 
   // ELECTRICAL METER RELATED STATE
   const COST_PER_FOOT = 45;
@@ -225,6 +230,7 @@ export const QuoteContextProvider = ({ children }: QuoteContextProviderProps): J
     highestValue,
     quoteId,
     leadId,
+    startedAt,
     isAutoLocationError,
     shouldContinueButtonDisabled,
     isAddressCoordinatesCompleted,
@@ -266,6 +272,7 @@ export const QuoteContextProvider = ({ children }: QuoteContextProviderProps): J
     highestValue,
     quoteId,
     leadId,
+    startedAt,
     isAutoLocationError,
     shouldContinueButtonDisabled,
     isAddressCoordinatesCompleted,

@@ -11,7 +11,7 @@ import { StepContent } from '@/types';
 import Step3Form from './Step3Form';
 
 export const PageContainer = (): JSX.Element => {
-  const { currentStepIndex, setCurrentStepIndex } = useQuoteContext();
+  const { currentStepIndex, setCurrentStepIndex, shouldContinueButtonDisabled } = useQuoteContext();
   const [showForm, setShowForm] = useState(false)
 
   const stepContent: StepContent[] = [{
@@ -37,24 +37,31 @@ export const PageContainer = (): JSX.Element => {
     setCurrentStepIndex(index);
   };
 
+  const goNext = (): void => {
+    if (currentStepIndex < stepContent.length - 1) {
+      setCurrentStepIndex(currentStepIndex + 1);
+    }
+  };
+
   return (
     <>
-      <div className="flex flex-row">
-        {/* step progress section */}
-        <div className={cn("flex flex-row gap-4", {
-          'lg:pl-[29px]': currentStepIndex === 1,
-          'lg:pl-[40px]': [2,3].includes(currentStepIndex),
-        })}>
-          {Array.from({ length: stepContent.length }, (_, index) => (
-            <div key={index} className={cn("h-[5px] w-[37px] cursor-pointer", {
-              'bg-custom-primary': index <= currentStepIndex,
-              'bg-neutral-200': index > currentStepIndex,
-            })}
-              onClick={() => handleClickStep(index)}
-            />
-          ))}
+      <div className="pb-20 md:pb-0">
+        <div className="flex flex-row">
+          {/* step progress section */}
+          <div className={cn("flex flex-row gap-4", {
+            'lg:pl-[29px]': currentStepIndex === 1,
+            'lg:pl-[40px]': [2,3].includes(currentStepIndex),
+          })}>
+            {Array.from({ length: stepContent.length }, (_, index) => (
+              <div key={index} className={cn("h-[5px] w-[37px] cursor-pointer", {
+                'bg-custom-primary': index <= currentStepIndex,
+                'bg-neutral-200': index > currentStepIndex,
+              })}
+                onClick={() => handleClickStep(index)}
+              />
+            ))}
+          </div>
         </div>
-      </div>
       <div className={cn("flex flex-col lg:flex-row lg:flex-wrap", {
         'lg:justify-between': currentStepIndex === 3,
       })}>
@@ -124,7 +131,27 @@ export const PageContainer = (): JSX.Element => {
           <Step4Summary />
         </div>
         } */}
+        </div>
       </div>
+
+      {/* Mobile sticky CTA - hidden on step 2 (final step with form) */}
+      {currentStepIndex < 2 && (
+        <div className="fixed bottom-0 left-0 right-0 z-40 border-t bg-white/90 backdrop-blur px-4 py-3 md:hidden">
+          <button
+            type="button"
+            onClick={goNext}
+            disabled={shouldContinueButtonDisabled}
+            className={cn(
+              "w-full h-12 rounded-xl text-base font-semibold shadow active:scale-[.99] hover:opacity-95",
+              shouldContinueButtonDisabled 
+                ? "bg-gray-400 text-white cursor-not-allowed" 
+                : "bg-black text-white"
+            )}
+          >
+            Continue
+          </button>
+        </div>
+      )}
     </>
   )
 }

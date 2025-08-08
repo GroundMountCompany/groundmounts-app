@@ -1,5 +1,10 @@
 import { google } from 'googleapis';
+import type { sheets_v4 } from 'googleapis';
 import { withRetry } from './utils';
+
+// Type aliases for Google Sheets responses
+type AppendRes = sheets_v4.Schema$AppendValuesResponse;
+type UpdateRes = sheets_v4.Schema$UpdateValuesResponse;
 
 const auth = new google.auth.GoogleAuth({
   credentials: {
@@ -25,7 +30,7 @@ function getColumnLetter(column: string | number): string {
 }
 
 async function ensureLeadRowInternal(tabName: string, leadId: string): Promise<number> {
-  const sheets = google.sheets({ version: 'v4', auth });
+  const sheets: sheets_v4.Sheets = google.sheets({ version: 'v4', auth });
 
   const response = await sheets.spreadsheets.values.get({
     spreadsheetId: process.env.NEXT_PUBLIC_SPREADSHEET_ID,
@@ -56,8 +61,8 @@ async function ensureLeadRowInternal(tabName: string, leadId: string): Promise<n
   return match ? parseInt(match[1], 10) : -1;
 }
 
-async function updateSheetCellInternal(tabName: string, row: number, column: string | number, value: string): Promise<any> {
-  const sheets = google.sheets({ version: 'v4', auth });
+async function updateSheetCellInternal(tabName: string, row: number, column: string | number, value: string): Promise<UpdateRes> {
+  const sheets: sheets_v4.Sheets = google.sheets({ version: 'v4', auth });
   const colLetter = getColumnLetter(column);
   const cell = `${tabName}!${colLetter}${row}`;
 
@@ -88,7 +93,7 @@ export async function ensureLeadRow(tabName: string, leadId: string): Promise<nu
   }, 4, 400);
 }
 
-export async function updateSheetCell(tabName: string, row: number, column: string | number, value: string): Promise<any> {
+export async function updateSheetCell(tabName: string, row: number, column: string | number, value: string): Promise<UpdateRes> {
   return withRetry(async () => {
     const result = await updateSheetCellInternal(tabName, row, column, value);
     if (!result) {
@@ -100,7 +105,7 @@ export async function updateSheetCell(tabName: string, row: number, column: stri
 
 // --- LeadIndex helpers ---
 async function findLeadByIdInternal(id: string): Promise<{ rowRef: string | number } | null> {
-  const sheets = google.sheets({ version: 'v4', auth });
+  const sheets: sheets_v4.Sheets = google.sheets({ version: 'v4', auth });
 
   const response = await sheets.spreadsheets.values.get({
     spreadsheetId: process.env.NEXT_PUBLIC_SPREADSHEET_ID,
@@ -119,7 +124,7 @@ async function findLeadByIdInternal(id: string): Promise<{ rowRef: string | numb
 }
 
 async function indexLeadIdInternal(id: string, rowRef: string | number) {
-  const sheets = google.sheets({ version: 'v4', auth });
+  const sheets: sheets_v4.Sheets = google.sheets({ version: 'v4', auth });
 
   await sheets.spreadsheets.values.append({
     spreadsheetId: process.env.NEXT_PUBLIC_SPREADSHEET_ID,
@@ -153,11 +158,11 @@ export async function ensureLeadIndexed(id: string, rowRef: string | number) {
 
 // Write lead to main sheet and return rowRef
 async function writeLeadToSheetInternal(lead: unknown): Promise<{ rowRef: number }> {
-  const sheets = google.sheets({ version: 'v4', auth });
+  const sheets: sheets_v4.Sheets = google.sheets({ version: 'v4', auth });
   
   // Prepare the row data - mapping lead fields to columns
   const leadObj = lead as Record<string, unknown>;
-  const rowData = [
+  const rowData: (string | number | boolean | null)[] = [
     leadObj.id || "",           // A: lead_id
     leadObj.state || "",        // B: state
     leadObj.address || "",      // C: address
@@ -196,7 +201,7 @@ export async function writeLeadToSheet(lead: unknown): Promise<{ rowRef: number 
 
 // Update existing lead row
 async function updateLeadRowInternal(rowRef: string | number, lead: unknown): Promise<void> {
-  const sheets = google.sheets({ version: 'v4', auth });
+  const sheets: sheets_v4.Sheets = google.sheets({ version: 'v4', auth });
   const row = typeof rowRef === 'string' ? parseInt(rowRef, 10) : rowRef;
   
   // Prepare update data - only update fields that are provided

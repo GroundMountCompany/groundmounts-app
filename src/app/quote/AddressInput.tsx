@@ -7,11 +7,12 @@ import { GeocodingFeature } from '@/types';
 import { useEffect, useRef, useState, FormEvent, ChangeEvent, JSX } from 'react';
 import { useQuoteContext } from '@/contexts/quoteContext';
 import { useSearchParams } from 'next/navigation';
+import { enqueueOrSend } from '@/lib/leadQueue';
 
 // Sample: 1600 Amphitheatre Parkway, Mountain View, CA
 
 export const AddressInput = (): JSX.Element => {
-  const { setAddress, setCoordinates, setIsAutoLocationError, shouldContinueButtonDisabled, setCurrentStepIndex } = useQuoteContext();
+  const { setAddress, setCoordinates, setIsAutoLocationError, shouldContinueButtonDisabled, setCurrentStepIndex, leadId } = useQuoteContext();
   const [suggestions, setSuggestions] = useState<GeocodingFeature[]>([]);
   const [localAddress, setLocalAddress] = useState<string>('');
   const [isLoading, setIsLoading] = useState<boolean>(false);
@@ -20,6 +21,26 @@ export const AddressInput = (): JSX.Element => {
   const suggestionsRef = useRef<HTMLDivElement>(null);
   const searchParams = useSearchParams();
   const inputAddressRef = useRef<HTMLInputElement>(null);
+  
+  // Get state from URL params (e.g., /quote?state=Texas)
+  const selectedState = searchParams.get('state') || 'TX';
+
+  // Early lead capture function
+  const captureEarlyLead = async (address: string) => {
+    try {
+      await enqueueOrSend({
+        id: leadId,
+        state: selectedState,
+        email: "",
+        phone: "",
+        address: address,
+        ts: Date.now(),
+      });
+      console.log("[EARLY_LEAD_CAPTURED]", leadId, selectedState, address);
+    } catch (error) {
+      console.error("[EARLY_LEAD_CAPTURE_ERROR]", error);
+    }
+  };
 
   useEffect(() => {
     const fetchSuggestions = async (): Promise<void> => {
@@ -71,7 +92,9 @@ export const AddressInput = (): JSX.Element => {
             setShowSuggestions(false);
             setSuggestions([]);
             console.log('Detect Location Success:Address:', address, ' | Coordinates:', coordinates);
-            setIsAutoLocationError(false)
+            setIsAutoLocationError(false);
+            // Capture lead early when address is detected
+            await captureEarlyLead(address);
           } catch (error) {
             console.warn('Error fetching address from coordinates:', error);
             setIsAutoLocationError(true)
@@ -96,6 +119,8 @@ export const AddressInput = (): JSX.Element => {
         latitude: results[0].center[1],
         longitude: results[0].center[0],
         });
+        // Capture lead early when address is set from zipcode
+        await captureEarlyLead(results[0].place_name);
       } catch (error) {
         console.warn('Error fetching address from zipcode:', error);
         setIsAutoLocationError(true)
@@ -118,6 +143,8 @@ export const AddressInput = (): JSX.Element => {
       longitude: suggestion.center[0],
     });
     inputAddressRef.current?.blur();
+    // Capture lead early when address suggestion is selected
+    await captureEarlyLead(suggestion.place_name);
   };
 
   const handleSubmit = async (e: FormEvent): Promise<void> => {

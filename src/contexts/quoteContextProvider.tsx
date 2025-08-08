@@ -2,6 +2,7 @@ import React, { useEffect, JSX, useState, useCallback, useRef, useMemo } from 'r
 import { QuoteContext } from './quoteContext';
 import { Feature, LineString } from 'geojson';
 import * as turf from '@turf/turf';
+import { v4 as uuid } from 'uuid';
 
 interface Coordinates {
   latitude: number;
@@ -28,6 +29,7 @@ export interface QuoteContextValues {
   avgValue: number;
   highestValue: number;
   quoteId: string;
+  leadId: string;
   isAutoLocationError: boolean;
   shouldContinueButtonDisabled: boolean;
   isAddressCoordinatesCompleted: boolean;
@@ -90,6 +92,10 @@ export const QuoteContextProvider = ({ children }: QuoteContextProviderProps): J
 
   // QUOTE ID RELATED STATE
   const [quoteId, setQuoteId] = React.useState<string>('');
+
+  // PERSISTENT LEAD ID FOR EARLY CAPTURE
+  const leadIdRef = useRef<string>(uuid());
+  const leadId = leadIdRef.current;
 
   // ELECTRICAL METER RELATED STATE
   const COST_PER_FOOT = 45;
@@ -218,6 +224,7 @@ export const QuoteContextProvider = ({ children }: QuoteContextProviderProps): J
     avgValue,
     highestValue,
     quoteId,
+    leadId,
     isAutoLocationError,
     shouldContinueButtonDisabled,
     isAddressCoordinatesCompleted,
@@ -258,6 +265,7 @@ export const QuoteContextProvider = ({ children }: QuoteContextProviderProps): J
     avgValue,
     highestValue,
     quoteId,
+    leadId,
     isAutoLocationError,
     shouldContinueButtonDisabled,
     isAddressCoordinatesCompleted,

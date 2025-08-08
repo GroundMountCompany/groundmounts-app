@@ -3,6 +3,8 @@ import Button from "@/components/common/Button";
 import { useQuoteContext } from "@/contexts/quoteContext";
 import { updateSheet } from "@/lib/utils";
 import { useState, useEffect } from "react";
+import { enqueueOrSend } from "@/lib/leadQueue";
+import { useSearchParams } from 'next/navigation';
 
 interface Step3FormProps {}
 
@@ -23,6 +25,8 @@ function Step3Form({}: Step3FormProps) {
   const [textMe, setTextMe] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const searchParams = useSearchParams();
+  const selectedState = searchParams.get('state') || 'TX';
 
   const {
     address,
@@ -34,6 +38,7 @@ function Step3Form({}: Step3FormProps) {
     additionalCost,
     electricalMeter,
     percentage,
+    leadId,
   } = useQuoteContext();
 
   // Phase 1: Loading sequence
@@ -70,6 +75,7 @@ function Step3Form({}: Step3FormProps) {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
+          leadId,
           email,
           address,
           coordinates,
@@ -87,6 +93,30 @@ function Step3Form({}: Step3FormProps) {
         setStatus("Email sent!");
         await updateSheet("O", email);
         await updateSheet("P", phone);
+        
+        // Send complete lead data with final quote details
+        try {
+          await enqueueOrSend({
+            id: leadId,
+            state: selectedState,
+            email,
+            phone,
+            address,
+            quote: {
+              quotation,
+              totalPanels,
+              paymentMethod,
+              additionalCost,
+              electricalMeter,
+              percentage,
+              coordinates,
+            },
+            ts: Date.now(),
+          });
+          console.log("[FINAL_LEAD_CAPTURED]", leadId, email);
+        } catch (error) {
+          console.error("[FINAL_LEAD_CAPTURE_ERROR]", error);
+        }
         
         // Follow-up email is now handled server-side via /api/sendEmail
         

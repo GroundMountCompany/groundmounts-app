@@ -24,7 +24,7 @@ const SOLAR_WRAP_ELEMENT = `<div class="grid grid-flow-col grid-rows-4 p-[6px] b
 
 const MapboxSolarPanelInner = ({ map, mapLoaded }: Props) => {
   const {
-    mapZoomPercentage,
+    // mapZoomPercentage, // unused
     totalPanels,
     shouldDrawPanels,
     panelPosition,
@@ -82,7 +82,7 @@ const MapboxSolarPanelInner = ({ map, mapLoaded }: Props) => {
   }, [map?.getZoom(), map?.getCenter(), totalPanels]);
 
   // rAF-safe setState for smooth drag performance
-  const safeSetPanelPosition = useCallback((updater: any) => {
+  const safeSetPanelPosition = useCallback((updater: [number, number]) => {
     if (raf.current) cancelAnimationFrame(raf.current);
     raf.current = requestAnimationFrame(() => setPanelPosition(updater));
   }, [setPanelPosition]);
@@ -297,26 +297,27 @@ const MapboxSolarPanelInner = ({ map, mapLoaded }: Props) => {
     }
   }, [actualPanels, map, mapLoaded]);
 
+  // Define callbacks outside useEffect to avoid Rules of Hooks violations
+  const onDragPanel = useCallback(() => {
+    if (!solarMarkerRef.current) return;
+    const solarMarkerLngLat = solarMarkerRef.current.getLngLat();
+    const newCoords: [number, number] = [solarMarkerLngLat.lng, solarMarkerLngLat.lat];
+    console.log('newCoords1', newCoords)
+    safeSetPanelPosition(newCoords);
+  }, [safeSetPanelPosition]);
+
+  const onDragEndPanel = useCallback(() => {
+    if (!solarMarkerRef.current) return;
+    const solarMarkerLngLat = solarMarkerRef.current.getLngLat();
+    const newCoords = [solarMarkerLngLat.lng, solarMarkerLngLat.lat];
+    if (newCoords.length === 2) {
+      setPanelPosition([newCoords[0], newCoords[1]]);
+    }
+  }, [setPanelPosition]);
+
   // Add handler for solar panel marker movement - using rAF-safe updates
   useEffect(() => {
     if (!map || !mapLoaded || !shouldDrawPanels || !drawRef.current) return;
-
-    const onDragPanel = useCallback(() => {
-      if (!solarMarkerRef.current) return;
-      const solarMarkerLngLat = solarMarkerRef.current.getLngLat();
-      const newCoords: [number, number] = [solarMarkerLngLat.lng, solarMarkerLngLat.lat];
-      console.log('newCoords1', newCoords)
-      safeSetPanelPosition(newCoords);
-    }, [safeSetPanelPosition]);
-
-    const onDragEndPanel = useCallback(() => {
-      if (!solarMarkerRef.current) return;
-      const solarMarkerLngLat = solarMarkerRef.current.getLngLat();
-      const newCoords = [solarMarkerLngLat.lng, solarMarkerLngLat.lat];
-      if (newCoords.length === 2) {
-        setPanelPosition([newCoords[0], newCoords[1]]);
-      }
-    }, [setPanelPosition]);
 
     if (solarMarkerRef.current) {
       solarMarkerRef.current.on('drag', onDragPanel);
@@ -333,7 +334,7 @@ const MapboxSolarPanelInner = ({ map, mapLoaded }: Props) => {
         }
       }
     };
-  }, [map, mapLoaded, shouldDrawPanels, drawRef.current, electricalMeterPosition, panelPosition, actualPanels, safeSetPanelPosition]);
+  }, [map, mapLoaded, shouldDrawPanels, electricalMeterPosition, panelPosition, actualPanels, onDragPanel, onDragEndPanel]);
 
   // REMOVE ALL ELEMENTS WHEN TOTAL PANELS IS 0
   useEffect(() => {

@@ -15,7 +15,7 @@ function getColumnLetter(column: string | number): string {
     let col = column;
     let letter = '';
     while (col > 0) {
-      let rem = (col - 1) % 26;
+      const rem = (col - 1) % 26;
       letter = String.fromCharCode(65 + rem) + letter;
       col = Math.floor((col - 1) / 26);
     }
@@ -152,18 +152,19 @@ export async function ensureLeadIndexed(id: string, rowRef: string | number) {
 }
 
 // Write lead to main sheet and return rowRef
-async function writeLeadToSheetInternal(lead: any): Promise<{ rowRef: number }> {
+async function writeLeadToSheetInternal(lead: unknown): Promise<{ rowRef: number }> {
   const sheets = google.sheets({ version: 'v4', auth });
   
   // Prepare the row data - mapping lead fields to columns
+  const leadObj = lead as Record<string, unknown>;
   const rowData = [
-    lead.id || "",           // A: lead_id
-    lead.state || "",        // B: state
-    lead.address || "",      // C: address
-    lead.email || "",        // D: email
-    lead.phone || "",        // E: phone
-    lead.quote ? JSON.stringify(lead.quote) : "", // F: quote JSON
-    lead.ts ? new Date(lead.ts).toISOString() : "", // G: timestamp
+    leadObj.id || "",           // A: lead_id
+    leadObj.state || "",        // B: state
+    leadObj.address || "",      // C: address
+    leadObj.email || "",        // D: email
+    leadObj.phone || "",        // E: phone
+    leadObj.quote ? JSON.stringify(leadObj.quote) : "", // F: quote JSON
+    leadObj.ts ? new Date(leadObj.ts as number).toISOString() : "", // G: timestamp
   ];
 
   const appendRes = await sheets.spreadsheets.values.append({
@@ -187,26 +188,27 @@ async function writeLeadToSheetInternal(lead: any): Promise<{ rowRef: number }> 
   return { rowRef };
 }
 
-export async function writeLeadToSheet(lead: any): Promise<{ rowRef: number }> {
+export async function writeLeadToSheet(lead: unknown): Promise<{ rowRef: number }> {
   return withRetry(async () => {
     return await writeLeadToSheetInternal(lead);
   }, 4, 400);
 }
 
 // Update existing lead row
-async function updateLeadRowInternal(rowRef: string | number, lead: any): Promise<void> {
+async function updateLeadRowInternal(rowRef: string | number, lead: unknown): Promise<void> {
   const sheets = google.sheets({ version: 'v4', auth });
   const row = typeof rowRef === 'string' ? parseInt(rowRef, 10) : rowRef;
   
   // Prepare update data - only update fields that are provided
   const updates: Array<{ range: string; values: string[][] }> = [];
+  const leadObj = lead as Record<string, unknown>;
   
-  if (lead.state) updates.push({ range: `Leads!B${row}`, values: [[lead.state]] });
-  if (lead.address) updates.push({ range: `Leads!C${row}`, values: [[lead.address]] });
-  if (lead.email) updates.push({ range: `Leads!D${row}`, values: [[lead.email]] });
-  if (lead.phone) updates.push({ range: `Leads!E${row}`, values: [[lead.phone]] });
-  if (lead.quote) updates.push({ range: `Leads!F${row}`, values: [[JSON.stringify(lead.quote)]] });
-  if (lead.ts) updates.push({ range: `Leads!G${row}`, values: [[new Date(lead.ts).toISOString()]] });
+  if (leadObj.state) updates.push({ range: `Leads!B${row}`, values: [[leadObj.state as string]] });
+  if (leadObj.address) updates.push({ range: `Leads!C${row}`, values: [[leadObj.address as string]] });
+  if (leadObj.email) updates.push({ range: `Leads!D${row}`, values: [[leadObj.email as string]] });
+  if (leadObj.phone) updates.push({ range: `Leads!E${row}`, values: [[leadObj.phone as string]] });
+  if (leadObj.quote) updates.push({ range: `Leads!F${row}`, values: [[JSON.stringify(leadObj.quote)]] });
+  if (leadObj.ts) updates.push({ range: `Leads!G${row}`, values: [[new Date(leadObj.ts as number).toISOString()]] });
 
   if (updates.length > 0) {
     await sheets.spreadsheets.values.batchUpdate({
@@ -219,7 +221,7 @@ async function updateLeadRowInternal(rowRef: string | number, lead: any): Promis
   }
 }
 
-export async function updateLeadRow(rowRef: string | number, lead: any): Promise<void> {
+export async function updateLeadRow(rowRef: string | number, lead: unknown): Promise<void> {
   return withRetry(async () => {
     await updateLeadRowInternal(rowRef, lead);
   }, 4, 400);

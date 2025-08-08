@@ -39,9 +39,10 @@ const baseUrl: string = process.env.NEXT_PUBLIC_VERCEL_URL || "https://ground-mo
 
 export default function FollowUpEmailTemplate({
   client = "John",
-  phone = "Not provided",
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  phone: _phone = "Not provided",
   systemType = "Ground Mount Solar System",
-  address = "Tailored for your home's energy needs",
+  address = "Tailored for your home&apos;s energy needs",
   materials = "Premium-quality, durable components",
   estimatedCost = "More affordable than traditional electricity",
   installationTimeline = "3 Days after Site Survey",
@@ -61,7 +62,7 @@ export default function FollowUpEmailTemplate({
       <Head>
         <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&display=swap" />
       </Head>
-      <Preview>Your ground mount quote is ready - let's discuss next steps</Preview>
+      <Preview>Your ground mount quote is ready - let&apos;s discuss next steps</Preview>
       <Tailwind>
         <Body style={body}>
           <Container className="bg-[#002868] w-full max-w-[656px]">
@@ -70,7 +71,7 @@ export default function FollowUpEmailTemplate({
                 Hi {client},
               </div>
               <div className='text-[16px] leading-[24px] text-left font-normal text-[#46586B] mt-6 mb-0'>
-                I hope you've had a chance to review your custom ground-mounted solar quote from earlier today. 
+                I hope you&apos;ve had a chance to review your custom ground-mounted solar quote from earlier today. 
                 I wanted to follow up and see if you have any questions about the system we designed for your property.
               </div>
               <div className='text-[16px] leading-[24px] text-left font-normal text-[#46586B] mt-4 mb-0'>
@@ -90,7 +91,7 @@ export default function FollowUpEmailTemplate({
               <Section className='py-6 px-5 bg-white rounded-[12px]'>
                 <Row>
                   <div className='text-[16px] leading-[24px] text-left tracking-[-0.02em] font-bold text-[#183776] !my-0'>
-                    Here's a quick reminder of your custom quote details:
+                    Here&apos;s a quick reminder of your custom quote details:
                   </div>
                 </Row>
                 <Row>

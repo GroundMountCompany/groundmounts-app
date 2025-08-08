@@ -1,10 +1,10 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 
 export default function GmailAdminPage() {
   const [authUrl, setAuthUrl] = useState<string>('');
-  const [replies, setReplies] = useState<any[]>([]);
+  const [replies, setReplies] = useState<unknown[]>([]);
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState<string>('');
 

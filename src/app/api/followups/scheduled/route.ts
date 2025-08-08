@@ -44,15 +44,17 @@ export async function GET() {
         await markFollowupSent(f.lead_id);
         sent++;
         console.log("[FOLLOWUP_SENT]", f.lead_id, f.email);
-      } catch (e: any) {
-        console.error("[FOLLOWUP_SEND_FAIL]", f.lead_id, f.email, e?.message || e);
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : String(e);
+        console.error("[FOLLOWUP_SEND_FAIL]", f.lead_id, f.email, msg);
       }
     }
 
     console.log("[FOLLOWUP_SCHEDULED_SUCCESS]", "queued:", due.length, "sent:", sent);
     return NextResponse.json({ ok: true, queued: due.length, sent });
-  } catch (e: any) {
-    console.error("[FOLLOWUP_SCHEDULED_ERROR]", e?.message || e, e?.stack);
-    return NextResponse.json({ ok: false, error: e?.message || "scheduled_failed" }, { status: 500 });
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error("[FOLLOWUP_SCHEDULED_ERROR]", msg);
+    return NextResponse.json({ ok: false, error: msg || "scheduled_failed" }, { status: 500 });
   }
 }

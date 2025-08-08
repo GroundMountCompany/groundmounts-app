@@ -28,10 +28,11 @@ export const updateSheet = async (column: string, value: string, cb?: () => void
     if (!response.ok) {
       throw new Error('Failed to update sheet with leadId');
     }
-    cb && cb()
+    if (cb) cb();
 
-  } catch (error) {
-    console.error('Error updating sheet with leadId:', error);
+  } catch (error: unknown) {
+    const msg = error instanceof Error ? error.message : String(error);
+    console.error('Error updating sheet with leadId:', msg);
   }
 };
 
@@ -41,17 +42,18 @@ export async function withRetry<T>(
   attempts = 4,
   baseMs = 400
 ): Promise<T> {
-  let lastErr: any;
+  let lastErr: unknown;
   for (let i = 0; i < attempts; i++) {
     try {
       return await fn();
-    } catch (e: any) {
+    } catch (e: unknown) {
       lastErr = e;
       if (i < attempts - 1) { // Don't wait after the last attempt
         const wait = baseMs * Math.pow(2, i) + Math.floor(Math.random() * 150);
+        const msg = e instanceof Error ? e.message : String(e);
         // surface each failure during backoff
         // eslint-disable-next-line no-console
-        console.error("[SHEETS_RETRY_FAIL]", i + 1, "of", attempts, e?.message || e);
+        console.error("[SHEETS_RETRY_FAIL]", i + 1, "of", attempts, msg);
         await new Promise((r) => setTimeout(r, wait));
       }
     }

@@ -4,8 +4,8 @@ const BUCKET: Record<string, RateEntry> = {};
 const WINDOW_MS = 60_000;   // 1 minute
 const MAX_REQS = 20;        // per IP per minute (tune as needed)
 
-export function getClientIp(req: Request | { headers: Headers }) {
-  const h = "headers" in req ? req.headers : (req as any).headers;
+export function getClientIp(req: Request | { headers: Headers }): string {
+  const h = "headers" in req ? req.headers : req.headers;
   return (
     h.get("x-forwarded-for")?.split(",")[0]?.trim() ||
     h.get("x-real-ip") ||

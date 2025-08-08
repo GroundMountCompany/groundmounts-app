@@ -1,11 +1,11 @@
 import React from "react";
-import Button from "@/components/common/Button";
 import { useQuoteContext } from "@/contexts/quoteContext";
 import { updateSheet } from "@/lib/utils";
 import { useState, useEffect } from "react";
 import { enqueueOrSend } from "@/lib/leadQueue";
 import { useSearchParams } from 'next/navigation';
 
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type
 interface Step3FormProps {}
 
 const loadingMessages = [
@@ -22,6 +22,7 @@ function Step3Form({}: Step3FormProps) {
   const [showMessage, setShowMessage] = useState(true);
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [textMe, setTextMe] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -264,8 +265,8 @@ function Step3Form({}: Step3FormProps) {
             {/* Trust copy */}
             <p className="text-base text-gray-700 font-semibold text-center mt-8 leading-relaxed">
               <span className="font-semibold">We will NEVER sell your info.</span><br />
-              This design tool wasn't free to build—we just ask for your email in return (fair, right?).<br />
-              You'll get your full custom quote instantly. Then we may follow up with a quick email or text to offer a <strong>free, no-pressure meeting</strong> to walk through the numbers.<br />
+              This design tool wasn&apos;t free to build—we just ask for your email in return (fair, right?).<br />
+              You&apos;ll get your full custom quote instantly. Then we may follow up with a quick email or text to offer a <strong>free, no-pressure meeting</strong> to walk through the numbers.<br />
               Not interested? Just reply <code className="bg-gray-200 px-1 py-0.5 rounded text-gray-800">STOP</code>. Low stakes. Big savings.
             </p>
 

@@ -1,24 +1,31 @@
 // src/lib/fb.ts
 
+type FbqArgs = unknown[];
+
+declare global {
+  interface Window {
+    fbq?: (...args: FbqArgs) => void;
+    _fbqQueue?: FbqArgs[];
+  }
+}
+
 // Safe call that queues until fb script is ready
-export function fbqSafe(...args: any[]) {
+export function fbqSafe(...args: FbqArgs) {
   if (typeof window === "undefined") return;
-  const win = window as any;
-  if (typeof win.fbq === "function") {
-    win.fbq(...args);
+  if (typeof window.fbq === "function") {
+    window.fbq(...args);
   } else {
-    win._fbqQueue = win._fbqQueue || [];
-    win._fbqQueue.push(args);
+    window._fbqQueue = window._fbqQueue || [];
+    window._fbqQueue.push(args);
   }
 }
 
 // Drain queued events once fbq exists
-export function flushFbqQueue() {
+export function flushFbqQueue(): void {
   if (typeof window === "undefined") return;
-  const win = window as any;
-  if (!win._fbqQueue || typeof win.fbq !== "function") return;
-  for (const args of win._fbqQueue) {
-    try { win.fbq(...args); } catch {}
+  if (!window._fbqQueue || typeof window.fbq !== "function") return;
+  for (const args of window._fbqQueue) {
+    try { window.fbq(...args); } catch {}
   }
-  win._fbqQueue = [];
+  window._fbqQueue = [];
 }

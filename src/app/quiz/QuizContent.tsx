@@ -138,6 +138,7 @@ export default function QuizContent() {
     }
   };
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const handleOptionSelect = async (field: string, value: string) => {
     const updatedQuizData = {
       ...quizData,

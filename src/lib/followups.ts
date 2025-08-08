@@ -54,7 +54,7 @@ async function appendFollowupRowInternal(row: FollowupRow): Promise<void> {
   }
 }
 
-async function fetchAllFollowupsInternal(): Promise<{ rows: any[][], rowStartIndex: number }> {
+async function fetchAllFollowupsInternal(): Promise<{ rows: unknown[][], rowStartIndex: number }> {
   const sheets = google.sheets({ version: 'v4', auth });
   
   const response = await sheets.spreadsheets.values.get({

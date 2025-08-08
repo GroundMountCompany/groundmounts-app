@@ -17,17 +17,7 @@ if (process.env.NEXT_PUBLIC_MAPBOX_TOKEN) {
 export const MapDrawTool = () => {
   const { coordinates, currentStepIndex, isAutoLocationError, shouldDrawPanels, setMapZoomPercentage, mapZoomPercentage, address } = useQuoteContext();
   
-  // Guard against missing Mapbox token
-  if (!process.env.NEXT_PUBLIC_MAPBOX_TOKEN) {
-    return (
-      <div className="w-full flex items-center justify-center bg-gray-100 rounded-lg" style={{ height: '600px' }}>
-        <div className="text-center p-8">
-          <h3 className="text-lg font-semibold text-gray-700 mb-2">Map Unavailable</h3>
-          <p className="text-gray-500">Mapbox configuration is missing</p>
-        </div>
-      </div>
-    );
-  }
+  // All hooks must be called before any conditional returns
   const mapContainer = useRef<HTMLDivElement | null>(null);
   const map = useRef<mapboxgl.Map | null>(null);
   const [zoom, setZoom] = useState(18.5);
@@ -222,7 +212,19 @@ export const MapDrawTool = () => {
         map.current?.off("dragstart", hide);
       } catch {}
     };
-  }, [map.current]);
+  }, [mapLoaded]); // Use mapLoaded instead of map.current
+
+  // Guard against missing Mapbox token - moved after all hooks
+  if (!process.env.NEXT_PUBLIC_MAPBOX_TOKEN) {
+    return (
+      <div className="w-full flex items-center justify-center bg-gray-100 rounded-lg" style={{ height: '600px' }}>
+        <div className="text-center p-8">
+          <h3 className="text-lg font-semibold text-gray-700 mb-2">Map Unavailable</h3>
+          <p className="text-gray-500">Mapbox configuration is missing</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="w-full" style={{ height: '600px' }}>

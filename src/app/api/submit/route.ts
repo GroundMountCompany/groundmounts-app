@@ -69,10 +69,10 @@ export async function POST(request: Request) {
     }
 
   } catch (e: unknown) {
-    const error = e as Error;
-    console.error('[SUBMIT_ROUTE_ERROR]', error?.message || error);
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error('[SUBMIT_ROUTE_ERROR]', msg);
     return NextResponse.json(
-      { ok: false, error: error?.message || "submit_failed" },
+      { ok: false, error: msg || "submit_failed" },
       { status: 500 }
     );
   }

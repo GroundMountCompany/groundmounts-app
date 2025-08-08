@@ -7,14 +7,14 @@ type Payload = {
   email?: string;
   phone?: string;
   address?: string;
-  quote?: any;
+  quote?: unknown;
   ts: number;
   honeypot?: string;     // spam prevention
   ttc_ms?: number;       // time to complete (milliseconds)
 };
 
 const load = (): Payload[] => {
-  try { return JSON.parse(localStorage.getItem(KEY) ?? "[]"); } catch { return []; }
+  try { return JSON.parse(localStorage.getItem(KEY) ?? "[]") as Payload[]; } catch { return []; }
 };
 const save = (items: Payload[]) => localStorage.setItem(KEY, JSON.stringify(items));
 

@@ -56,7 +56,7 @@ const ElectricalMeter = ({ map, mapLoaded }: Props) => {
   const {
     shouldDrawPanels,
     electricalMeter,
-    mapZoomPercentage,
+    // mapZoomPercentage, // unused
     setElectricalMeterPosition,
     panelPosition,
     drawRef,

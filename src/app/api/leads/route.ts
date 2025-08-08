@@ -8,29 +8,30 @@ interface Lead {
   email?: string;
   phone?: string;
   address?: string;
-  quote?: any;
+  quote?: unknown;
   ts: number;
 }
 
-function validateLead(data: any): Lead {
-  if (!data.id || typeof data.id !== 'string' || data.id.length < 8) {
+function validateLead(data: unknown): Lead {
+  const obj = data as Record<string, unknown>;
+  if (!obj.id || typeof obj.id !== 'string' || obj.id.length < 8) {
     throw new Error('Invalid lead ID');
   }
-  if (!data.state || typeof data.state !== 'string') {
+  if (!obj.state || typeof obj.state !== 'string') {
     throw new Error('Invalid state');
   }
-  if (typeof data.ts !== 'number') {
+  if (typeof obj.ts !== 'number') {
     throw new Error('Invalid timestamp');
   }
   
   return {
-    id: data.id,
-    state: data.state,
-    email: data.email || "",
-    phone: data.phone || "",
-    address: data.address || "",
-    quote: data.quote,
-    ts: data.ts,
+    id: obj.id,
+    state: obj.state,
+    email: (obj.email as string) || "",
+    phone: (obj.phone as string) || "",
+    address: (obj.address as string) || "",
+    quote: obj.quote,
+    ts: obj.ts,
   };
 }
 
@@ -65,8 +66,8 @@ export async function POST(req: NextRequest) {
     console.log("[LEAD_CAPTURED]", lead.id, lead.state, lead.address || "no_address", "row:", rowRef);
     return NextResponse.json({ ok: true, rowRef });
   } catch (e: unknown) {
-    const error = e as Error;
-    console.error("[LEADS_ROUTE_ERROR]", error?.message || error);
-    return NextResponse.json({ ok: false, error: error?.message || "bad_request" }, { status: 400 });
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error("[LEADS_ROUTE_ERROR]", msg);
+    return NextResponse.json({ ok: false, error: msg || "bad_request" }, { status: 400 });
   }
 }

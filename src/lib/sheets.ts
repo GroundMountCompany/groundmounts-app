@@ -3,7 +3,6 @@ import type { sheets_v4 } from 'googleapis';
 import { withRetry } from './utils';
 
 // Type aliases for Google Sheets responses
-type AppendRes = sheets_v4.Schema$AppendValuesResponse;
 type UpdateRes = sheets_v4.Schema$UpdateValuesResponse;
 
 const auth = new google.auth.GoogleAuth({

@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { cn, updateSheet } from "@/lib/utils";
 import * as Slider from "@radix-ui/react-slider";
 import "./sliderStyle.css";
@@ -13,7 +13,7 @@ interface Step2FormProps {
   setShowForm: React.Dispatch<React.SetStateAction<boolean>>;
 }
 
-export default function Step2Form({
+function Step2Form({
   showForm,
   setShowForm
 }: Step2FormProps) {
@@ -95,9 +95,9 @@ export default function Step2Form({
           },{
             col: "M", val: String(Math.floor(totalCost * 0.3)),
           }]
-    vals.forEach(async val => {
+    for (const val of vals) {
       await updateSheet(val.col, val.val)
-    })
+    }
     setCurrentStepIndex(2);
   }
 
@@ -261,3 +261,5 @@ export default function Step2Form({
     </div>
   )
 }
+
+export default React.memo(Step2Form);

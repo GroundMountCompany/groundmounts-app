@@ -1,11 +1,17 @@
 import EmailTemplate from '@/components/common/EmailTemplate';
-import { Resend } from 'resend';
+import { NextResponse } from 'next/server';
+import { getResendOrThrow } from '@/lib/resendSafe';
+import { enqueueFollowup } from '@/lib/followups';
 import type { ReactElement } from 'react';
 
-const resend = new Resend(process.env.RESEND_API_KEY);
-
 export async function POST(request: Request) {
+  if (!process.env.RESEND_API_KEY) {
+    return NextResponse.json({ ok: false, error: "RESEND_API_KEY missing" }, { status: 500 });
+  }
+  
   try {
+    const resend = getResendOrThrow();
+    
     const {
       email,
       address,
@@ -72,10 +78,42 @@ export async function POST(request: Request) {
     //   })
     // });
     if (error) {
+      console.error("[SEND_EMAIL_ERROR]", error);
       return Response.json({ error }, { status: 500 });
     }
 
-    return Response.json(data);
+    // Enqueue follow-up email for 15 minutes later
+    try {
+      const leadId = `${email}_${Date.now()}`;
+      const followupDueMs = Date.now() + (15 * 60 * 1000); // 15 minutes
+      const quoteData = JSON.stringify({
+        email,
+        address,
+        coordinates,
+        quotation,
+        totalPanels,
+        paymentMethod,
+        additionalCost,
+        electricalMeter,
+        percentage,
+      });
+
+      await enqueueFollowup({
+        lead_id: leadId,
+        email,
+        created_at_ms: Date.now(),
+        followup_due_ms: followupDueMs,
+        followup_sent: false,
+        quote_data: quoteData,
+      });
+      
+      console.log("[FOLLOWUP_ENQUEUED]", leadId, email);
+    } catch (followupError) {
+      console.error("[FOLLOWUP_ENQUEUE_ERROR]", followupError);
+      // Don't fail the main email send if follow-up queueing fails
+    }
+
+    return Response.json({ ok: true, data });
   } catch (error) {
     console.log("error", error)
     return Response.json({ error }, { status: 500 });

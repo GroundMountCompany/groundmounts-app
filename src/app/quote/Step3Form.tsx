@@ -1,7 +1,10 @@
+import React from "react";
 import Button from "@/components/common/Button";
 import { useQuoteContext } from "@/contexts/quoteContext";
 import { updateSheet } from "@/lib/utils";
 import { useState, useEffect } from "react";
+import { enqueueOrSend } from "@/lib/leadQueue";
+import { useSearchParams } from 'next/navigation';
 
 interface Step3FormProps {}
 
@@ -13,7 +16,7 @@ const loadingMessages = [
   "Your quote is ready!"
 ];
 
-export default function Step3Form({}: Step3FormProps) {
+function Step3Form({}: Step3FormProps) {
   const [currentPhase, setCurrentPhase] = useState<'loading' | 'form' | 'success'>('loading');
   const [currentMessageIndex, setCurrentMessageIndex] = useState(0);
   const [showMessage, setShowMessage] = useState(true);
@@ -22,6 +25,9 @@ export default function Step3Form({}: Step3FormProps) {
   const [textMe, setTextMe] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [company, setCompany] = useState(""); // Honeypot field
+  const searchParams = useSearchParams();
+  const selectedState = searchParams.get('state') || 'TX';
 
   const {
     address,
@@ -33,6 +39,8 @@ export default function Step3Form({}: Step3FormProps) {
     additionalCost,
     electricalMeter,
     percentage,
+    leadId,
+    startedAt,
   } = useQuoteContext();
 
   // Phase 1: Loading sequence
@@ -69,6 +77,7 @@ export default function Step3Form({}: Step3FormProps) {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
+          leadId,
           email,
           address,
           coordinates,
@@ -79,6 +88,8 @@ export default function Step3Form({}: Step3FormProps) {
           additionalCost,
           electricalMeter,
           percentage,
+          honeypot: company,
+          ttc_ms: Date.now() - startedAt,
         }),
       });
 
@@ -87,33 +98,33 @@ export default function Step3Form({}: Step3FormProps) {
         await updateSheet("O", email);
         await updateSheet("P", phone);
         
-        // Schedule follow-up email for 15 minutes later
-        setTimeout(async () => {
-          try {
-            await fetch("/api/sendFollowUpEmail", {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-              },
-              body: JSON.stringify({
-                email,
-                phone,
-                address,
-                coordinates,
-                quotation,
-                totalPanels,
-                paymentMethod,
-                quoteId,
-                additionalCost,
-                electricalMeter,
-                percentage,
-              }),
-            });
-            console.log('Follow-up email scheduled successfully');
-          } catch (error) {
-            console.error('Failed to send follow-up email:', error);
-          }
-        }, 15 * 60 * 1000); // 15 minutes in milliseconds
+        // Send complete lead data with final quote details
+        try {
+          await enqueueOrSend({
+            id: leadId,
+            state: selectedState,
+            email,
+            phone,
+            address,
+            quote: {
+              quotation,
+              totalPanels,
+              paymentMethod,
+              additionalCost,
+              electricalMeter,
+              percentage,
+              coordinates,
+            },
+            ts: Date.now(),
+            honeypot: company,
+            ttc_ms: Date.now() - startedAt,
+          });
+          console.log("[FINAL_LEAD_CAPTURED]", leadId, email);
+        } catch (error) {
+          console.error("[FINAL_LEAD_CAPTURE_ERROR]", error);
+        }
+        
+        // Follow-up email is now handled server-side via /api/sendEmail
         
         // Wait 1.5 seconds then show success state
         setTimeout(() => {
@@ -203,8 +214,10 @@ export default function Step3Form({}: Step3FormProps) {
               <input
                 type="email"
                 id="email"
+                inputMode="email"
+                autoComplete="email"
                 required
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="h-12 w-full px-4 text-base border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 placeholder="Enter your email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
@@ -219,12 +232,25 @@ export default function Step3Form({}: Step3FormProps) {
               <input
                 type="tel"
                 id="phone"
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                inputMode="tel"
+                autoComplete="tel"
+                className="h-12 w-full px-4 text-base border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 placeholder="Enter your phone number"
                 value={phone}
                 onChange={(e) => setPhone(e.target.value)}
               />
             </div>
+
+            {/* Honeypot: hidden from humans, visible to bots */}
+            <input
+              name="company"
+              aria-hidden="true"
+              tabIndex={-1}
+              autoComplete="off"
+              className="absolute left-[-9999px] top-auto w-px h-px overflow-hidden"
+              value={company}
+              onChange={(e) => setCompany(e.target.value)}
+            />
 
             {/* Submit button */}
             <button
@@ -257,3 +283,5 @@ export default function Step3Form({}: Step3FormProps) {
     </div>
   );
 }
+
+export default React.memo(Step3Form);

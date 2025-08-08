@@ -10,13 +10,24 @@ import { useQuoteContext } from '@/contexts/quoteContext';
 import MapboxSolarPanel from './MapboxSolarPanel';
 
 // Initialize mapbox with token
-if (!process.env.NEXT_PUBLIC_MAPBOX_TOKEN) {
-  throw new Error('Mapbox token is required');
+if (process.env.NEXT_PUBLIC_MAPBOX_TOKEN) {
+  mapboxgl.accessToken = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
 }
-mapboxgl.accessToken = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
 
 export const MapDrawTool = () => {
   const { coordinates, currentStepIndex, isAutoLocationError, shouldDrawPanels, setMapZoomPercentage, mapZoomPercentage, address } = useQuoteContext();
+  
+  // Guard against missing Mapbox token
+  if (!process.env.NEXT_PUBLIC_MAPBOX_TOKEN) {
+    return (
+      <div className="w-full flex items-center justify-center bg-gray-100 rounded-lg" style={{ height: '600px' }}>
+        <div className="text-center p-8">
+          <h3 className="text-lg font-semibold text-gray-700 mb-2">Map Unavailable</h3>
+          <p className="text-gray-500">Mapbox configuration is missing</p>
+        </div>
+      </div>
+    );
+  }
   const mapContainer = useRef<HTMLDivElement | null>(null);
   const map = useRef<mapboxgl.Map | null>(null);
   const [zoom, setZoom] = useState(18.5);
@@ -25,7 +36,7 @@ export const MapDrawTool = () => {
   const [showLocationText, setShowLocationText] = useState(true);
   const [hasValidCoordinates, setHasValidCoordinates] = useState(false);
   const cleanupRef = useRef(false);
-  const [mapInteractive, setMapInteractive] = useState(false);
+  const [hint, setHint] = useState(true);
 
   // Track when coordinates are set from AddressInput or geolocation
   useEffect(() => {
@@ -36,55 +47,6 @@ export const MapDrawTool = () => {
       setHasValidCoordinates(false);
     }
   }, [coordinates, isAutoLocationError, address]);
-
-  // Add effect to toggle interactive class on the map container
-  useEffect(() => {
-    if (!map.current) return;
-    
-    const mapCanvas = map.current.getCanvas();
-    if (mapInteractive) {
-      mapCanvas.parentElement?.classList.add('interactive');
-      
-      // When interactive, we no longer need to change the z-index of the map container
-      // as we'll use pointer-events instead to allow interaction
-      if (mapContainer.current) {
-        mapContainer.current.style.pointerEvents = 'auto';
-        
-        // Enable touch events on mobile
-        mapContainer.current.style.touchAction = 'auto';
-      }
-      
-      // Ensure map is fully interactive
-      map.current.boxZoom.enable();
-      map.current.scrollZoom.enable();
-      map.current.dragPan.enable();
-      map.current.dragRotate.disable(); // Keep rotation disabled
-      map.current.keyboard.enable();
-      map.current.doubleClickZoom.enable();
-      map.current.touchZoomRotate.enable();
-    } else {
-      mapCanvas.parentElement?.classList.remove('interactive');
-      
-      // Reset pointer-events when not interactive
-      if (mapContainer.current) {
-        mapContainer.current.style.pointerEvents = 'none';
-        
-        // Disable touch events on mobile when not interactive
-        mapContainer.current.style.touchAction = 'none';
-      }
-      
-      // Disable map interactions when not interactive
-      if (map.current) {
-        map.current.boxZoom.disable();
-        map.current.scrollZoom.disable();
-        map.current.dragPan.disable();
-        map.current.dragRotate.disable();
-        map.current.keyboard.disable();
-        map.current.doubleClickZoom.disable();
-        map.current.touchZoomRotate.disable();
-      }
-    }
-  }, [mapInteractive]);
 
   // Initialize map only once
   useEffect(() => {
@@ -108,6 +70,11 @@ export const MapDrawTool = () => {
       interactive: true,
       touchPitch: false
     });
+    
+    // Configure mobile gestures for buttery performance
+    newMap.scrollZoom.disable();        // prevent accidental page scroll fights
+    newMap.touchZoomRotate.enable();    // pinch/rotate on mobile
+    newMap.doubleClickZoom.disable();   // avoid jumpy zooms
     map.current = newMap;
     setMapZoomPercentage(Math.round(((zoom - 17) / 3) * 200));
 
@@ -243,41 +210,32 @@ export const MapDrawTool = () => {
     }
   }, [shouldDrawPanels]);
 
+  // Auto-hide hint on touch/drag interaction
+  useEffect(() => {
+    if (!map.current) return;
+    const hide = () => setHint(false);
+    map.current.once("touchstart", hide);
+    map.current.once("dragstart", hide);
+    return () => {
+      try {
+        map.current?.off("touchstart", hide);
+        map.current?.off("dragstart", hide);
+      } catch {}
+    };
+  }, [map.current]);
+
   return (
     <div className="w-full" style={{ height: '600px' }}>
       <div className="relative w-full h-full rounded-lg overflow-hidden">
         <div 
           ref={mapContainer} 
           className="absolute inset-0 w-full h-full" 
-          onTouchStart={mapInteractive ? undefined : (e) => e.stopPropagation()}
         />
         
-        {!mapInteractive && (
-          <div 
-            className="absolute inset-0 z-20 bg-black/30 flex items-center justify-center touch-auto md:hidden"
-            onClick={() => setMapInteractive(true)}
-            onTouchEnd={(e) => {
-              e.preventDefault();
-              setMapInteractive(true);
-            }}
-          >
-            <div className="bg-white px-4 py-2 rounded-full shadow-lg text-sm font-medium">
-              Tap to interact with map
-            </div>
+        {hint && (
+          <div className="pointer-events-none fixed inset-x-0 top-0 z-30 mx-auto w-fit rounded-b-lg bg-black/70 px-3 py-1 text-xs text-white">
+            Use two fingers to move, pinch to zoom
           </div>
-        )}
-        
-        {mapInteractive && (
-          <button 
-            className="absolute top-4 lg:top-8 left-4 lg:left-[30px] shadow-lg rounded-full px-4 py-2 filter backdrop-blur-md bg-white/70 text-xs lg:text-sm z-30 md:hidden"
-            onClick={() => setMapInteractive(false)}
-            onTouchEnd={(e) => {
-              e.preventDefault();
-              setMapInteractive(false);
-            }}
-          >
-            Done
-          </button>
         )}
 
         {currentStepIndex === 0 && (

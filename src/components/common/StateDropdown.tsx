@@ -6,6 +6,7 @@ import { twMerge } from 'tailwind-merge';
 import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
 import { defaultRevealY } from '@/constants/animation';
+import { fbqSafe } from '@/lib/fb';
 
 const STATES = [
   'Texas', 'Oklahoma', 'Kansas', 'Nebraska', 'Arkansas', 'Louisiana',
@@ -36,23 +37,30 @@ export default function StateDropdown({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const router = useRouter();
 
+  // Fire DesignStart exactly once per session
+  const fireDesignStartOnce = () => {
+    if (typeof window === "undefined") return;
+    const KEY = "gm_design_start_fired";
+    if (sessionStorage.getItem(KEY)) return;
+    sessionStorage.setItem(KEY, "1");
+    fbqSafe("trackCustom", "DesignStart");
+  };
+
   const handleGetQuote = () => {
     if (!selectedState) return;
     setIsSubmitting(true);
 
     /* ---------- Meta Lead ---------- */
-    if (typeof window !== 'undefined' && typeof window.fbq === 'function') {
+    if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search);
       const testCode = params.get('test_event_code');           // <- present only when Test-events tab opened
       const options = testCode ? { eventID: testCode } : {};
-      window.fbq('track', 'Lead', {}, options);
+      fbqSafe('track', 'Lead', {}, options);
     }
     /* -------------------------------- */
 
     setTimeout(() => {
-      if (typeof window !== 'undefined' && typeof window.fbq === 'function') {
-        window.fbq('trackCustom', 'DesignStart');
-      }
+      fireDesignStartOnce();
       router.push(`/quiz?state=${encodeURIComponent(selectedState)}`);
     }, 150);
   };

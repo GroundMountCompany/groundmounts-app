@@ -9,6 +9,12 @@
           }
         ]
       }
+    ],
+    "crons": [
+      {
+        "path": "/api/followups/scheduled",
+        "schedule": "*/5 * * * *"
+      }
     ]
   }
   

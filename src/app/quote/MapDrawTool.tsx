@@ -10,13 +10,24 @@ import { useQuoteContext } from '@/contexts/quoteContext';
 import MapboxSolarPanel from './MapboxSolarPanel';
 
 // Initialize mapbox with token
-if (!process.env.NEXT_PUBLIC_MAPBOX_TOKEN) {
-  throw new Error('Mapbox token is required');
+if (process.env.NEXT_PUBLIC_MAPBOX_TOKEN) {
+  mapboxgl.accessToken = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
 }
-mapboxgl.accessToken = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
 
 export const MapDrawTool = () => {
   const { coordinates, currentStepIndex, isAutoLocationError, shouldDrawPanels, setMapZoomPercentage, mapZoomPercentage, address } = useQuoteContext();
+  
+  // Guard against missing Mapbox token
+  if (!process.env.NEXT_PUBLIC_MAPBOX_TOKEN) {
+    return (
+      <div className="w-full flex items-center justify-center bg-gray-100 rounded-lg" style={{ height: '600px' }}>
+        <div className="text-center p-8">
+          <h3 className="text-lg font-semibold text-gray-700 mb-2">Map Unavailable</h3>
+          <p className="text-gray-500">Mapbox configuration is missing</p>
+        </div>
+      </div>
+    );
+  }
   const mapContainer = useRef<HTMLDivElement | null>(null);
   const map = useRef<mapboxgl.Map | null>(null);
   const [zoom, setZoom] = useState(18.5);

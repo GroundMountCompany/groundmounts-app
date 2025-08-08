@@ -1,11 +1,16 @@
 import EmailTemplate from '@/components/common/EmailTemplate';
-import { Resend } from 'resend';
+import { NextResponse } from 'next/server';
+import { getResendOrThrow } from '@/lib/resendSafe';
 import type { ReactElement } from 'react';
 
-const resend = new Resend(process.env.RESEND_API_KEY);
-
 export async function POST(request: Request) {
+  if (!process.env.RESEND_API_KEY) {
+    return NextResponse.json({ ok: false, error: "RESEND_API_KEY missing" }, { status: 500 });
+  }
+  
   try {
+    const resend = getResendOrThrow();
+    
     const {
       email,
       address,

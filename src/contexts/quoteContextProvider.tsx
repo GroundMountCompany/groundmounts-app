@@ -189,6 +189,24 @@ export const QuoteContextProvider = ({ children }: QuoteContextProviderProps): J
     }
   }, [electricalMeterPosition, panelPosition, createOrUpdateLine, drawRef]);
 
+  // Stabilize setter functions with useCallback
+  const stableSetCurrentStepIndex = useCallback(setCurrentStepIndex, []);
+  const stableSetAddress = useCallback(setAddress, []);
+  const stableSetCoordinates = useCallback(setCoordinates, []);
+  const stableSetQuotation = useCallback(setQuotation, []);
+  const stableSetPaymentMethod = useCallback(setPaymentMethod, []);
+  const stableSetTotalPanels = useCallback(setTotalPanels, []);
+  const stableSetMapZoomPercentage = useCallback(setMapZoomPercentage, []);
+  const stableSetPercentage = useCallback(setPercentage, []);
+  const stableSetAvgValue = useCallback(setAvgValue, []);
+  const stableSetHighestValue = useCallback(setHighestValue, []);
+  const stableSetQuoteId = useCallback(setQuoteId, []);
+  const stableSetElectricalMeter = useCallback(setElectricalMeter, []);
+  const stableSetAdditionalCost = useCallback(setAdditionalCost, []);
+  const stableSetPanelPosition = useCallback(setPanelPosition, []);
+  const stableSetElectricalMeterPosition = useCallback(setElectricalMeterPosition, []);
+  const stableSetIsAutoLocationError = useCallback(setIsAutoLocationError, []);
+
   const values: QuoteContextValues = React.useMemo(() => ({
     currentStepIndex,
     address,
@@ -211,22 +229,22 @@ export const QuoteContextProvider = ({ children }: QuoteContextProviderProps): J
     electricalMeterPosition,
     lineFeatureIdRef,
     drawRef,
-    setIsAutoLocationError,
-    setCurrentStepIndex,
-    setAddress,
-    setCoordinates,
-    setQuotation,
-    setPaymentMethod,
-    setTotalPanels,
-    setMapZoomPercentage,
-    setPercentage,
-    setAvgValue,
-    setHighestValue,
-    setQuoteId,
-    setElectricalMeter,
-    setAdditionalCost,
-    setPanelPosition,
-    setElectricalMeterPosition,
+    setIsAutoLocationError: stableSetIsAutoLocationError,
+    setCurrentStepIndex: stableSetCurrentStepIndex,
+    setAddress: stableSetAddress,
+    setCoordinates: stableSetCoordinates,
+    setQuotation: stableSetQuotation,
+    setPaymentMethod: stableSetPaymentMethod,
+    setTotalPanels: stableSetTotalPanels,
+    setMapZoomPercentage: stableSetMapZoomPercentage,
+    setPercentage: stableSetPercentage,
+    setAvgValue: stableSetAvgValue,
+    setHighestValue: stableSetHighestValue,
+    setQuoteId: stableSetQuoteId,
+    setElectricalMeter: stableSetElectricalMeter,
+    setAdditionalCost: stableSetAdditionalCost,
+    setPanelPosition: stableSetPanelPosition,
+    setElectricalMeterPosition: stableSetElectricalMeterPosition,
     createOrUpdateLine,
     updateDistanceAndCost,
   }), [
@@ -251,22 +269,22 @@ export const QuoteContextProvider = ({ children }: QuoteContextProviderProps): J
     electricalMeterPosition,
     lineFeatureIdRef,
     drawRef,
-    setIsAutoLocationError,
-    setCurrentStepIndex,
-    setAddress,
-    setCoordinates,
-    setQuotation,
-    setPaymentMethod,
-    setTotalPanels,
-    setMapZoomPercentage,
-    setPercentage,
-    setAvgValue,
-    setHighestValue,
-    setQuoteId,
-    setElectricalMeter,
-    setAdditionalCost,
-    setPanelPosition,
-    setElectricalMeterPosition,
+    stableSetIsAutoLocationError,
+    stableSetCurrentStepIndex,
+    stableSetAddress,
+    stableSetCoordinates,
+    stableSetQuotation,
+    stableSetPaymentMethod,
+    stableSetTotalPanels,
+    stableSetMapZoomPercentage,
+    stableSetPercentage,
+    stableSetAvgValue,
+    stableSetHighestValue,
+    stableSetQuoteId,
+    stableSetElectricalMeter,
+    stableSetAdditionalCost,
+    stableSetPanelPosition,
+    stableSetElectricalMeterPosition,
     createOrUpdateLine,
     updateDistanceAndCost
   ]);

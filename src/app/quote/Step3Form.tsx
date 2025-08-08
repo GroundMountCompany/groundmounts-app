@@ -1,3 +1,4 @@
+import React from "react";
 import Button from "@/components/common/Button";
 import { useQuoteContext } from "@/contexts/quoteContext";
 import { updateSheet } from "@/lib/utils";
@@ -13,7 +14,7 @@ const loadingMessages = [
   "Your quote is ready!"
 ];
 
-export default function Step3Form({}: Step3FormProps) {
+function Step3Form({}: Step3FormProps) {
   const [currentPhase, setCurrentPhase] = useState<'loading' | 'form' | 'success'>('loading');
   const [currentMessageIndex, setCurrentMessageIndex] = useState(0);
   const [showMessage, setShowMessage] = useState(true);
@@ -231,3 +232,5 @@ export default function Step3Form({}: Step3FormProps) {
     </div>
   );
 }
+
+export default React.memo(Step3Form);

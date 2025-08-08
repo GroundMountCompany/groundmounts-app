@@ -11,7 +11,8 @@ export async function GET() {
       hasGoogleAuth: !!process.env.GOOGLE_CLIENT_EMAIL && !!process.env.GOOGLE_PRIVATE_KEY,
     };
     return NextResponse.json({ ok: true, env });
-  } catch (e: any) {
-    return NextResponse.json({ ok: false, error: e?.message || "health_failed" }, { status: 500 });
+  } catch (e: unknown) {
+    const error = e as Error;
+    return NextResponse.json({ ok: false, error: error?.message || "health_failed" }, { status: 500 });
   }
 }

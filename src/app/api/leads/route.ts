@@ -44,11 +44,11 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: "rate_limited" }, { status: 429 });
     }
 
-    if (isBotHoneypot((body as any).honeypot)) {
+    if (isBotHoneypot((body as Record<string, unknown>).honeypot as string)) {
       return NextResponse.json({ ok: true, ignored: true }); // pretend success, do nothing
     }
 
-    if ((body as any).ttc_ms !== undefined && !minTimeOk((body as any).ttc_ms)) {
+    if ((body as Record<string, unknown>).ttc_ms !== undefined && !minTimeOk((body as Record<string, unknown>).ttc_ms as number)) {
       return NextResponse.json({ ok: false, error: "too_fast" }, { status: 400 });
     }
 
@@ -64,8 +64,9 @@ export async function POST(req: NextRequest) {
 
     console.log("[LEAD_CAPTURED]", lead.id, lead.state, lead.address || "no_address", "row:", rowRef);
     return NextResponse.json({ ok: true, rowRef });
-  } catch (e: any) {
-    console.error("[LEADS_ROUTE_ERROR]", e?.message || e, e?.stack);
-    return NextResponse.json({ ok: false, error: e?.message || "bad_request" }, { status: 400 });
+  } catch (e: unknown) {
+    const error = e as Error;
+    console.error("[LEADS_ROUTE_ERROR]", error?.message || error);
+    return NextResponse.json({ ok: false, error: error?.message || "bad_request" }, { status: 400 });
   }
 }

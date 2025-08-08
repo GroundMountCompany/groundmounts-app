@@ -13,11 +13,11 @@ export async function POST(request: Request) {
         return NextResponse.json({ ok: false, error: "rate_limited" }, { status: 429 });
       }
 
-      if (isBotHoneypot((body as any).honeypot)) {
+      if (isBotHoneypot((body as Record<string, unknown>).honeypot as string)) {
         return NextResponse.json({ ok: true, ignored: true });
       }
 
-      if ((body as any).ttc_ms !== undefined && !minTimeOk((body as any).ttc_ms)) {
+      if ((body as Record<string, unknown>).ttc_ms !== undefined && !minTimeOk((body as Record<string, unknown>).ttc_ms as number)) {
         return NextResponse.json({ ok: false, error: "too_fast" }, { status: 400 });
       }
     }
@@ -68,10 +68,11 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: true, created: true, rowRef });
     }
 
-  } catch (e: any) {
-    console.error('[SUBMIT_ROUTE_ERROR]', e?.message || e, e?.stack);
+  } catch (e: unknown) {
+    const error = e as Error;
+    console.error('[SUBMIT_ROUTE_ERROR]', error?.message || error);
     return NextResponse.json(
-      { ok: false, error: e?.message || "submit_failed" },
+      { ok: false, error: error?.message || "submit_failed" },
       { status: 500 }
     );
   }

@@ -34,3 +34,27 @@ export const updateSheet = async (column: string, value: string, cb?: () => void
     console.error('Error updating sheet with leadId:', error);
   }
 };
+
+// Retry with exponential backoff. Jitter keeps calls from syncing up.
+export async function withRetry<T>(
+  fn: () => Promise<T>,
+  attempts = 4,
+  baseMs = 400
+): Promise<T> {
+  let lastErr: any;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await fn();
+    } catch (e: any) {
+      lastErr = e;
+      if (i < attempts - 1) { // Don't wait after the last attempt
+        const wait = baseMs * Math.pow(2, i) + Math.floor(Math.random() * 150);
+        // surface each failure during backoff
+        // eslint-disable-next-line no-console
+        console.error("[SHEETS_RETRY_FAIL]", i + 1, "of", attempts, e?.message || e);
+        await new Promise((r) => setTimeout(r, wait));
+      }
+    }
+  }
+  throw lastErr;
+}

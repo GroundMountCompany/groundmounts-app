@@ -2,6 +2,7 @@
 
 import { cn } from '@/lib/utils';
 import Step2Form from './Step2Form';
+// import ErrorTest from '@/components/test/ErrorTest'; // Temporarily disabled
 // import Step4Summary from './Step4Summary';
 import MapDrawTool from './MapDrawTool';
 import { useQuoteContext } from '@/contexts/quoteContext';

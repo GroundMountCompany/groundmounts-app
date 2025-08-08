@@ -58,6 +58,9 @@ async function ensureLeadRow(tabName: string, leadId: string): Promise<number> {
 
 export async function POST(request: Request) {
   try {
+    // Temporarily test error handling
+    // throw new Error("Test error for route logging verification");
+    
     const sheets = google.sheets({ version: 'v4', auth });
     const body = await request.json();
     console.log("stp1", { version: 'v4', auth }, sheets)
@@ -110,13 +113,10 @@ export async function POST(request: Request) {
       response: updateRes.data,
     });
 
-  } catch (error: any) {
-    console.error('Error:', error);
+  } catch (e: any) {
+    console.error('[SUBMIT_ROUTE_ERROR]', e?.message || e, e?.stack);
     return NextResponse.json(
-      {
-        error: 'Failed to update sheet',
-        details: error.message,
-      },
+      { ok: false, error: e?.message || "submit_failed" },
       { status: 500 }
     );
   }

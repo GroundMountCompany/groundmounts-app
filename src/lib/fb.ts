@@ -4,7 +4,6 @@ type FbqArgs = unknown[];
 
 declare global {
   interface Window {
-    fbq?: (...args: FbqArgs) => void;
     _fbqQueue?: FbqArgs[];
   }
 }

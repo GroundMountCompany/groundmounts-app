@@ -2,9 +2,33 @@
 
 import { useState } from 'react';
 
+type GmailReply = {
+  subject: string;
+  from: string;
+  snippet: string;
+  id?: string;
+  threadId?: string;
+  internalDate?: string;
+};
+
+function toGmailReplies(input: unknown): GmailReply[] {
+  if (!Array.isArray(input)) return [];
+  return input.map((r) => {
+    const o = r as Record<string, unknown>;
+    return {
+      subject: typeof o.subject === "string" ? o.subject : "",
+      from: typeof o.from === "string" ? o.from : "",
+      snippet: typeof o.snippet === "string" ? o.snippet : "",
+      id: typeof o.id === "string" ? o.id : undefined,
+      threadId: typeof o.threadId === "string" ? o.threadId : undefined,
+      internalDate: typeof o.internalDate === "string" ? o.internalDate : undefined,
+    };
+  });
+}
+
 export default function GmailAdminPage() {
   const [authUrl, setAuthUrl] = useState<string>('');
-  const [replies, setReplies] = useState<unknown[]>([]);
+  const [replies, setReplies] = useState<GmailReply[]>([]);
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState<string>('');
 
@@ -35,7 +59,8 @@ export default function GmailAdminPage() {
       const data = await response.json();
       
       if (data.success) {
-        setReplies(data.replies);
+        const typedReplies: GmailReply[] = toGmailReplies(data.replies);
+        setReplies(typedReplies);
         setStatus(`Found ${data.count} replies`);
       } else {
         setStatus('Failed to check replies');
@@ -137,7 +162,7 @@ export default function GmailAdminPage() {
                   </div>
                   <p className="text-gray-600 text-sm">{reply.snippet}</p>
                   <p className="text-xs text-gray-400 mt-2">
-                    ID: {reply.id} | Date: {new Date(parseInt(reply.internalDate)).toLocaleString()}
+                    ID: {reply.id} | Date: {reply.internalDate ? new Date(parseInt(reply.internalDate)).toLocaleString() : 'N/A'}
                   </p>
                 </div>
               ))}

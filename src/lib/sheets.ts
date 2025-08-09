@@ -162,11 +162,11 @@ async function writeLeadToSheetInternal(lead: unknown): Promise<{ rowRef: number
   // Prepare the row data - mapping lead fields to columns
   const leadObj = lead as Record<string, unknown>;
   const rowData: (string | number | boolean | null)[] = [
-    leadObj.id || "",           // A: lead_id
-    leadObj.state || "",        // B: state
-    leadObj.address || "",      // C: address
-    leadObj.email || "",        // D: email
-    leadObj.phone || "",        // E: phone
+    String(leadObj.id || ""),           // A: lead_id
+    String(leadObj.state || ""),        // B: state
+    String(leadObj.address || ""),      // C: address
+    String(leadObj.email || ""),        // D: email
+    String(leadObj.phone || ""),        // E: phone
     leadObj.quote ? JSON.stringify(leadObj.quote) : "", // F: quote JSON
     leadObj.ts ? new Date(leadObj.ts as number).toISOString() : "", // G: timestamp
   ];

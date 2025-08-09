@@ -98,12 +98,12 @@ export async function fetchDueFollowups(nowMs: number): Promise<FollowupRow[]> {
     
     for (const row of rows) {
       if (row.length >= 5) {
-        const leadId = row[0];
-        const email = row[1];
-        const createdAtMs = parseInt(row[2], 10);
-        const followupDueMs = parseInt(row[3], 10);
-        const followupSent = row[4]?.toLowerCase() === 'true';
-        const quoteData = row[5] || '';
+        const leadId = String(row[0] || '');
+        const email = String(row[1] || '');
+        const createdAtMs = parseInt(String(row[2] || '0'), 10);
+        const followupDueMs = parseInt(String(row[3] || '0'), 10);
+        const followupSent = String(row[4] || '').toLowerCase() === 'true';
+        const quoteData = String(row[5] || '');
         
         // Check if due and not sent
         if (!followupSent && followupDueMs <= nowMs) {

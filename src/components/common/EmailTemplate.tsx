@@ -1,233 +1,422 @@
-import * as React from 'react';
-import {
-  Body,
-  Container,
-  Head,
-  Hr,
-  Html,
-  Img,
-  Link,
-  Preview,
-  Section,
-  Tailwind,
-  Row,
-  Column,
-} from '@react-email/components';
+import * as React from "react";
 
-interface EmailTemplateProps {
-  client: string;
+// ===== Types =====
+type LatLng = { lat: number; lng: number } | string;
+
+export type QuoteEmailProps = {
+  brandName?: string;
+  logoUrl?: string;             // header logo (optional)
+  designImageUrl?: string;      // right-side "design" image (optional)
+  homeImageUrl?: string;        // left-side "site/home" image (optional)
+  calendlyUrl?: string;         // booking link
+  supportEmail?: string;        // footer contact
+
+  previewText?: string;         // inbox preview copy
+
+  // Core quote values (keep names you already pass; add safe fallbacks)
+  client?: string;
   systemType?: string;
   address?: string;
   materials?: string;
-  coordinates?: string;
-  estimatedCost?: string;
-  installationTimeline?: string;
+  coordinates?: LatLng | string;
   trenching?: string;
-  totalCost?: string;
-  date?: string;
-  calendlyUrl?: string;
+  estimatedCost?: string;        // subtotal before credit
   fedralTax?: string;
-}
+  totalCost?: string;            // net total
+  date?: string;                 // e.g., 'Aug 09, 2025'
+  installationTimeline?: string; // e.g., '3–4 weeks'
+  proTips?: string[];           // list; optional
+};
 
-interface BodyStyle {
-  fontFamily: string;
-  margin: number;
-}
-
-const baseUrl: string = process.env.NEXT_PUBLIC_VERCEL_URL || "https://ground-mounts-web.vercel.app";
+const styles = {
+  body: {
+    margin: 0,
+    padding: 0,
+    backgroundColor: "#f6f7f9",
+    fontFamily:
+      '-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Oxygen,Ubuntu,Cantarell,"Helvetica Neue",Arial,sans-serif',
+    color: "#111827",
+  } as React.CSSProperties,
+  container: {
+    width: "100%",
+    tableLayout: "fixed",
+    backgroundColor: "#f6f7f9",
+    padding: "24px 0",
+  } as React.CSSProperties,
+  card: {
+    width: "100%",
+    maxWidth: "720px",
+    margin: "0 auto",
+    backgroundColor: "#ffffff",
+    borderRadius: "16px",
+    border: "1px solid #e5e7eb",
+    boxShadow: "0 8px 32px rgba(0,0,0,0.06)",
+  } as React.CSSProperties,
+  header: {
+    padding: "20px 24px",
+    borderBottom: "1px solid #e5e7eb",
+  } as React.CSSProperties,
+  h1: { margin: 0, fontSize: "20px", lineHeight: "28px", fontWeight: 800 } as React.CSSProperties,
+  sub: { marginTop: "6px", fontSize: "14px", color: "#6b7280" } as React.CSSProperties,
+  section: { padding: "20px 24px" } as React.CSSProperties,
+  table: { width: "100%", borderCollapse: "collapse" } as React.CSSProperties,
+  label: { fontSize: "12px", color: "#6b7280", letterSpacing: ".02em" } as React.CSSProperties,
+  value: { fontSize: "15px", fontWeight: 600, color: "#111827" } as React.CSSProperties,
+  costRow: { fontSize: "14px", color: "#111827" } as React.CSSProperties,
+  muted: { color: "#6b7280" } as React.CSSProperties,
+  kbd: {
+    display: "inline-block",
+    background: "#e5e7eb",
+    borderRadius: "6px",
+    padding: "2px 6px",
+    fontSize: "12px",
+    fontWeight: 700,
+  } as React.CSSProperties,
+  ctaWrap: { padding: "8px 24px 24px" } as React.CSSProperties,
+  cta: {
+    display: "inline-block",
+    backgroundColor: "#111827",
+    color: "#ffffff",
+    padding: "14px 32px",
+    borderRadius: "8px",
+    textDecoration: "none",
+    fontSize: "15px",
+    fontWeight: 700,
+    textAlign: "center" as const,
+  } as React.CSSProperties,
+  imgBox: {
+    width: "100%",
+    height: "180px",
+    borderRadius: "8px",
+    overflow: "hidden",
+    backgroundColor: "#f3f4f6",
+  } as React.CSSProperties,
+  footer: {
+    padding: "20px 24px",
+    borderTop: "1px solid #e5e7eb",
+    backgroundColor: "#f9fafb",
+    borderBottomLeftRadius: "16px",
+    borderBottomRightRadius: "16px",
+  } as React.CSSProperties,
+};
 
 export default function EmailTemplate({
-  client = "John",
+  brandName = "The Ground Mount Company",
+  logoUrl,
+  designImageUrl,
+  homeImageUrl,
+  calendlyUrl = "#",
+  supportEmail = "info@groundmounts.com",
+  previewText = "Your custom ground mount solar quote is ready",
+  
+  // Quote data
+  client = "Homeowner",
   systemType = "Ground Mount Solar System",
-  address = "Tailored for your home's energy needs",
-  materials = "Premium-quality, durable components",
-  estimatedCost = "More affordable than traditional electricity",
-  installationTimeline = "3 Days after Site Survey",
-  trenching = "50 years",
+  address = "Your Property",
+  materials = "Premium-quality components",
   coordinates,
-  totalCost,
-  date,
-  calendlyUrl,
-  fedralTax
-}: EmailTemplateProps): React.JSX.Element {
-  const body: BodyStyle = {
-    fontFamily: "'Manrope', 'Helvetica', 'Arial', sans-serif",
-    margin: 0
-  }
+  trenching,
+  estimatedCost = "$0",
+  fedralTax,
+  totalCost = "$0",
+  date = new Date().toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' }),
+  installationTimeline = "3-4 weeks",
+  proTips = [
+    "Maximize sun exposure by keeping panels free from shade",
+    "Consider seasonal sun angles when positioning your system",
+    "Regular cleaning maintains optimal efficiency"
+  ],
+}: QuoteEmailProps): React.JSX.Element {
+  const baseUrl = process.env.NEXT_PUBLIC_VERCEL_URL || "https://ground-mounts-web.vercel.app";
+  
+  // Format coordinates
+  const coordsDisplay = typeof coordinates === 'string' 
+    ? coordinates 
+    : coordinates && typeof coordinates === 'object' && 'lat' in coordinates
+    ? `${coordinates.lat.toFixed(4)}, ${coordinates.lng.toFixed(4)}`
+    : "—";
+
   return (
-    <Html>
-      <Head>
-        <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&display=swap" />
-      </Head>
-      <Preview>Design your own ground mount solar system in 3 minutes</Preview>
-      <Tailwind>
-        <Body style={body}>
-          <Container className="bg-[#002868] w-full max-w-[656px]">
-            {/* <Section>
-              <Img
-                src={`${baseUrl}/images/logo-email.png`}
-                alt="The Ground Mount Company Logo"
-                width={220}
-                height={54.45}
-                className='w-[220px] h-[54.45px] mt-[60px] mb-[68px] mx-auto'
-              />
-            </Section>
-            <Section className='w-[95%] mx-auto mb-[80px]'>
-              <Heading className='text-[36px] leading-[42.48px] tracking-[-0.1px] text-center text-white font-normal my-0'>
-              Design your own ground mount solar system in 3 minutes
-              </Heading>
-            </Section>
-            <Section className="relative px-[20px] overflow-visible bg-[url('https://ground-mounts-web.vercel.app/images/hero-email-bg.png')] bg-no-repeat bg-[position:100%_0]">
-              <Img
-                src={`${baseUrl}/images/hero-email.png`}
-                alt="Hero Image"
-                width={335}
-                height={409.55}
-                className='relative z-20 w-full h-auto'
-              />
-            </Section> */}
-            <Section className='p-10 bg-white'>
-              <div className='text-[16px] leading-[24px] text-left font-bold text-[#183776] my-0'>
-                Dear {client},
-              </div>
-              <div className='text-[16px] leading-[24px] text-left font-normal text-[#46586B] mt-6 mb-0'>
-                Great news! Your custom ground-mounted solar energy system is ready.
-                Designed in just 3 minutes, this system is tailored to maximize efficiency
-                and sustainability for your home.
-              </div>
-            </Section>
-              <div className="flex justify-center mt-10">
-                <a href={calendlyUrl} target='_blank' className='flex gap-2 justify-center items-center btn bg-blue-600 text-white px-4 py-2 rounded rounded-sm text-xl mx-auto text-decoration-none border-radius-4' style={{textDecoration: "none", fontSize: "26px", borderRadius: "20px"}}>
-                  <span className='text-white'>&#128241;</span> Book a Calendly call
-                </a>
-              </div>
-            <Section className='p-[32px]'>
-              <Section className='py-6 px-5 bg-white rounded-[12px]'>
-                <Row>
-                  <div className='text-[16px] leading-[24px] text-left tracking-[-0.02em] font-bold text-[#183776] !my-0'>Thank you for your interest in our Ground Mount Solar System! We&apos;ve designed a custom solution that fits your energy needs in just 3 minutes. Below, you&apos;ll find the quotation details to help you make the switch to sustainable energy effortlessly.</div>
-                </Row>
-                <Row>
-                  <Column className='w-1/2 relative'>
-                    <div className='text-[16px] leading-[24px] text-left font-normal text-[#46586B] mt-6 mb-0 absolute top-0 left-0'>System Type</div>
-                  </Column>
-                  <Column className='w-1/2'>
-                    <div className='text-[16px] leading-[24px] tracking-[-0.02em] text-left font-bold text-[#183776] mt-6 mb-0'>{systemType}</div>
-                  </Column>
-                </Row>
-                <Row>
-                  <Column className='w-1/2 relative'>
-                    <div className='text-[16px] leading-[24px] text-left font-normal text-[#46586B] mt-6 mb-0 absolute top-0 left-0'>Address:</div>
-                  </Column>
-                  <Column className='w-1/2'>
-                    <div className='text-[16px] leading-[24px] tracking-[-0.02em] text-left font-bold text-[#183776] mt-6 mb-0'>{address}</div>
-                  </Column>
-                </Row>
-                <Row>
-                  <Column className='w-1/2 relative'>
-                    <div className='text-[16px] leading-[24px] text-left font-normal text-[#46586B] mt-6 mb-0 absolute top-0 left-0'>Materials:</div>
-                  </Column>
-                  <Column className='w-1/2'>
-                    <div className='text-[16px] leading-[24px] tracking-[-0.02em] text-left font-bold text-[#183776] mt-6 mb-0'>{materials}</div>
-                  </Column>
-                </Row>
-                <Row>
-                  <Column className='w-1/2 relative'>
-                    <div className='text-[16px] leading-[24px] text-left font-normal text-[#46586B] mt-6 mb-0 absolute top-0 left-0'>Coordinates:</div>
-                  </Column>
-                  <Column className='w-1/2'>
-                    <div className='text-[16px] leading-[24px] tracking-[-0.02em] text-left font-bold text-[#183776] mt-6 mb-0'>{coordinates}</div>
-                  </Column>
-                </Row>
-                <Row>
-                  <Column className='w-1/2 relative'>
-                    <div className='text-[16px] leading-[24px] text-left font-normal text-[#46586B] mt-6 mb-0 absolute top-0 left-0'>Trenching Cost:</div>
-                  </Column>
-                  <Column className='w-1/2'>
-                    <div className='text-[16px] leading-[24px] tracking-[-0.02em] text-left font-bold text-[#183776] mt-6 mb-0'>{trenching}</div>
-                  </Column>
-                </Row>
-                <Row>
-                  <Column className='w-1/2 relative'>
-                    <div className='text-[16px] leading-[24px] text-left font-normal text-[#46586B] mt-6 mb-0 absolute top-0 left-0'>Estimated Cost:</div>
-                  </Column>
-                  <Column className='w-1/2'>
-                    <div className='text-[16px] leading-[24px] tracking-[-0.02em] text-left font-bold text-[#183776] mt-6 mb-0'>{estimatedCost}</div>
-                  </Column>
-                </Row>
-                <Row>
-                  <Column className='w-1/2 relative'>
-                    <div className='text-[16px] leading-[24px] text-left font-normal text-[#46586B] mt-6 mb-0 absolute top-0 left-0'>Fedral Tax Credit:</div>
-                  </Column>
-                  <Column className='w-1/2'>
-                    <div className='text-[16px] leading-[24px] tracking-[-0.02em] text-left font-bold text-[#183776] mt-6 mb-0'>${fedralTax}</div>
-                  </Column>
-                </Row>
-                <Row>
-                  <Column className='w-1/2 relative'>
-                    <div className='text-[16px] leading-[24px] text-left font-normal text-[#46586B] mt-6 mb-0 absolute top-0 left-0'>Total Cost:</div>
-                  </Column>
-                  <Column className='w-1/2'>
-                    <div className='text-[16px] leading-[24px] tracking-[-0.02em] text-left font-bold text-[#183776] mt-6 mb-0'>{totalCost}</div>
-                  </Column>
-                </Row>
-                <Row>
-                  <Column className='w-1/2 relative'>
-                    <div className='text-[16px] leading-[24px] text-left font-normal text-[#46586B] mt-6 mb-0 absolute top-0 left-0'>Date:</div>
-                  </Column>
-                  <Column className='w-1/2'>
-                    <div className='text-[16px] leading-[24px] tracking-[-0.02em] text-left font-bold text-[#183776] mt-6 mb-0'>{date}</div>
-                  </Column>
-                </Row>
-                <Row>
-                  <Column className='w-1/2 relative'>
-                    <div className='text-[16px] leading-[24px] text-left font-normal text-[#46586B] mt-6 mb-0 absolute top-0 left-0'>Installation Timeline:</div>
-                  </Column>
-                  <Column className='w-1/2'>
-                    <div className='text-[16px] leading-[24px] tracking-[-0.02em] text-left font-bold text-[#183776] mt-6 mb-0'>{installationTimeline}</div>
-                  </Column>
-                </Row>
-                
-                <Section className='bg-[#D5F1FC66] rounded-[12px] p-4 mt-10'>
-                  <div className='text-[16px] leading-[24px] tracking-[-0.02em] text-left font-bold text-[#183776] flex items-center'>
-                    <Img src={`${baseUrl}/images/bulb.png`} alt="Pro Tips" width={24} height={24} className='inline-block mr-2' />
-                   <div className='mt-[-4px] inline-block'> Pro Tips:</div>
-                  </div>
-                  <div className='text-[16px] leading-[24px] tracking-[-0.02em] text-left font-normal text-[#46586B] mt-6 mb-0'>
-                    Maximize Sun Exposure - Install panels in an area with unobstructed sunlight
-                    throughout the day. Avoid shading from trees, buildings, or other structures.
-                  </div>
-                </Section>
-              </Section>
-            </Section>
-            <Img src={`${baseUrl}/images/logo-email-white.png`} alt="logo white" width={135.54} height={33.55} className='w-[135.54px] h-[33.55px] mx-auto mt-8 mb-[30.85px]' />
-            <div className="text-[24px] leading-[36px] text-center font-normal text-white w-[75%] mx-auto">&apos;s custom ground-mounted solar energy system in 3 minutes</div>
-            <Row className='mb-5'>
-              <Column className='w-1/2'>
-                <Img src={`${baseUrl}/images/email-left.png`} alt="left image" width={135.54} height={33.55} className='h-[250px] w-auto' />
-              </Column>
-              <Column className='w-1/2 text-right'>
-                <Img src={`${baseUrl}/images/email-right.png`} alt="rightDesign your home image" width={135.54} height={33.55} className='inline-block h-[250px] w-auto' />
-              </Column>
-            </Row>
-            <Hr className='!border-white opacity-[0.12] my-0' />
-            <Section className='text-center text-[12px] leading-[18px] font-normal text-white pt-[33px] pb-[40px] px-[20px]'>
-              <div className='mb-2 w-[90%] mx-auto'>Questions or concerns? Get in touch with us at <Link href="mailto:info@groundmounts.com" className='text-white font-extrabold'>info@groundmounts.com.</Link></div>
-              <div className='mb-6 w-[90%] mx-auto'>Never miss a beat! Follow us on <Link href="https://www.youtube.com/channel/UCfvcBjN1jER6Wer4vPAjvhA" className='text-white font-extrabold'>Youtube</Link> and <Link href="https://www.facebook.com/profile.php?id=61572574884731" className='text-white font-extrabold'>Facebook</Link></div>
-            </Section>
-            <Hr className='!border-white opacity-[0.12] my-0' />
-            <Section className='text-center py-[20px]'>
-              <div className='text-[10px] leading-[15px] text-left font-normal text-white inline-block opacity-[0.5]'>Copyright © 2024 The Ground Mount Company</div>
-            </Section>
-          </Container>
-          <Container>
-            <div className="flex justify-center mt-10">
-              <a href={calendlyUrl} target='_blank' className='flex gap-2 justify-center items-center btn bg-blue-600 text-white px-4 py-2 rounded rounded-sm text-xxl mx-auto text-decoration-none border-radius-4' style={{textDecoration: "none", fontSize: "44px", borderRadius: "20px"}}>
-                <span className='text-white'>&#128241;</span> Book a Calendly call
-              </a>
-            </div>
-          </Container>
-        </Body>
-      </Tailwind>
-    </Html>
+    <html>
+      <head>
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <meta httpEquiv="Content-Type" content="text/html; charset=UTF-8" />
+        <title>{previewText}</title>
+      </head>
+      <body style={styles.body}>
+        {/* Preview text for inbox */}
+        <div style={{ display: "none", maxHeight: 0, overflow: "hidden" }}>
+          {previewText}
+        </div>
+        
+        {/* Main container */}
+        <table role="presentation" style={styles.container}>
+          <tr>
+            <td align="center">
+              <table role="presentation" style={styles.card}>
+                {/* Header */}
+                <tr>
+                  <td style={styles.header}>
+                    <table style={styles.table}>
+                      <tr>
+                        <td>
+                          <h1 style={styles.h1}>Your Solar Quote is Ready! ☀️</h1>
+                          <p style={styles.sub}>
+                            Dear {client}, your custom ground mount design is complete
+                          </p>
+                        </td>
+                        {logoUrl && (
+                          <td align="right" width="120">
+                            <img 
+                              src={logoUrl || `${baseUrl}/images/logo-email.png`}
+                              alt={brandName}
+                              width="100"
+                              style={{ display: "block", maxWidth: "100px" }}
+                            />
+                          </td>
+                        )}
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+
+                {/* Images Section */}
+                <tr>
+                  <td style={{ padding: "0 24px" }}>
+                    <table style={styles.table}>
+                      <tr>
+                        <td width="48%" style={{ paddingRight: "8px" }}>
+                          <div style={styles.imgBox}>
+                            {homeImageUrl ? (
+                              <img 
+                                src={homeImageUrl || `${baseUrl}/images/email-left.png`}
+                                alt="Your home site"
+                                style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                              />
+                            ) : (
+                              <div style={{ padding: "60px 20px", textAlign: "center", color: "#9ca3af" }}>
+                                <div style={{ fontSize: "32px" }}>🏠</div>
+                                <div style={{ fontSize: "12px", marginTop: "8px" }}>Site Image</div>
+                              </div>
+                            )}
+                          </div>
+                        </td>
+                        <td width="48%" style={{ paddingLeft: "8px" }}>
+                          <div style={styles.imgBox}>
+                            {designImageUrl ? (
+                              <img 
+                                src={designImageUrl || `${baseUrl}/images/email-right.png`}
+                                alt="Your solar design"
+                                style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                              />
+                            ) : (
+                              <div style={{ padding: "60px 20px", textAlign: "center", color: "#9ca3af" }}>
+                                <div style={{ fontSize: "32px" }}>⚡</div>
+                                <div style={{ fontSize: "12px", marginTop: "8px" }}>Design Preview</div>
+                              </div>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+
+                {/* Quote Details */}
+                <tr>
+                  <td style={styles.section}>
+                    <table style={styles.table}>
+                      <tr>
+                        <td colSpan={2} style={{ paddingBottom: "16px" }}>
+                          <div style={{ fontSize: "16px", fontWeight: 700, color: "#111827" }}>
+                            Quote Details
+                          </div>
+                        </td>
+                      </tr>
+                      
+                      {/* System Info */}
+                      <tr>
+                        <td style={{ padding: "8px 0" }}>
+                          <div style={styles.label}>SYSTEM TYPE</div>
+                          <div style={styles.value}>{systemType}</div>
+                        </td>
+                        <td style={{ padding: "8px 0" }}>
+                          <div style={styles.label}>INSTALLATION</div>
+                          <div style={styles.value}>{installationTimeline}</div>
+                        </td>
+                      </tr>
+                      
+                      <tr>
+                        <td colSpan={2} style={{ padding: "8px 0" }}>
+                          <div style={styles.label}>PROPERTY ADDRESS</div>
+                          <div style={styles.value}>{address}</div>
+                        </td>
+                      </tr>
+                      
+                      <tr>
+                        <td style={{ padding: "8px 0" }}>
+                          <div style={styles.label}>COORDINATES</div>
+                          <div style={styles.value}>{coordsDisplay}</div>
+                        </td>
+                        <td style={{ padding: "8px 0" }}>
+                          <div style={styles.label}>MATERIALS</div>
+                          <div style={styles.value}>{materials}</div>
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+
+                {/* Cost Breakdown */}
+                <tr>
+                  <td style={{ padding: "0 24px 20px" }}>
+                    <div style={{
+                      backgroundColor: "#f9fafb",
+                      borderRadius: "8px",
+                      padding: "16px",
+                      border: "1px solid #e5e7eb"
+                    }}>
+                      <table style={styles.table}>
+                        <tr>
+                          <td colSpan={2} style={{ paddingBottom: "12px" }}>
+                            <div style={{ fontSize: "14px", fontWeight: 700, color: "#111827" }}>
+                              Cost Breakdown
+                            </div>
+                          </td>
+                        </tr>
+                        
+                        <tr>
+                          <td style={styles.costRow}>System Cost</td>
+                          <td align="right" style={{ ...styles.costRow, fontWeight: 600 }}>
+                            {estimatedCost}
+                          </td>
+                        </tr>
+                        
+                        {trenching && (
+                          <tr>
+                            <td style={{ ...styles.costRow, paddingTop: "6px" }}>Trenching</td>
+                            <td align="right" style={{ ...styles.costRow, paddingTop: "6px", fontWeight: 600 }}>
+                              {trenching}
+                            </td>
+                          </tr>
+                        )}
+                        
+                        {fedralTax && (
+                          <tr>
+                            <td style={{ ...styles.costRow, paddingTop: "6px", color: "#059669" }}>
+                              Federal Tax Credit (30%)
+                            </td>
+                            <td align="right" style={{ ...styles.costRow, paddingTop: "6px", color: "#059669", fontWeight: 600 }}>
+                              -${fedralTax}
+                            </td>
+                          </tr>
+                        )}
+                        
+                        <tr>
+                          <td colSpan={2} style={{ paddingTop: "12px", borderTop: "1px solid #e5e7eb" }}>
+                            <table style={styles.table}>
+                              <tr>
+                                <td style={{ fontSize: "16px", fontWeight: 700, color: "#111827" }}>
+                                  Total Investment
+                                </td>
+                                <td align="right" style={{ fontSize: "20px", fontWeight: 800, color: "#111827" }}>
+                                  {totalCost}
+                                </td>
+                              </tr>
+                            </table>
+                          </td>
+                        </tr>
+                        
+                        <tr>
+                          <td colSpan={2} style={{ paddingTop: "8px" }}>
+                            <div style={{ fontSize: "11px", color: "#6b7280" }}>
+                              Quote generated on {date}
+                            </div>
+                          </td>
+                        </tr>
+                      </table>
+                    </div>
+                  </td>
+                </tr>
+
+                {/* Pro Tips */}
+                {proTips && proTips.length > 0 && (
+                  <tr>
+                    <td style={{ padding: "0 24px 20px" }}>
+                      <div style={{
+                        backgroundColor: "#fef3c7",
+                        borderRadius: "8px",
+                        padding: "16px",
+                        border: "1px solid #fde68a"
+                      }}>
+                        <div style={{ fontSize: "14px", fontWeight: 700, color: "#92400e", marginBottom: "8px" }}>
+                          💡 Pro Tips
+                        </div>
+                        <ul style={{ margin: 0, paddingLeft: "20px", color: "#78350f", fontSize: "13px", lineHeight: "20px" }}>
+                          {proTips.map((tip, i) => (
+                            <li key={i} style={{ marginBottom: i < proTips.length - 1 ? "4px" : 0 }}>
+                              {tip}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    </td>
+                  </tr>
+                )}
+
+                {/* CTA */}
+                <tr>
+                  <td style={styles.ctaWrap}>
+                    <table style={styles.table}>
+                      <tr>
+                        <td align="center">
+                          <a href={calendlyUrl} style={styles.cta}>
+                            📞 Book Your Free Consultation
+                          </a>
+                          <div style={{ marginTop: "12px", fontSize: "13px", color: "#6b7280" }}>
+                            Takes 30 seconds • No obligation • Expert guidance
+                          </div>
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+
+                {/* Footer */}
+                <tr>
+                  <td style={styles.footer}>
+                    <table style={styles.table}>
+                      <tr>
+                        <td>
+                          <div style={{ fontSize: "12px", color: "#6b7280", lineHeight: "18px" }}>
+                            Questions? Email us at{" "}
+                            <a href={`mailto:${supportEmail}`} style={{ color: "#111827", fontWeight: 600 }}>
+                              {supportEmail}
+                            </a>
+                          </div>
+                          <div style={{ fontSize: "11px", color: "#9ca3af", marginTop: "8px" }}>
+                            © 2024 {brandName}. Empowering homes with clean energy.
+                          </div>
+                        </td>
+                        <td align="right">
+                          <div style={{ fontSize: "11px", color: "#9ca3af" }}>
+                            <a href="https://www.youtube.com/channel/UCfvcBjN1jER6Wer4vPAjvhA" style={{ color: "#6b7280", textDecoration: "none", marginRight: "12px" }}>
+                              Youtube
+                            </a>
+                            <a href="https://www.facebook.com/profile.php?id=61572574884731" style={{ color: "#6b7280", textDecoration: "none" }}>
+                              Facebook
+                            </a>
+                          </div>
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+        </table>
+      </body>
+    </html>
   );
 }

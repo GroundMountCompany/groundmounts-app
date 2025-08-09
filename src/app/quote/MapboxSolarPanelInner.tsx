@@ -469,7 +469,7 @@ const MapboxSolarPanelInner = ({ map, mapLoaded }: Props) => {
   return (
     <>
       {!electricalMeterPosition && (currentStepIndex !== 0) && (
-        <div className="absolute top-[30px] left-1/2 transform -translate-x-1/2 z-10">
+        <div className="pointer-events-none absolute top-[30px] left-1/2 transform -translate-x-1/2 z-10">
           <div className="bg-white/70 backdrop-blur-md px-4 py-2 rounded-full shadow-lg text-sm text-gray-700 flex items-center gap-2 transition-opacity duration-300">
           <svg width="12" height="13" viewBox="0 0 12 13" fill="none" xmlns="http://www.w3.org/2000/svg">
               <g filter="url(#filter0_d_1811_38540)">
@@ -494,7 +494,7 @@ const MapboxSolarPanelInner = ({ map, mapLoaded }: Props) => {
       )}
       { actualPanels > 0 && (
   <div className="absolute bottom-[30px] left-1/2 transform -translate-x-1/2 z-10 flex flex-col items-center gap-2">
-    <div className="bg-white/70 backdrop-blur-md px-4 py-2 rounded-full shadow-lg text-sm font-medium text-gray-700">
+    <div className="pointer-events-none bg-white/70 backdrop-blur-md px-4 py-2 rounded-full shadow-lg text-sm font-medium text-gray-700">
       System Size: {systemSizeFeet.widthFeet} ft x {systemSizeFeet.heightFeet} ft
     </div>
 
@@ -504,7 +504,7 @@ const MapboxSolarPanelInner = ({ map, mapLoaded }: Props) => {
         e.preventDefault();
         focusOnPanels();
       }}
-      className="flex items-center gap-2 px-4 py-2 bg-white/70 backdrop-blur-md rounded-full shadow-lg text-sm font-medium text-gray-700 hover:bg-white/90 transition-all duration-200"
+      className="pointer-events-auto flex items-center gap-2 px-4 py-2 bg-white/70 backdrop-blur-md rounded-full shadow-lg text-sm font-medium text-gray-700 hover:bg-white/90 transition-all duration-200"
     >
       <svg
         className="w-4 h-4"

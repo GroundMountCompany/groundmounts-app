@@ -3,6 +3,8 @@
 :root {
   --background: #ffffff;
   --foreground: #171717;
+  /* Mobile viewport var; used for stable 100vh on iOS Safari */
+  --vh: 1vh;
 }
 
 @theme inline {
@@ -30,6 +32,8 @@ body {
   -webkit-tap-highlight-color: transparent;
 }
 
-html {
+/* Guard against nested bounce scroll */
+html, body {
+  overscroll-behavior: none;
   touch-action: manipulation;
 }

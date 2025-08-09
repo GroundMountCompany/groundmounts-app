@@ -312,20 +312,22 @@ const MapboxSolarPanelInner = ({ map, mapLoaded }: Props) => {
     if (!map || !mapLoaded || !shouldDrawPanels || actualPanels === 0) return;
 
     const onClick = (e: mapboxgl.MapMouseEvent) => {
-      if (!e.lngLat) return;
+      console.log('Panel click detected:', e.lngLat);
+      if (!e.lngLat || solarMarkerRef.current) return;
       onPlaceAtLngLat(e.lngLat);
     };
 
     const onTouchEnd = (e: TouchEvt) => {
+      console.log('Panel touch detected:', e);
+      if (solarMarkerRef.current) return;
       const ll = touchEventLngLat(map, e);
+      console.log('Panel touch converted to coords:', ll);
       if (ll) onPlaceAtLngLat(ll);
     };
 
-    // Only add listeners if no panel marker exists yet
-    if (!solarMarkerRef.current) {
-      map.on("click", onClick);
-      map.on("touchend", onTouchEnd);
-    }
+    // Always add listeners, but check for existing marker inside handlers
+    map.on("click", onClick);
+    map.on("touchend", onTouchEnd);
 
     return () => {
       try {

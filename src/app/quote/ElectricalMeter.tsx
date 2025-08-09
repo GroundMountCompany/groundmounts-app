@@ -212,11 +212,15 @@ const ElectricalMeter = ({ map, mapLoaded }: Props) => {
     };
 
     const handleMapClick = (e: mapboxgl.MapMouseEvent) => {
-      if (e.lngLat) handleMapPlacement(e.lngLat);
+      console.log('Meter click detected:', e.lngLat);
+      if (e.lngLat && !markerRef.current) handleMapPlacement(e.lngLat);
     };
 
     const handleMapTouch = (e: TouchEvt) => {
+      console.log('Meter touch detected:', e);
+      if (markerRef.current) return;
       const ll = touchEventLngLat(map, e);
+      console.log('Meter touch converted to coords:', ll);
       if (ll) handleMapPlacement(ll);
     };
 

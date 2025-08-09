@@ -188,96 +188,120 @@ function Step3Form({}: Step3FormProps) {
 
   // Phase 2: Modal Form
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden">
-        {/* Header with image */}
-        <div className="relative h-32">
-          <img
-            src="/images/quote-email-preview.png"
-            alt="Custom ground mount quote preview"
-            className="w-full h-full object-cover"
-          />
-        </div>
-        <div className="p-6 text-center">
-          <h2 className="text-2xl font-bold text-gray-900">
-            Get Your Custom Ground Mount Quote
-          </h2>
-        </div>
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 backdrop-blur-sm p-4">
+      {/* Card container */}
+      <div className="mx-auto w-full max-w-[640px]">
+        <div className="rounded-2xl border border-neutral-200 bg-white shadow-[0_6px_30px_rgba(0,0,0,0.06)]">
+          {/* Header */}
+          <div className="border-b border-neutral-200 px-6 py-5 sm:px-8">
+            <p className="text-sm font-medium tracking-wide text-neutral-500">
+              Step 3
+            </p>
+            <h2 className="mt-1 text-2xl font-extrabold leading-tight text-neutral-900">
+              Get Your Custom Ground Mount Quote
+            </h2>
+            <p className="mt-2 text-sm text-neutral-600">
+              Enter your best email (and phone if you want SMS). We&apos;ll send your full quote now and follow up if you want help choosing options.
+            </p>
+          </div>
 
-        {/* Form content */}
-        <div className="p-6 pt-0">
-          <form onSubmit={(e) => { e.preventDefault(); handleSendEmail(); }}>
-            {/* Email input */}
-            <div className="mb-4">
-              <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-2">
-                Email Address *
-              </label>
-              <input
-                type="email"
-                id="email"
-                inputMode="email"
-                autoComplete="email"
-                required
-                className="h-12 w-full px-4 text-base border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                placeholder="Enter your email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-              />
-            </div>
-
-            {/* Phone input */}
-            <div className="mb-4">
-              <label htmlFor="phone" className="block text-sm font-medium text-gray-700 mb-2">
-                Phone Number
-              </label>
-              <input
-                type="tel"
-                id="phone"
-                inputMode="tel"
-                autoComplete="tel"
-                className="h-12 w-full px-4 text-base border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                placeholder="Enter your phone number"
-                value={phone}
-                onChange={(e) => setPhone(e.target.value)}
-              />
-            </div>
-
-            {/* Honeypot: hidden from humans, visible to bots */}
+          {/* Form */}
+          <form onSubmit={(e) => { e.preventDefault(); handleSendEmail(); }} className="px-6 py-6 sm:px-8 sm:py-8">
+            {/* Honeypot (keep) */}
             <input
               name="company"
               aria-hidden="true"
               tabIndex={-1}
               autoComplete="off"
-              className="absolute left-[-9999px] top-auto w-px h-px overflow-hidden"
+              className="sr-only"
               value={company}
               onChange={(e) => setCompany(e.target.value)}
             />
 
-            {/* Submit button */}
-            <button
-              type="submit"
-              disabled={isSubmitting || !email}
-              className="w-full bg-red-600 hover:bg-red-700 disabled:bg-gray-400 text-white font-bold py-4 px-6 rounded-lg transition-colors duration-200"
-            >
-              {isSubmitting ? 'Sending...' : 'Send Me My Quote'}
-            </button>
+            {/* Inputs */}
+            <div className="grid grid-cols-1 gap-4 sm:gap-5">
+              <div className="flex flex-col gap-2">
+                <label htmlFor="email" className="text-sm font-semibold text-neutral-800">
+                  Email Address <span className="font-normal text-rose-600">*</span>
+                </label>
+                <input
+                  id="email"
+                  type="email"
+                  inputMode="email"
+                  autoComplete="email"
+                  required
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="h-12 w-full rounded-xl border border-neutral-300 bg-white px-4 text-base outline-none ring-0 transition focus:border-neutral-400 focus:ring-2 focus:ring-neutral-200"
+                  placeholder="you@example.com"
+                />
+                {status && status.includes('Failed') && (
+                  <p className="text-sm text-rose-600">{status}</p>
+                )}
+              </div>
 
-            {/* Trust copy */}
-            <p className="text-base text-gray-700 font-semibold text-center mt-8 leading-relaxed">
-              <span className="font-semibold">We will NEVER sell your info.</span><br />
-              This design tool wasn&apos;t free to build—we just ask for your email in return (fair, right?).<br />
-              You&apos;ll get your full custom quote instantly. Then we may follow up with a quick email or text to offer a <strong>free, no-pressure meeting</strong> to walk through the numbers.<br />
-              Not interested? Just reply <code className="bg-gray-200 px-1 py-0.5 rounded text-gray-800">STOP</code>. Low stakes. Big savings.
-            </p>
+              <div className="flex flex-col gap-2">
+                <label htmlFor="phone" className="text-sm font-semibold text-neutral-800">
+                  Phone Number <span className="font-normal text-neutral-500">(optional)</span>
+                </label>
+                <input
+                  id="phone"
+                  type="tel"
+                  inputMode="tel"
+                  autoComplete="tel"
+                  pattern="[0-9\\-()+ ]*"
+                  value={phone}
+                  onChange={(e) => setPhone(e.target.value)}
+                  className="h-12 w-full rounded-xl border border-neutral-300 bg-white px-4 text-base outline-none ring-0 transition focus:border-neutral-400 focus:ring-2 focus:ring-neutral-200"
+                  placeholder="(555) 555-5555"
+                />
+              </div>
+            </div>
 
-            {/* Status message */}
-            {status && (
-              <p className={`text-sm mt-3 text-center ${
-                status.includes('sent') ? 'text-green-600' : 'text-red-600'
-              }`}>
-                {status}
+            {/* CTA */}
+            <div className="mt-6 sm:mt-7">
+              <button
+                type="submit"
+                disabled={isSubmitting}
+                className="flex h-12 w-full items-center justify-center rounded-xl bg-neutral-900 text-base font-semibold text-white transition hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-70"
+              >
+                {isSubmitting ? (
+                  <span className="inline-flex items-center gap-2">
+                    <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-white border-r-transparent" />
+                    Sending…
+                  </span>
+                ) : (
+                  "Send Me My Quote"
+                )}
+              </button>
+            </div>
+
+            {/* Trust & expectations */}
+            <div className="mt-6 grid gap-3 text-sm text-neutral-700">
+              <div className="rounded-lg bg-neutral-50 p-4">
+                <ul className="list-disc space-y-1 pl-5">
+                  <li>You&apos;ll get your full custom quote instantly.</li>
+                  <li>We may follow up with a quick email or text to offer a free, no‑pressure call to walk through the numbers.</li>
+                  <li>Not interested? Just reply <span className="rounded bg-neutral-200 px-1 py-0.5 text-xs font-semibold">STOP</span>.</li>
+                </ul>
+              </div>
+              <p className="text-center text-[13px] text-neutral-500">
+                We will <span className="font-semibold">NEVER</span> sell your info.
+                This design tool wasn&apos;t free to build—we just ask for your email in return (fair, right?).
               </p>
-            )}
+            </div>
+
+            {/* Status / errors */}
+            <div className="mt-4">
+              <p role="status" aria-live="polite" className="text-sm text-neutral-600">
+                {isSubmitting ? "Sending your quote…" : (status && status.includes('sent') ? status : '')}
+              </p>
+              {status && status.includes('Failed') && (
+                <p className="mt-1 text-sm font-medium text-rose-600">
+                  {status}
+                </p>
+              )}
+            </div>
           </form>
         </div>
       </div>

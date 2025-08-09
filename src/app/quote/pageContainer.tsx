@@ -9,10 +9,8 @@ import { useQuoteContext } from '@/contexts/quoteContext';
 import { JSX, useState } from 'react';
 import { StepContent } from '@/types';
 import Step3Form from './Step3Form';
-import { useSetViewportUnit } from '@/lib/useSetViewportUnit';
 
 export const PageContainer = (): JSX.Element => {
-  useSetViewportUnit();
   const { currentStepIndex, setCurrentStepIndex, shouldContinueButtonDisabled } = useQuoteContext();
   const [showForm, setShowForm] = useState(false)
 
@@ -46,10 +44,9 @@ export const PageContainer = (): JSX.Element => {
   };
 
   return (
-    <div className="flex h-[calc(var(--vh)*100)] w-full flex-col overflow-hidden bg-white">
-      {/* Sticky header / step progress */}
-      <header className="sticky top-0 z-40 border-b border-neutral-200 bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/70 px-4 py-3 md:static md:border-0 md:p-0 md:bg-transparent md:backdrop-blur-none">
-        <div className="flex flex-row gap-4 md:pb-0">
+    <>
+      <div className="pb-20 md:pb-0">
+        <div className="flex flex-row">
           {/* step progress section */}
           <div className={cn("flex flex-row gap-4", {
             'lg:pl-[29px]': currentStepIndex === 1,
@@ -65,23 +62,19 @@ export const PageContainer = (): JSX.Element => {
             ))}
           </div>
         </div>
-      </header>
-      
-      {/* Scrollable content area; leave existing step rendering inside */}
-      <main className="min-h-0 grow overflow-y-auto overscroll-contain px-4 pb-[calc(env(safe-area-inset-bottom)+88px)] pt-4 sm:px-6 md:px-0 md:pb-0 md:pt-0">
-        <div className={cn("flex flex-col lg:flex-row lg:flex-wrap", {
-          'lg:justify-between': currentStepIndex === 3,
-        })}>
-          {/* step content section */}
-          {stepContent.map((step, index) => {
-            if (index !== currentStepIndex) return null;
-            return (
-              <div key={index} className={cn("w-full", {
-                'lg:w-[542px] lg:pl-[29px]': currentStepIndex === 1,
-                'lg:w-[630px]': currentStepIndex === 3,
-                'lg:pl-[40px]': [2,3].includes(currentStepIndex),
-              })}>
-                <div>
+      <div className={cn("flex flex-col lg:flex-row lg:flex-wrap", {
+        'lg:justify-between': currentStepIndex === 3,
+      })}>
+        {/* step content section */}
+        {stepContent.map((step, index) => {
+          if (index !== currentStepIndex) return null;
+          return (
+            <div key={index} className={cn("w-full", {
+              'lg:w-[542px] lg:pl-[29px]': currentStepIndex === 1,
+              'lg:w-[630px]': currentStepIndex === 3,
+              'lg:pl-[40px]': [2,3].includes(currentStepIndex),
+            })}>
+              <div>
                 {
                   currentStepIndex === 1?
                   <>
@@ -139,9 +132,9 @@ export const PageContainer = (): JSX.Element => {
         </div>
         } */}
         </div>
-      </main>
+      </div>
 
-      {/* Keep your existing sticky bottom CTA from Step 9 (md:hidden). Do not move. */}
+      {/* Mobile sticky CTA - hidden on step 2 (final step with form) */}
       {currentStepIndex < 2 && (
         <div className="fixed bottom-0 left-0 right-0 z-40 border-t bg-white/90 backdrop-blur px-4 py-3 md:hidden">
           <button
@@ -159,6 +152,6 @@ export const PageContainer = (): JSX.Element => {
           </button>
         </div>
       )}
-    </div>
+    </>
   )
 }

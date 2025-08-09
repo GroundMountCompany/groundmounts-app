@@ -11,19 +11,6 @@ interface Props {
   mapLoaded: boolean;
 }
 
-// Helper types for touch events
-type TouchEvt = mapboxgl.MapLayerTouchEvent | mapboxgl.MapTouchEvent;
-
-// Helper function to convert touch event to lngLat
-function touchEventLngLat(map: mapboxgl.Map, e: TouchEvt): mapboxgl.LngLatLike | null {
-  const te = (e.originalEvent as TouchEvent);
-  if (!te || !te.changedTouches || te.changedTouches.length === 0) return null;
-  const t = te.changedTouches[0];
-  const rect = (map.getContainer() as HTMLElement).getBoundingClientRect();
-  const point = new mapboxgl.Point(t.clientX - rect.left, t.clientY - rect.top);
-  return map.unproject(point);
-}
-
 const ROWS = 4; // Fixed number of rows
 const SOLAR_SINGLE_ELEMENT = `
   <div class="block border-2 border-white rounded-xs">
@@ -135,22 +122,10 @@ const MapboxSolarPanelInner = ({ map, mapLoaded }: Props) => {
 
     const marker = new mapboxgl.Marker({
       element: solarMarkerElement,
-      draggable: true,
-      anchor: 'center'
+      draggable: true
     })
       .setLngLat(coordinates)
       .addTo(map);
-
-    // Add mobile-friendly styles
-    solarMarkerElement.style.touchAction = 'none';
-    solarMarkerElement.style.cursor = 'move';
-    
-    // Increase hit area for mobile
-    const isMobile = window.innerWidth < 768;
-    if (isMobile) {
-      solarMarkerElement.style.padding = '10px';
-      solarMarkerElement.style.margin = '-10px';
-    }
 
     solarMarkerRef.current = marker;
   }, [scaleFactor, map, actualPanels]);
@@ -171,7 +146,6 @@ const MapboxSolarPanelInner = ({ map, mapLoaded }: Props) => {
     map.scrollZoom.disable();          // prevent accidental page scroll fights
     map.touchZoomRotate.enable();      // pinch/rotate on mobile
     map.doubleClickZoom.disable();     // avoid jumpy zooms
-    map.dragPan.enable();              // ensure panning works after earlier changes
   }, [map]);
 
   // Attach & detach map listeners with cleanup
@@ -297,52 +271,12 @@ const MapboxSolarPanelInner = ({ map, mapLoaded }: Props) => {
     };
   }, [map, mapLoaded]);
 
-  // Unified placement handler for both click and touch
-  const onPlaceAtLngLat = useCallback((lngLat: mapboxgl.LngLatLike) => {
-    if (!solarMarkerRef.current && actualPanels > 0 && shouldDrawPanels) {
-      const coords = lngLat as mapboxgl.LngLat;
-      const position: [number, number] = [coords.lng, coords.lat];
-      setPanelPosition(position);
-      createPanelMarker(position);
-    }
-  }, [actualPanels, shouldDrawPanels, setPanelPosition, createPanelMarker]);
-
-  // Add click and touch event handlers for panel placement
-  useEffect(() => {
-    if (!map || !mapLoaded || !shouldDrawPanels || actualPanels === 0) return;
-
-    const onClick = (e: mapboxgl.MapMouseEvent) => {
-      console.log('Panel click detected:', e.lngLat);
-      if (!e.lngLat || solarMarkerRef.current) return;
-      onPlaceAtLngLat(e.lngLat);
-    };
-
-    const onTouchEnd = (e: TouchEvt) => {
-      console.log('Panel touch detected:', e);
-      if (solarMarkerRef.current) return;
-      const ll = touchEventLngLat(map, e);
-      console.log('Panel touch converted to coords:', ll);
-      if (ll) onPlaceAtLngLat(ll);
-    };
-
-    // Always add listeners, but check for existing marker inside handlers
-    map.on("click", onClick);
-    map.on("touchend", onTouchEnd);
-
-    return () => {
-      try {
-        map.off("click", onClick);
-        map.off("touchend", onTouchEnd);
-      } catch {}
-    };
-  }, [map, mapLoaded, shouldDrawPanels, actualPanels, onPlaceAtLngLat]);
-
   // create solar marker and remove solar marker if actuall panels is 0
   useEffect(() => {
     if (!map || !mapLoaded) return;
 
     const center = map.getCenter();
-    if (!panelPosition && actualPanels > 0) setPanelPosition([center.lng, center.lat]);
+    if (!panelPosition) setPanelPosition([center.lng, center.lat]);
     
     if (actualPanels > 0) {
       // drawRef.current?.delete(solarMarkerRef.current);
@@ -469,7 +403,7 @@ const MapboxSolarPanelInner = ({ map, mapLoaded }: Props) => {
   return (
     <>
       {!electricalMeterPosition && (currentStepIndex !== 0) && (
-        <div className="pointer-events-none absolute top-[30px] left-1/2 transform -translate-x-1/2 z-10">
+        <div className="absolute top-[30px] left-1/2 transform -translate-x-1/2 z-10">
           <div className="bg-white/70 backdrop-blur-md px-4 py-2 rounded-full shadow-lg text-sm text-gray-700 flex items-center gap-2 transition-opacity duration-300">
           <svg width="12" height="13" viewBox="0 0 12 13" fill="none" xmlns="http://www.w3.org/2000/svg">
               <g filter="url(#filter0_d_1811_38540)">
@@ -494,7 +428,7 @@ const MapboxSolarPanelInner = ({ map, mapLoaded }: Props) => {
       )}
       { actualPanels > 0 && (
   <div className="absolute bottom-[30px] left-1/2 transform -translate-x-1/2 z-10 flex flex-col items-center gap-2">
-    <div className="pointer-events-none bg-white/70 backdrop-blur-md px-4 py-2 rounded-full shadow-lg text-sm font-medium text-gray-700">
+    <div className="bg-white/70 backdrop-blur-md px-4 py-2 rounded-full shadow-lg text-sm font-medium text-gray-700">
       System Size: {systemSizeFeet.widthFeet} ft x {systemSizeFeet.heightFeet} ft
     </div>
 
@@ -504,7 +438,7 @@ const MapboxSolarPanelInner = ({ map, mapLoaded }: Props) => {
         e.preventDefault();
         focusOnPanels();
       }}
-      className="pointer-events-auto flex items-center gap-2 px-4 py-2 bg-white/70 backdrop-blur-md rounded-full shadow-lg text-sm font-medium text-gray-700 hover:bg-white/90 transition-all duration-200"
+      className="flex items-center gap-2 px-4 py-2 bg-white/70 backdrop-blur-md rounded-full shadow-lg text-sm font-medium text-gray-700 hover:bg-white/90 transition-all duration-200"
     >
       <svg
         className="w-4 h-4"

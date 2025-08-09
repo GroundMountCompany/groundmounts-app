@@ -227,11 +227,11 @@ export const MapDrawTool = () => {
   }
 
   return (
-    <div className="w-full h-[60vh] md:h-[600px]">
+    <div className="w-full" style={{ height: '600px' }}>
       <div className="relative w-full h-full rounded-lg overflow-hidden">
         <div 
           ref={mapContainer} 
-          className="absolute inset-0 w-full h-full touch-none md:touch-auto pointer-events-auto" 
+          className="absolute inset-0 w-full h-full" 
         />
         
         {hint && (
@@ -241,7 +241,7 @@ export const MapDrawTool = () => {
         )}
 
         {currentStepIndex === 0 && (
-          <div className="absolute left-4 right-4 bottom-[18px] lg:bottom-4 lg:left-[50%] lg:transform lg:-translate-x-1/2 rounded-md z-30 pointer-events-auto">
+          <div className="absolute left-4 right-4 bottom-[18px] lg:bottom-4 lg:left-[50%] lg:transform lg:-translate-x-1/2 rounded-md z-30">
             <Suspense fallback={
               <div className="bg-white p-4 rounded-lg shadow-lg animate-pulse">
                 <div className="h-10 bg-gray-200 rounded w-full"></div>
@@ -252,12 +252,12 @@ export const MapDrawTool = () => {
           </div>
         )}
 
-        <div className="pointer-events-none absolute top-4 lg:top-8 right-4 lg:right-[30px] shadow-lg rounded-full px-4 py-2 filter backdrop-blur-md bg-white/70 text-xs lg:text-sm z-30">
+        <div className="absolute top-4 lg:top-8 right-4 lg:right-[30px] shadow-lg rounded-full px-4 py-2 filter backdrop-blur-md bg-white/70 text-xs lg:text-sm z-30">
           Zoom : {mapZoomPercentage}%
         </div>
 
         {isAutoLocationError && (
-          <div className="pointer-events-none absolute w-[214px] lg:w-auto top-4 lg:top-8 left-[11px] lg:left-[50%] lg:transform lg:-translate-x-1/2 shadow-lg rounded-[12px] lg:rounded-full p-[9.87px] filter backdrop-blur-md bg-white/70 text-xs z-30 flex flex-col lg:flex-row lg:items-center gap-2 text-[#111111]">
+          <div className="absolute w-[214px] lg:w-auto top-4 lg:top-8 left-[11px] lg:left-[50%] lg:transform lg:-translate-x-1/2 shadow-lg rounded-[12px] lg:rounded-full p-[9.87px] filter backdrop-blur-md bg-white/70 text-xs z-30 flex flex-col lg:flex-row lg:items-center gap-2 text-[#111111]">
             <img src="/images/icons/warning.png" alt="warning" className="w-4 h-4" />
             Locating your address was too tricky! Please type and select your address.
           </div>

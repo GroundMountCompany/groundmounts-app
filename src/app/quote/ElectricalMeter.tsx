@@ -5,19 +5,6 @@ import { useEffect, useRef, useCallback, useMemo, useState } from 'react';
 import mapboxgl from 'mapbox-gl';
 import { updateSheet } from '@/lib/utils';
 
-// Helper types for touch events
-type TouchEvt = mapboxgl.MapLayerTouchEvent | mapboxgl.MapTouchEvent;
-
-// Helper function to convert touch event to lngLat
-function touchEventLngLat(map: mapboxgl.Map, e: TouchEvt): mapboxgl.LngLatLike | null {
-  const te = (e.originalEvent as TouchEvent);
-  if (!te || !te.changedTouches || te.changedTouches.length === 0) return null;
-  const t = te.changedTouches[0];
-  const rect = (map.getContainer() as HTMLElement).getBoundingClientRect();
-  const point = new mapboxgl.Point(t.clientX - rect.left, t.clientY - rect.top);
-  return map.unproject(point);
-}
-
 interface Props {
   map: mapboxgl.Map | null;
   mapLoaded: boolean;
@@ -132,22 +119,10 @@ const ElectricalMeter = ({ map, mapLoaded }: Props) => {
     // Create and add the marker to the map
     const marker = new mapboxgl.Marker({
       element: markerElement,
-      draggable: true,
-      anchor: 'center'
+      draggable: true
     })
       .setLngLat(coordinates)
       .addTo(map);
-
-    // Add mobile-friendly styles
-    markerElement.style.touchAction = 'none';
-    markerElement.style.cursor = 'move';
-    
-    // Increase hit area for mobile
-    const isMobile = window.innerWidth < 768;
-    if (isMobile) {
-      markerElement.style.padding = '12px';
-      markerElement.style.margin = '-12px';
-    }
 
     // Store reference and update position
     markerRef.current = marker;
@@ -197,31 +172,16 @@ const ElectricalMeter = ({ map, mapLoaded }: Props) => {
   useEffect(() => {
     if (!map || !mapLoaded || !drawRef.current || (currentStepIndex === 0)) return;
 
-    // Unified handler for placing meter on click or touch
-    const handleMapPlacement = (lngLat: mapboxgl.LngLatLike) => {
+    const handleMapInteraction = (e: mapboxgl.MapMouseEvent | mapboxgl.MapTouchEvent) => {
       if (!markerRef.current) {
         try {
-          const coords = lngLat as mapboxgl.LngLat;
-          const meterCoords: [number, number] = [coords.lng, coords.lat];
+          const meterCoords: [number, number] = [e.lngLat.lng, e.lngLat.lat];
           setElectricalMeterPosition(meterCoords);
           createCustomMarker(meterCoords);
         } catch (error) {
-          console.error('Error handling map placement:', error);
+          console.error('Error handling map interaction:', error);
         }
       }
-    };
-
-    const handleMapClick = (e: mapboxgl.MapMouseEvent) => {
-      console.log('Meter click detected:', e.lngLat);
-      if (e.lngLat && !markerRef.current) handleMapPlacement(e.lngLat);
-    };
-
-    const handleMapTouch = (e: TouchEvt) => {
-      console.log('Meter touch detected:', e);
-      if (markerRef.current) return;
-      const ll = touchEventLngLat(map, e);
-      console.log('Meter touch converted to coords:', ll);
-      if (ll) handleMapPlacement(ll);
     };
 
     const onDrag = () => {
@@ -322,8 +282,8 @@ const ElectricalMeter = ({ map, mapLoaded }: Props) => {
     }
 
     // Add both click and touchend event handlers
-    map.on('click', handleMapClick);
-    map.on('touchend', handleMapTouch);
+    map.on('click', handleMapInteraction);
+    map.on('touchend', handleMapInteraction);
     console.log("electricalMeterPosition", electricalMeterPosition)
     if (!electricalMeterPosition) return;
 
@@ -343,8 +303,8 @@ const ElectricalMeter = ({ map, mapLoaded }: Props) => {
       clearTimeout(timeout)
       if (map && map.loaded()) {
         try {
-          map.off('click', handleMapClick);
-          map.off('touchend', handleMapTouch);
+          map.off('click', handleMapInteraction);
+          map.off('touchend', handleMapInteraction);
         } catch (error) {
           console.error('Error cleaning up ElectricalMeter:', error);
         }

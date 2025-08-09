@@ -52,7 +52,6 @@ export async function withRetry<T>(
         const wait = baseMs * Math.pow(2, i) + Math.floor(Math.random() * 150);
         const msg = e instanceof Error ? e.message : String(e);
         // surface each failure during backoff
-        // eslint-disable-next-line no-console
         console.error("[SHEETS_RETRY_FAIL]", i + 1, "of", attempts, msg);
         await new Promise((r) => setTimeout(r, wait));
       }

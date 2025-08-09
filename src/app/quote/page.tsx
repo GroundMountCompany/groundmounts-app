@@ -14,7 +14,7 @@ export default function QuotePage() {
   return (
     <ErrorBoundary>
       <QuoteContextProvider>
-        <main className="bg-white max-w-7xl mx-auto px-4 py-[64px] lg:px-10 lg:py-[80px]">
+        <main className="bg-white h-[100dvh] md:h-auto md:max-w-7xl md:mx-auto md:px-4 md:py-[64px] lg:px-10 lg:py-[80px] overflow-hidden md:overflow-visible">
           <PageContainer />
         </main>
       </QuoteContextProvider>

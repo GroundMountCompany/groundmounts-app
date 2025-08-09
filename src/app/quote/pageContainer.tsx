@@ -44,9 +44,10 @@ export const PageContainer = (): JSX.Element => {
   };
 
   return (
-    <>
-      <div className="pb-20 md:pb-0">
-        <div className="flex flex-row">
+    <div className="flex h-[100dvh] w-full flex-col overflow-hidden bg-white md:h-auto md:overflow-visible">
+      {/* Sticky Header with Progress */}
+      <header className="shrink-0 border-b border-neutral-200 bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/70 px-4 py-3 md:border-0 md:bg-transparent md:backdrop-blur-none md:p-0">
+        <div className="flex flex-row gap-4 md:pb-0">
           {/* step progress section */}
           <div className={cn("flex flex-row gap-4", {
             'lg:pl-[29px]': currentStepIndex === 1,
@@ -62,19 +63,23 @@ export const PageContainer = (): JSX.Element => {
             ))}
           </div>
         </div>
-      <div className={cn("flex flex-col lg:flex-row lg:flex-wrap", {
-        'lg:justify-between': currentStepIndex === 3,
-      })}>
-        {/* step content section */}
-        {stepContent.map((step, index) => {
-          if (index !== currentStepIndex) return null;
-          return (
-            <div key={index} className={cn("w-full", {
-              'lg:w-[542px] lg:pl-[29px]': currentStepIndex === 1,
-              'lg:w-[630px]': currentStepIndex === 3,
-              'lg:pl-[40px]': [2,3].includes(currentStepIndex),
-            })}>
-              <div>
+      </header>
+      
+      {/* Scrollable Content Area */}
+      <main className="min-h-0 grow overflow-y-auto overscroll-contain px-4 pb-24 pt-4 sm:px-6 md:overflow-visible md:px-0 md:pb-0 md:pt-0">
+        <div className={cn("flex flex-col lg:flex-row lg:flex-wrap", {
+          'lg:justify-between': currentStepIndex === 3,
+        })}>
+          {/* step content section */}
+          {stepContent.map((step, index) => {
+            if (index !== currentStepIndex) return null;
+            return (
+              <div key={index} className={cn("w-full", {
+                'lg:w-[542px] lg:pl-[29px]': currentStepIndex === 1,
+                'lg:w-[630px]': currentStepIndex === 3,
+                'lg:pl-[40px]': [2,3].includes(currentStepIndex),
+              })}>
+                <div>
                 {
                   currentStepIndex === 1?
                   <>
@@ -132,7 +137,7 @@ export const PageContainer = (): JSX.Element => {
         </div>
         } */}
         </div>
-      </div>
+      </main>
 
       {/* Mobile sticky CTA - hidden on step 2 (final step with form) */}
       {currentStepIndex < 2 && (
@@ -152,6 +157,6 @@ export const PageContainer = (): JSX.Element => {
           </button>
         </div>
       )}
-    </>
+    </div>
   )
 }

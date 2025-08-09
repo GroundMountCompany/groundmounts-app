@@ -227,11 +227,11 @@ export const MapDrawTool = () => {
   }
 
   return (
-    <div className="w-full" style={{ height: '600px' }}>
+    <div className="w-full h-[60vh] md:h-[600px]">
       <div className="relative w-full h-full rounded-lg overflow-hidden">
         <div 
           ref={mapContainer} 
-          className="absolute inset-0 w-full h-full" 
+          className="absolute inset-0 w-full h-full touch-none md:touch-auto pointer-events-auto" 
         />
         
         {hint && (

@@ -11,6 +11,19 @@ interface Props {
   mapLoaded: boolean;
 }
 
+// Helper types for touch events
+type TouchEvt = mapboxgl.MapLayerTouchEvent | mapboxgl.MapTouchEvent;
+
+// Helper function to convert touch event to lngLat
+function touchEventLngLat(map: mapboxgl.Map, e: TouchEvt): mapboxgl.LngLatLike | null {
+  const te = (e.originalEvent as TouchEvent);
+  if (!te || !te.changedTouches || te.changedTouches.length === 0) return null;
+  const t = te.changedTouches[0];
+  const rect = (map.getContainer() as HTMLElement).getBoundingClientRect();
+  const point = new mapboxgl.Point(t.clientX - rect.left, t.clientY - rect.top);
+  return map.unproject(point);
+}
+
 const ROWS = 4; // Fixed number of rows
 const SOLAR_SINGLE_ELEMENT = `
   <div class="block border-2 border-white rounded-xs">
@@ -122,10 +135,22 @@ const MapboxSolarPanelInner = ({ map, mapLoaded }: Props) => {
 
     const marker = new mapboxgl.Marker({
       element: solarMarkerElement,
-      draggable: true
+      draggable: true,
+      anchor: 'center'
     })
       .setLngLat(coordinates)
       .addTo(map);
+
+    // Add mobile-friendly styles
+    solarMarkerElement.style.touchAction = 'none';
+    solarMarkerElement.style.cursor = 'move';
+    
+    // Increase hit area for mobile
+    const isMobile = window.innerWidth < 768;
+    if (isMobile) {
+      solarMarkerElement.style.padding = '10px';
+      solarMarkerElement.style.margin = '-10px';
+    }
 
     solarMarkerRef.current = marker;
   }, [scaleFactor, map, actualPanels]);
@@ -146,6 +171,7 @@ const MapboxSolarPanelInner = ({ map, mapLoaded }: Props) => {
     map.scrollZoom.disable();          // prevent accidental page scroll fights
     map.touchZoomRotate.enable();      // pinch/rotate on mobile
     map.doubleClickZoom.disable();     // avoid jumpy zooms
+    map.dragPan.enable();              // ensure panning works after earlier changes
   }, [map]);
 
   // Attach & detach map listeners with cleanup
@@ -271,12 +297,50 @@ const MapboxSolarPanelInner = ({ map, mapLoaded }: Props) => {
     };
   }, [map, mapLoaded]);
 
+  // Unified placement handler for both click and touch
+  const onPlaceAtLngLat = useCallback((lngLat: mapboxgl.LngLatLike) => {
+    if (!solarMarkerRef.current && actualPanels > 0 && shouldDrawPanels) {
+      const coords = lngLat as mapboxgl.LngLat;
+      const position: [number, number] = [coords.lng, coords.lat];
+      setPanelPosition(position);
+      createPanelMarker(position);
+    }
+  }, [actualPanels, shouldDrawPanels, setPanelPosition, createPanelMarker]);
+
+  // Add click and touch event handlers for panel placement
+  useEffect(() => {
+    if (!map || !mapLoaded || !shouldDrawPanels || actualPanels === 0) return;
+
+    const onClick = (e: mapboxgl.MapMouseEvent) => {
+      if (!e.lngLat) return;
+      onPlaceAtLngLat(e.lngLat);
+    };
+
+    const onTouchEnd = (e: TouchEvt) => {
+      const ll = touchEventLngLat(map, e);
+      if (ll) onPlaceAtLngLat(ll);
+    };
+
+    // Only add listeners if no panel marker exists yet
+    if (!solarMarkerRef.current) {
+      map.on("click", onClick);
+      map.on("touchend", onTouchEnd);
+    }
+
+    return () => {
+      try {
+        map.off("click", onClick);
+        map.off("touchend", onTouchEnd);
+      } catch {}
+    };
+  }, [map, mapLoaded, shouldDrawPanels, actualPanels, onPlaceAtLngLat]);
+
   // create solar marker and remove solar marker if actuall panels is 0
   useEffect(() => {
     if (!map || !mapLoaded) return;
 
     const center = map.getCenter();
-    if (!panelPosition) setPanelPosition([center.lng, center.lat]);
+    if (!panelPosition && actualPanels > 0) setPanelPosition([center.lng, center.lat]);
     
     if (actualPanels > 0) {
       // drawRef.current?.delete(solarMarkerRef.current);

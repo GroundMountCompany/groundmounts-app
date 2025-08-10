@@ -5,16 +5,24 @@ import MapboxDraw from '@mapbox/mapbox-gl-draw';
 import { useEffect, useMemo, useRef, useCallback } from 'react';
 import mapboxgl from 'mapbox-gl';
 import ElectricalMeter from './ElectricalMeter';
+import * as turf from '@turf/turf';
 
 interface Props {
   map: mapboxgl.Map | null;
   mapLoaded: boolean;
-  mode?: "default" | "place-meter" | "preview";
+  mode?: "default" | "place-meter" | "preview" | "design";
   onPlace?: (lngLat: { lng: number; lat: number }) => void;
   initialZoomPercent?: number;
   initialCenter?: [number, number];
   showMeterAtCenter?: boolean;
   disableInteractions?: boolean;
+  // Design mode props
+  designPanels?: number;
+  designGrid?: { rows: number; cols: number };
+  designPanelSize?: { w: number; h: number };
+  meterPosition?: [number, number];
+  arrayPosition?: [number, number] | null;
+  onArrayMove?: (lngLat: { lng: number; lat: number }) => void;
 }
 
 const ROWS = 4; // Fixed number of rows
@@ -47,7 +55,14 @@ const MapboxSolarPanelInner = ({
   initialZoomPercent,
   initialCenter,
   // showMeterAtCenter,
-  disableInteractions 
+  disableInteractions,
+  // Design mode props
+  // designPanels = 0,
+  designGrid = { rows: 1, cols: 1 },
+  designPanelSize = { w: 1.2, h: 2.1 },
+  meterPosition,
+  arrayPosition,
+  onArrayMove
 }: Props) => {
   const {
     mapZoomPercentage,
@@ -69,6 +84,8 @@ const MapboxSolarPanelInner = ({
   const raf = useRef<number | null>(null);
   const initializedRef = useRef(false);
   const previewMarkerRef = useRef<mapboxgl.Marker | null>(null);
+  const arrayMarkerRef = useRef<mapboxgl.Marker | null>(null);
+  const arrayCenterRef = useRef<[number, number] | null>(null);
 
   // Calculate the actual number of panels (rounded up to multiple of 4)
   const actualPanels = useMemo(() => {
@@ -244,6 +261,87 @@ const MapboxSolarPanelInner = ({
     map.touchZoomRotate.enable();      // pinch/rotate on mobile
     map.doubleClickZoom.disable();     // avoid jumpy zooms
   }, [map, mode, disableInteractions]);
+
+  // Design mode - interactive array placement
+  useEffect(() => {
+    if (!map || mode !== "design") return;
+
+    // Helper: create polygon feature for array footprint
+    const arrayPolygon = (center: [number, number], rows: number, cols: number, panelWm: number, panelHm: number) => {
+      const halfW = (cols * panelWm) / 2;
+      const halfH = (rows * panelHm) / 2;
+      const p = turf.point(center);
+      const nw = turf.destination(p, Math.hypot(halfW, halfH) / 1000, 315, "kilometers").geometry.coordinates as [number, number];
+      const ne = turf.destination(p, Math.hypot(halfW, halfH) / 1000, 45,  "kilometers").geometry.coordinates as [number, number];
+      const se = turf.destination(p, Math.hypot(halfW, halfH) / 1000, 135, "kilometers").geometry.coordinates as [number, number];
+      const sw = turf.destination(p, Math.hypot(halfW, halfH) / 1000, 225, "kilometers").geometry.coordinates as [number, number];
+      return turf.polygon([[nw, ne, se, sw, nw]]);
+    };
+
+    // Initialize array center
+    const startCenter: [number, number] = arrayPosition?.length === 2 ? arrayPosition : map.getCenter().toArray() as [number, number];
+    arrayCenterRef.current = startCenter;
+
+    // Draggable marker at center
+    arrayMarkerRef.current = new mapboxgl.Marker({ color: "#0ea5e9", draggable: true }) // cyan handle
+      .setLngLat(startCenter)
+      .addTo(map);
+
+    const onDragEnd = () => {
+      if (!arrayMarkerRef.current) return;
+      const lngLat = arrayMarkerRef.current.getLngLat();
+      arrayCenterRef.current = [lngLat.lng, lngLat.lat];
+      onArrayMove?.({ lng: lngLat.lng, lat: lngLat.lat });
+      renderDesignLayers(); // update footprint + distance
+    };
+    arrayMarkerRef.current.on("dragend", onDragEnd);
+
+    // Also: move array to any click (easier on mobile)
+    const onClick = (e: mapboxgl.MapMouseEvent) => {
+      if (!arrayMarkerRef.current) return;
+      const { lng, lat } = e.lngLat;
+      arrayMarkerRef.current.setLngLat([lng, lat]);
+      arrayCenterRef.current = [lng, lat];
+      onArrayMove?.({ lng, lat });
+      renderDesignLayers();
+    };
+    map.on("click", onClick);
+
+    // Add sources/layers if missing
+    if (!map.getSource("array-footprint")) {
+      map.addSource("array-footprint", { type: "geojson", data: turf.featureCollection([]) });
+      map.addLayer({ id: "array-fill", type: "fill", source: "array-footprint", paint: { "fill-color": "#0ea5e9", "fill-opacity": 0.25 } });
+      map.addLayer({ id: "array-outline", type: "line", source: "array-footprint", paint: { "line-color": "#0284c7", "line-width": 2 } });
+    }
+
+    if (!map.getSource("trench-line")) {
+      map.addSource("trench-line", { type: "geojson", data: turf.featureCollection([]) });
+      map.addLayer({ id: "trench", type: "line", source: "trench-line", paint: { "line-color": "#f59e0b", "line-width": 3 } }); // amber
+    }
+
+    const renderDesignLayers = () => {
+      if (!arrayCenterRef.current) return;
+      const c = arrayCenterRef.current;
+      const rows = designGrid.rows;
+      const cols = designGrid.cols;
+      const size = designPanelSize;
+
+      const poly = arrayPolygon(c, rows, cols, size.w, size.h);
+      (map.getSource("array-footprint") as mapboxgl.GeoJSONSource).setData(poly);
+
+      if (meterPosition?.length === 2) {
+        const line = turf.lineString([meterPosition, c]);
+        (map.getSource("trench-line") as mapboxgl.GeoJSONSource).setData(line);
+      }
+    };
+
+    renderDesignLayers();
+
+    return () => {
+      try { map.off("click", onClick); } catch {}
+      try { arrayMarkerRef.current?.remove(); } catch {}
+    };
+  }, [map, mode, designGrid.rows, designGrid.cols, designPanelSize.w, designPanelSize.h, meterPosition, arrayPosition, onArrayMove]);
 
   // Attach & detach map listeners with cleanup
   useEffect(() => {

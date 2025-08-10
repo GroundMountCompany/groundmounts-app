@@ -8,7 +8,7 @@ import { updateSheet } from '@/lib/utils';
 interface Props {
   map: mapboxgl.Map | null;
   mapLoaded: boolean;
-  mode?: "default" | "place-meter" | "preview";
+  mode?: "default" | "place-meter" | "preview" | "design";
 }
 
 const METER_HTML_ELEMENT = `

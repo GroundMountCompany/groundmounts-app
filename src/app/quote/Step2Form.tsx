@@ -7,7 +7,8 @@ import "./sliderStyle.css";
 import Button from "@/components/common/Button";
 import { useQuoteContext } from "@/contexts/quoteContext";
 import Image from "next/image";
-import MapPreviewBare from "./MapPreviewBare";
+import { estimateMonthlyKWh, kWFromMonthlyKWh, panelsFromkW } from "@/lib/solar";
+import MapDesignCanvas from "./MapDesignCanvas";
 
 interface Step2FormProps {
   showForm: boolean;
@@ -38,39 +39,34 @@ function Step2Form({
   const [showTooltip, setShowTooltip] = useState<boolean>(false);
   const [meterBtn, setMeterBtn] = useState<boolean>(false);
 
-  const shouldContinueButtonDisabled: boolean = useMemo(() => {
-    return avgValue === 0 || totalPanels === 0 || additionalCost === 0;
-  }, [avgValue, totalPanels, additionalCost]);
+  // Recompute target panels whenever bill/offset changes using new solar helpers
+  const computedPanels = useMemo(() => {
+    const monthlyKWh = estimateMonthlyKWh(Number(avgValue || 0));
+    const targetKWh = monthlyKWh * (Number(percentage || 0) / 100);
+    const dcKW = kWFromMonthlyKWh(targetKWh);
+    return panelsFromkW(dcKW);
+  }, [avgValue, percentage]);
 
   useEffect(() => {
-    // Step 1: Calculate monthly and yearly consumption
-    const perKwhRate: number = 0.18;
-    const monthlyConsumption: number = avgValue / perKwhRate;
-    const yearlyConsumption: number = monthlyConsumption * 12;
-    
-    // Step 2: Apply the percentage offset selected by user
-    const consumptionToOffset: number = yearlyConsumption * percentage / 100;
-    
-    // Step 3: Calculate panels needed based on new production rate
-    const solarKwhPerPanel: number = 583; // Updated from 1400
-    const panelWattage: number = 400; // New constant for panel wattage
-    const totalPanelsNeeded: number = consumptionToOffset / solarKwhPerPanel;
-    
-    // Round to nearest multiple of 4 for rectangular layout
-    const roundedPanels = Math.ceil(totalPanelsNeeded / 4) * 4;
-    setTotalPanels(roundedPanels);
-    
-    // Step 4: Calculate system cost based on total watts
-    const costPerWatt: number = 3.50;
-    const systemSizeWatts: number = roundedPanels * panelWattage;
-    const baseQuotation: number = systemSizeWatts * costPerWatt;
-    
-    // Update states
-    setQuotation(baseQuotation);
-    // setPercentage(percentage);
-    setHighestValue(highestValue);
-    // setAvgValue(avgValue);
-  }, [avgValue, percentage, setQuotation, setTotalPanels, setPercentage, setHighestValue, setAvgValue]);
+    if (computedPanels && computedPanels !== totalPanels) {
+      setTotalPanels(computedPanels);
+    }
+  }, [computedPanels, totalPanels, setTotalPanels]);
+
+  // Keep existing quotation calculation logic
+  useEffect(() => {
+    if (totalPanels > 0) {
+      const panelWattage: number = 400; // New constant for panel wattage
+      const costPerWatt: number = 3.50;
+      const systemSizeWatts: number = totalPanels * panelWattage;
+      const baseQuotation: number = systemSizeWatts * costPerWatt;
+      setQuotation(baseQuotation);
+    }
+  }, [totalPanels, setQuotation]);
+
+  const shouldContinueButtonDisabled: boolean = useMemo(() => {
+    return avgValue === 0 || totalPanels === 0;
+  }, [avgValue, totalPanels]);
 
   useEffect(() => {
     if (electricalMeterPosition) {
@@ -102,22 +98,19 @@ function Step2Form({
     setCurrentStepIndex(2);
   }
 
-  // Check if we have a valid meter position
-  const hasMeter =
-    Array.isArray(electricalMeterPosition) &&
-    electricalMeterPosition.length === 2 &&
-    typeof electricalMeterPosition[0] === "number" &&
-    typeof electricalMeterPosition[1] === "number";
+  // Check if we have a valid meter position for interactive map
+  const showMap = Array.isArray(electricalMeterPosition) && electricalMeterPosition.length === 2;
 
   return (
     <div>
-      {/* Map preview - show only if meter position exists and form is shown */}
-      {hasMeter && showForm && (
-        <MapPreviewBare
-          center={[electricalMeterPosition[0], electricalMeterPosition[1]]}
-          zoomPercent={50}
-          className="mb-4 h-[36vh] md:h-72 w-full rounded-xl border border-neutral-200 overflow-hidden"
-        />
+      {/* Interactive map with live panel sizing - show above form inputs */}
+      {showMap && showForm && (
+        <div className="mb-6">
+          <MapDesignCanvas
+            panels={totalPanels || computedPanels || 0}
+            onDistance={() => {}} // Distance calculation handled internally
+          />
+        </div>
       )}
       {
         !showForm ? (

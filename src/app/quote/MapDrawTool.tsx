@@ -14,13 +14,20 @@ if (process.env.NEXT_PUBLIC_MAPBOX_TOKEN) {
   mapboxgl.accessToken = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
 }
 
+// Zoom conversion helper
+function percentFromZoom(z: number, min: number, max: number) {
+  if (max === min) return 0;
+  return Math.round(((z - min) / (max - min)) * 100);
+}
+
 export const MapDrawTool = () => {
   const { coordinates, currentStepIndex, isAutoLocationError, shouldDrawPanels, setMapZoomPercentage, mapZoomPercentage, address } = useQuoteContext();
   
   // All hooks must be called before any conditional returns
   const mapContainer = useRef<HTMLDivElement | null>(null);
   const map = useRef<mapboxgl.Map | null>(null);
-  const [zoom, setZoom] = useState(18.5);
+  const [zoom, setZoom] = useState(17); // Start at min zoom (0%)
+  const initializedRef = useRef(false);
   const [mapLoaded, setMapLoaded] = useState(false);
   const [marker, setMarker] = useState<mapboxgl.Marker | null>(null);
   const [showLocationText, setShowLocationText] = useState(true);
@@ -66,11 +73,18 @@ export const MapDrawTool = () => {
     newMap.touchZoomRotate.enable();    // pinch/rotate on mobile
     newMap.doubleClickZoom.disable();   // avoid jumpy zooms
     map.current = newMap;
-    setMapZoomPercentage(Math.round(((zoom - 17) / 3) * 200));
+    setMapZoomPercentage(0); // Start at 0%
 
     // Wait for map to load before adding controls
     newMap.on('load', () => {
       if (cleanupRef.current) return;
+      
+      // Force map to start at 0% (min zoom) on first load
+      if (!initializedRef.current) {
+        newMap.jumpTo({ zoom: 17 }); // Jump to min zoom (0%)
+        setMapZoomPercentage(0);
+        initializedRef.current = true;
+      }
 
       const nav = new mapboxgl.NavigationControl({
         showCompass: false,
@@ -82,7 +96,8 @@ export const MapDrawTool = () => {
       let zoomTimeout: NodeJS.Timeout;
       newMap.on('zoom', () => {
         const currentZoom = newMap.getZoom();
-        setMapZoomPercentage(Math.round(((currentZoom - 17) / 3) * 200));
+        const percentage = percentFromZoom(currentZoom, 17, 20);
+        setMapZoomPercentage(percentage);
 
         // Clear any pending timeout
         if (zoomTimeout) {
@@ -95,7 +110,7 @@ export const MapDrawTool = () => {
           setMapZoomPercentage(0);
         } else if (currentZoom > 20) {
           newMap.setZoom(20);
-          setMapZoomPercentage(Math.round(((20 - 17) / 3) * 200));
+          setMapZoomPercentage(percentFromZoom(20, 17, 20));
         }
 
         // Debounce the state update
@@ -252,8 +267,15 @@ export const MapDrawTool = () => {
           </div>
         )}
 
-        <div className="absolute top-4 lg:top-8 right-4 lg:right-[30px] shadow-lg rounded-full px-4 py-2 filter backdrop-blur-md bg-white/70 text-xs lg:text-sm z-30">
-          Zoom : {mapZoomPercentage}%
+        <div className="
+          pointer-events-none
+          absolute z-30
+          top-2 left-2 md:top-3 md:left-3
+          rounded-full bg-neutral-900/80 px-3 py-1
+          text-[11px] font-semibold tracking-wide text-white
+          md:text-xs
+        ">
+          Zoom: {mapZoomPercentage ?? 0}%
         </div>
 
         {isAutoLocationError && (

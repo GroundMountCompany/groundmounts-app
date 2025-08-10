@@ -131,8 +131,16 @@ function Step2Form({
       
       {/* Fallback map display for debugging */}
       {!showMap && showForm && (
-        <div className="mb-6 p-4 bg-gray-100 border border-gray-300 rounded">
-          <p className="text-sm text-gray-600">Map not showing. Meter position: {JSON.stringify(electricalMeterPosition)}</p>
+        <div className="mb-6 p-4 bg-blue-50 border border-blue-300 rounded">
+          <p className="text-sm text-blue-800 font-medium">Interactive map will appear after placing your electrical meter.</p>
+          <p className="text-xs text-blue-600 mt-1">Please go back to the previous step to place your meter if you haven't already.</p>
+          <button 
+            onClick={() => setCurrentStepIndex(2)}
+            className="mt-2 px-3 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700"
+          >
+            Go Back to Place Meter
+          </button>
+          <p className="text-xs text-gray-500 mt-2">Debug: Meter position: {JSON.stringify(electricalMeterPosition)}</p>
         </div>
       )}
       {

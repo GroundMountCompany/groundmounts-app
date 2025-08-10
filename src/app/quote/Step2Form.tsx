@@ -102,6 +102,15 @@ function Step2Form({
     setCurrentStepIndex(2);
   }
 
+  // Debug: Log the values to understand why map doesn't show
+  console.log('Step2Form Debug:', {
+    electricalMeterPosition,
+    showForm,
+    isArray: Array.isArray(electricalMeterPosition),
+    length: electricalMeterPosition?.length,
+    shouldShow: Array.isArray(electricalMeterPosition) && electricalMeterPosition.length === 2 && showForm
+  });
+
   return (
     <div>
       {/* Map preview - show only if meter position exists and form is shown */}
@@ -112,6 +121,16 @@ function Step2Form({
             zoomPercent={50} // match the meter screen
             className="h-[36vh] md:h-72 w-full rounded-xl border border-neutral-200 overflow-hidden"
           />
+        </div>
+      )}
+      {/* Fallback debug div to see if component renders */}
+      {showForm && (
+        <div className="mb-4 p-4 bg-yellow-100 border border-yellow-400 rounded">
+          <p><strong>Debug Info:</strong></p>
+          <p>showForm: {String(showForm)}</p>
+          <p>electricalMeterPosition: {JSON.stringify(electricalMeterPosition)}</p>
+          <p>isArray: {String(Array.isArray(electricalMeterPosition))}</p>
+          <p>shouldShowMap: {String(Array.isArray(electricalMeterPosition) && electricalMeterPosition.length === 2 && showForm)}</p>
         </div>
       )}
       {

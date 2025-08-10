@@ -22,6 +22,7 @@ type PaymentMethod = 'unselected' | 'cash' | 'finance';
 type PanelorMeterCoordinates = [number, number];
 
 export interface QuoteContextValues {
+  hydrated: boolean;
   currentStepIndex: number;
   address: string;
   coordinates: Coordinates;
@@ -70,6 +71,9 @@ interface QuoteContextProviderProps {
 }
 
 export const QuoteContextProvider = ({ children }: QuoteContextProviderProps): JSX.Element => {
+
+  // HYDRATION STATE
+  const [hydrated, setHydrated] = useState<boolean>(false);
 
   // STEPS STATE
   const [currentStepIndex, setCurrentStepIndex] = React.useState<number>(0);
@@ -125,37 +129,39 @@ export const QuoteContextProvider = ({ children }: QuoteContextProviderProps): J
     if (typeof window === "undefined") return;
     try {
       const raw = sessionStorage.getItem(STORAGE_KEY);
-      if (!raw) return;
-      const saved = JSON.parse(raw);
-
-      // Hydrate only if not already set
-      if (saved?.electricalMeter && electricalMeter === null) {
-        setElectricalMeter(saved.electricalMeter);
-      }
-      if (Array.isArray(saved?.electricalMeterPosition) && saved.electricalMeterPosition.length === 2 && !electricalMeterPosition) {
-        setElectricalMeterPosition(saved.electricalMeterPosition);
-      }
-      if (Array.isArray(saved?.panelPosition) && saved.panelPosition.length === 2 && !panelPosition) {
-        setPanelPosition(saved.panelPosition);
-      }
-      // Optional: other values
-      if (typeof saved?.percentage === "number" && percentage === 50) {
-        setPercentage(saved.percentage);
-      }
-      if (typeof saved?.averageBill === "number" && avgValue === 0) {
-        setAvgValue(saved.averageBill);
-      }
-      if (typeof saved?.highestBill === "number" && highestValue === 0) {
-        setHighestValue(saved.highestBill);
-      }
-      if (typeof saved?.address === "string" && address === "") {
-        setAddress(saved.address);
-      }
-      if (saved?.coordinates && coordinates.latitude === 32.9007121) {
-        setCoordinates(saved.coordinates);
+      if (raw) {
+        const saved = JSON.parse(raw);
+        // Hydrate only if not already set
+        if (saved?.electricalMeter && electricalMeter === null) {
+          setElectricalMeter(saved.electricalMeter);
+        }
+        if (Array.isArray(saved?.electricalMeterPosition) && saved.electricalMeterPosition.length === 2 && !electricalMeterPosition) {
+          setElectricalMeterPosition(saved.electricalMeterPosition);
+        }
+        if (Array.isArray(saved?.panelPosition) && saved.panelPosition.length === 2 && !panelPosition) {
+          setPanelPosition(saved.panelPosition);
+        }
+        // Optional: other values
+        if (typeof saved?.percentage === "number" && percentage === 50) {
+          setPercentage(saved.percentage);
+        }
+        if (typeof saved?.averageBill === "number" && avgValue === 0) {
+          setAvgValue(saved.averageBill);
+        }
+        if (typeof saved?.highestBill === "number" && highestValue === 0) {
+          setHighestValue(saved.highestBill);
+        }
+        if (typeof saved?.address === "string" && address === "") {
+          setAddress(saved.address);
+        }
+        if (saved?.coordinates && coordinates.latitude === 32.9007121) {
+          setCoordinates(saved.coordinates);
+        }
       }
     } catch (e) {
       console.warn("[QUOTE_CTX] hydrate error", e);
+    } finally {
+      setHydrated(true);
     }
     // run once
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -293,6 +299,7 @@ export const QuoteContextProvider = ({ children }: QuoteContextProviderProps): J
   const stableSetIsAutoLocationError = useCallback(setIsAutoLocationError, []);
 
   const values: QuoteContextValues = React.useMemo(() => ({
+    hydrated,
     currentStepIndex,
     address,
     coordinates,
@@ -335,6 +342,7 @@ export const QuoteContextProvider = ({ children }: QuoteContextProviderProps): J
     createOrUpdateLine,
     updateDistanceAndCost,
   }), [
+    hydrated,
     currentStepIndex,
     address,
     coordinates,

@@ -1,4 +1,4 @@
-"use client"
+"use client";
 
 import React, { useEffect, useMemo, useState } from "react";
 import { cn, updateSheet } from "@/lib/utils";
@@ -9,6 +9,7 @@ import { useQuoteContext } from "@/contexts/quoteContext";
 import Image from "next/image";
 import { estimateMonthlyKWh, kWFromMonthlyKWh, panelsFromkW } from "@/lib/solar";
 import MapDesignCanvas from "./MapDesignCanvas";
+import MapPreviewBare from "./MapPreviewBare";
 
 interface Step2FormProps {
   showForm: boolean;
@@ -20,6 +21,7 @@ function Step2Form({
   setShowForm
 }: Step2FormProps) {
   const {
+    hydrated,
     setCurrentStepIndex,
     setQuotation,
     setTotalPanels,
@@ -104,20 +106,31 @@ function Step2Form({
     typeof electricalMeterPosition[0] === "number" &&
     typeof electricalMeterPosition[1] === "number";
 
-  // Quick debug breadcrumb (temporary)
+  // TEMP debug – remove later
   useEffect(() => {
-    console.log("[CALCS] meter pos", electricalMeterPosition);
-  }, [electricalMeterPosition?.[0], electricalMeterPosition?.[1]]);
+    console.log("[CALCS] hydrated:", hydrated, "meter:", electricalMeterPosition);
+  }, [hydrated, electricalMeterPosition?.[0], electricalMeterPosition?.[1]]);
 
   return (
     <div>
-      {/* Interactive map with live panel sizing */}
-      {hasMeter && (
-        <div className="mb-6">
-          <MapDesignCanvas
-            panels={totalPanels || computedPanels || 0}
-            onDistance={() => {}} // Distance calculation handled internally
-          />
+      {/* Map first */}
+      {hydrated ? (
+        hasMeter ? (
+          <div className="mb-6">
+            <MapDesignCanvas
+              panels={totalPanels || computedPanels || 0}
+              onDistance={() => {}}
+            />
+          </div>
+        ) : (
+          // Fallback: if we somehow lost context, try to show a preview from storage
+          <div className="mb-6">
+            <FallbackPreviewFromStorage />
+          </div>
+        )
+      ) : (
+        <div className="mb-6 h-[36vh] md:h-72 w-full rounded-xl border grid place-items-center text-neutral-500">
+          Loading map…
         </div>
       )}
       {
@@ -277,6 +290,26 @@ function Step2Form({
       }
     </div>
   )
+}
+
+function FallbackPreviewFromStorage() {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = sessionStorage.getItem("gmq:v2");
+    if (!raw) return null;
+    const saved = JSON.parse(raw);
+    const pos = saved?.electricalMeterPosition;
+    if (Array.isArray(pos) && pos.length === 2) {
+      return (
+        <MapPreviewBare
+          center={[pos[0], pos[1]]}
+          zoomPercent={50}
+          className="h-[36vh] md:h-72 w-full rounded-xl border border-neutral-200 overflow-hidden"
+        />
+      );
+    }
+  } catch {}
+  return null;
 }
 
 export default React.memo(Step2Form);

@@ -22,9 +22,21 @@ const SOLAR_SINGLE_ELEMENT = `
 `
 const SOLAR_WRAP_ELEMENT = `<div class="grid grid-flow-col grid-rows-4 p-[6px] bg-[#201d64] transform">`
 
+// Zoom conversion helpers
+function zoomFromPercent(p: number, min: number, max: number) {
+  const clamped = Math.max(0, Math.min(100, p));
+  return min + (max - min) * (clamped / 100);
+}
+function percentFromZoom(z: number, min: number, max: number) {
+  if (max === min) return 0;
+  const p = ((z - min) / (max - min)) * 100;
+  return Math.round(Math.max(0, Math.min(100, p)));
+}
+
 const MapboxSolarPanelInner = ({ map, mapLoaded }: Props) => {
   const {
-    // mapZoomPercentage, // unused
+    mapZoomPercentage,
+    setMapZoomPercentage,
     totalPanels,
     shouldDrawPanels,
     panelPosition,
@@ -40,6 +52,7 @@ const MapboxSolarPanelInner = ({ map, mapLoaded }: Props) => {
 
   const solarMarkerRef = useRef<mapboxgl.Marker | null>(null);
   const raf = useRef<number | null>(null);
+  const initializedRef = useRef(false);
 
   // Calculate the actual number of panels (rounded up to multiple of 4)
   const actualPanels = useMemo(() => {
@@ -47,6 +60,33 @@ const MapboxSolarPanelInner = ({ map, mapLoaded }: Props) => {
   }, [totalPanels]);
 
   console.log('actualPanels', actualPanels)
+
+  // Default zoom to 0% on first load
+  useEffect(() => {
+    if (!map || initializedRef.current) return;
+
+    const min = map.getMinZoom();
+    const max = map.getMaxZoom();
+
+    // Start at 0% (min zoom)
+    map.jumpTo({ zoom: zoomFromPercent(0, min, max) });
+    try { setMapZoomPercentage?.(0); } catch {}
+
+    const handleZoom = () => {
+      const p = percentFromZoom(map.getZoom(), min, max);
+      setMapZoomPercentage?.(p);
+    };
+    map.on("zoomend", handleZoom);
+    map.on("moveend", handleZoom);
+
+    initializedRef.current = true;
+    return () => {
+      try {
+        map.off("zoomend", handleZoom);
+        map.off("moveend", handleZoom);
+      } catch {}
+    };
+  }, [map, setMapZoomPercentage]);
   const getMetersPerPixel = (latitude: number, zoom: number) => {
     const earthCircumference = 40075016.686; // in meters
     const latitudeRadians = latitude * (Math.PI / 180);
@@ -455,6 +495,57 @@ const MapboxSolarPanelInner = ({ map, mapLoaded }: Props) => {
     </button>
   </div>
 )}
+
+      {/* Zoom HUD: bottom-right, stays above safe-area and clear of sticky CTA */}
+      <div
+        className="
+          absolute z-30 right-3
+          bottom-[calc(env(safe-area-inset-bottom)+84px)] md:bottom-3
+          flex items-center gap-2 rounded-full bg-neutral-900/85 px-2 py-1
+          text-[12px] text-white shadow-lg pointer-events-auto
+        "
+        role="group"
+        aria-label="Zoom controls"
+      >
+        <button
+          type="button"
+          className="grid h-8 w-8 place-items-center rounded-full bg-white/10 hover:bg-white/20 active:bg-white/30"
+          onClick={() => {
+            if (!map) return;
+            const min = map.getMinZoom();
+            const max = map.getMaxZoom();
+            // step by 10% for clarity
+            const p = percentFromZoom(map.getZoom(), min, max);
+            const next = Math.max(0, p - 10);
+            map.easeTo({ zoom: zoomFromPercent(next, min, max), duration: 250 });
+            try { setMapZoomPercentage?.(next); } catch {}
+          }}
+          aria-label="Zoom out"
+        >
+          –
+        </button>
+
+        <span className="px-2 font-semibold tabular-nums">
+          Zoom: {mapZoomPercentage ?? 0}%
+        </span>
+
+        <button
+          type="button"
+          className="grid h-8 w-8 place-items-center rounded-full bg-white/10 hover:bg-white/20 active:bg-white/30"
+          onClick={() => {
+            if (!map) return;
+            const min = map.getMinZoom();
+            const max = map.getMaxZoom();
+            const p = percentFromZoom(map.getZoom(), min, max);
+            const next = Math.min(100, p + 10);
+            map.easeTo({ zoom: zoomFromPercent(next, min, max), duration: 250 });
+            try { setMapZoomPercentage?.(next); } catch {}
+          }}
+          aria-label="Zoom in"
+        >
+          +
+        </button>
+      </div>
 
       <ElectricalMeter map={map} mapLoaded={mapLoaded} />
     </>

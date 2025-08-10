@@ -21,7 +21,7 @@ function percentFromZoom(z: number, min: number, max: number) {
 }
 
 export const MapDrawTool = () => {
-  const { coordinates, currentStepIndex, isAutoLocationError, shouldDrawPanels, setMapZoomPercentage, mapZoomPercentage, address } = useQuoteContext();
+  const { coordinates, currentStepIndex, isAutoLocationError, shouldDrawPanels, setMapZoomPercentage, address } = useQuoteContext();
   
   // All hooks must be called before any conditional returns
   const mapContainer = useRef<HTMLDivElement | null>(null);
@@ -33,7 +33,6 @@ export const MapDrawTool = () => {
   const [showLocationText, setShowLocationText] = useState(true);
   const [hasValidCoordinates, setHasValidCoordinates] = useState(false);
   const cleanupRef = useRef(false);
-  const [hint, setHint] = useState(true);
 
   // Track when coordinates are set from AddressInput or geolocation
   useEffect(() => {
@@ -215,19 +214,6 @@ export const MapDrawTool = () => {
     }
   }, [shouldDrawPanels]);
 
-  // Auto-hide hint on touch/drag interaction
-  useEffect(() => {
-    if (!map.current) return;
-    const hide = () => setHint(false);
-    map.current.once("touchstart", hide);
-    map.current.once("dragstart", hide);
-    return () => {
-      try {
-        map.current?.off("touchstart", hide);
-        map.current?.off("dragstart", hide);
-      } catch {}
-    };
-  }, [mapLoaded]); // Use mapLoaded instead of map.current
 
   // Guard against missing Mapbox token - moved after all hooks
   if (!process.env.NEXT_PUBLIC_MAPBOX_TOKEN) {
@@ -249,11 +235,6 @@ export const MapDrawTool = () => {
           className="relative h-full w-full select-none touch-none pointer-events-auto" 
         />
         
-        {hint && (
-          <div className="pointer-events-none fixed inset-x-0 top-0 z-30 mx-auto w-fit rounded-b-lg bg-black/70 px-3 py-1 text-xs text-white">
-            Use two fingers to move, pinch to zoom
-          </div>
-        )}
 
         {currentStepIndex === 0 && (
           <div className="absolute left-2 right-2 top-2 lg:left-4 lg:right-4 lg:top-4 z-30">
@@ -267,16 +248,6 @@ export const MapDrawTool = () => {
           </div>
         )}
 
-        <div className="
-          pointer-events-none
-          absolute z-30
-          top-2 left-2 md:top-3 md:left-3
-          rounded-full bg-neutral-900/80 px-3 py-1
-          text-[11px] font-semibold tracking-wide text-white
-          md:text-xs
-        ">
-          Zoom: {mapZoomPercentage ?? 0}%
-        </div>
 
         {isAutoLocationError && (
           <div className="absolute w-[214px] lg:w-auto top-4 lg:top-8 left-[11px] lg:left-[50%] lg:transform lg:-translate-x-1/2 shadow-lg rounded-[12px] lg:rounded-full p-[9.87px] filter backdrop-blur-md bg-white/70 text-xs z-30 flex flex-col lg:flex-row lg:items-center gap-2 text-[#111111]">

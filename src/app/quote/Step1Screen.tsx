@@ -23,9 +23,6 @@ export default function Step1Screen() {
         <p className="text-[clamp(12px,1.9vw,14px)] font-semibold text-neutral-800">
           Step 1 • Find your property
         </p>
-        <p className="mt-0.5 text-[clamp(11px,1.6vw,13px)] text-neutral-500">
-          Search your address, then pan/zoom the map to center your land.
-        </p>
       </div>
 
       {/* Map fills remaining space, never hidden behind CTA */}

@@ -227,11 +227,11 @@ export const MapDrawTool = () => {
   }
 
   return (
-    <div className="w-full" style={{ height: '600px' }}>
-      <div className="relative w-full h-full rounded-lg overflow-hidden">
+    <div className="w-full h-full">
+      <div className="relative w-full h-full overflow-hidden">
         <div 
           ref={mapContainer} 
-          className="absolute inset-0 w-full h-full" 
+          className="relative h-full w-full select-none touch-none pointer-events-auto" 
         />
         
         {hint && (
@@ -241,10 +241,10 @@ export const MapDrawTool = () => {
         )}
 
         {currentStepIndex === 0 && (
-          <div className="absolute left-4 right-4 bottom-[18px] lg:bottom-4 lg:left-[50%] lg:transform lg:-translate-x-1/2 rounded-md z-30">
+          <div className="absolute left-2 right-2 top-2 lg:left-4 lg:right-4 lg:top-4 z-30">
             <Suspense fallback={
-              <div className="bg-white p-4 rounded-lg shadow-lg animate-pulse">
-                <div className="h-10 bg-gray-200 rounded w-full"></div>
+              <div className="bg-white p-2 rounded-lg shadow-lg animate-pulse">
+                <div className="h-8 bg-gray-200 rounded w-full"></div>
               </div>
             }>
               <AddressInput />

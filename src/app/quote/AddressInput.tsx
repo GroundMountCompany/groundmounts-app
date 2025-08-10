@@ -187,10 +187,10 @@ export const AddressInput = (): JSX.Element => {
   };
 
   return (
-    <div className="w-full max-w-md mx-auto relative">
-      <form onSubmit={handleSubmit} className="space-y-4">
-        <div className="flex flex-row">
-          <div className="relative grow shrink-0 lg:grow-0">
+    <div className="w-full relative">
+      <form onSubmit={handleSubmit} className="space-y-2">
+        <div className="flex flex-row gap-2">
+          <div className="relative flex-1">
             <input
               type="text"
               id="address"
@@ -205,7 +205,7 @@ export const AddressInput = (): JSX.Element => {
                 // Fire DesignStart on first focus
                 try { fireDesignStartOnce(); } catch {}
               }}
-              className="shadow-lg rounded-full px-4 py-2 filter backdrop-blur-md bg-white/70 text-xs text-[#111111] placeholder:text-xs placeholder:text-[#111111] outline-none w-full lg:w-[433px] h-[42px]"
+              className="h-12 w-full rounded-xl border border-neutral-300 bg-white px-4 text-base outline-none ring-0 transition focus:border-neutral-400 focus:ring-2 focus:ring-neutral-200 placeholder:text-neutral-500"
               placeholder="Find My Location"
               autoComplete="off"
             />
@@ -220,13 +220,13 @@ export const AddressInput = (): JSX.Element => {
             {showSuggestions && suggestions.length > 0 && (
               <div
                 ref={suggestionsRef}
-                className="absolute z-10 bottom-[48px] w-full shadow-lg rounded-lg filter backdrop-blur-md bg-white/70"
+                className="absolute z-10 top-[52px] w-full shadow-lg rounded-lg bg-white border border-neutral-200"
               >
                 {suggestions.map((suggestion) => (
                   <button
                     key={suggestion.id}
                     type="button"
-                    className="w-full px-4 py-2 text-left transition-all duration-300 hover:bg-gray-100 focus:outline-none focus:bg-gray-100 text-xs text-[#111111] first:rounded-t-lg last:rounded-b-lg"
+                    className="w-full px-4 py-2 text-left transition-all duration-300 hover:bg-gray-100 focus:outline-none focus:bg-gray-100 text-sm text-neutral-700 first:rounded-t-lg last:rounded-b-lg"
                     onClick={() => handleSuggestionClick(suggestion)}
                   >
                     {suggestion.place_name}
@@ -237,8 +237,9 @@ export const AddressInput = (): JSX.Element => {
           </div>
           <button
             type="submit"
-            className={cn("hover:bg-custom-primary bg-custom-black text-white transition-all duration-300 px-4 py-2 rounded-full px-6 py-3 text-xs ml-3 lg:ml-4 filter backdrop-blur-md", {
-              'bg-[#C0C0C0] cursor-not-allowed': shouldContinueButtonDisabled,
+            className={cn("h-12 px-4 rounded-xl text-sm font-semibold transition-all duration-300 shrink-0", {
+              'bg-gray-400 text-white cursor-not-allowed': shouldContinueButtonDisabled,
+              'bg-black text-white hover:bg-gray-800': !shouldContinueButtonDisabled,
             })}
             disabled={shouldContinueButtonDisabled}
           >

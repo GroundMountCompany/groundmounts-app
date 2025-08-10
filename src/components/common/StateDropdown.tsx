@@ -37,14 +37,6 @@ export default function StateDropdown({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const router = useRouter();
 
-  // Fire DesignStart exactly once per session
-  const fireDesignStartOnce = () => {
-    if (typeof window === "undefined") return;
-    const KEY = "gm_design_start_fired";
-    if (sessionStorage.getItem(KEY)) return;
-    sessionStorage.setItem(KEY, "1");
-    fbqSafe("trackCustom", "DesignStart");
-  };
 
   const handleGetQuote = () => {
     if (!selectedState) return;
@@ -60,8 +52,7 @@ export default function StateDropdown({
     /* -------------------------------- */
 
     setTimeout(() => {
-      fireDesignStartOnce();
-      router.push(`/quiz?state=${encodeURIComponent(selectedState)}`);
+      router.push(`/quote?state=${encodeURIComponent(selectedState)}`);
     }, 150);
   };
 

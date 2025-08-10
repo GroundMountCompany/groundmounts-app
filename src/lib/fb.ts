@@ -28,3 +28,12 @@ export function flushFbqQueue(): void {
   }
   window._fbqQueue = [];
 }
+
+// Fire DesignStart exactly once per session
+export function fireDesignStartOnce(): void {
+  if (typeof window === "undefined") return;
+  const KEY = "gm_design_start_fired";
+  if (sessionStorage.getItem(KEY)) return;
+  sessionStorage.setItem(KEY, "1");
+  fbqSafe("trackCustom", "DesignStart");
+}

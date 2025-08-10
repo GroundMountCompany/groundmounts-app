@@ -12,8 +12,12 @@ enum QuoteStep {
 }
 
 export default function Step2MeterMap() {
-  const { setElectricalMeter, setElectricalMeterPosition, setCurrentStepIndex } = useQuoteContext();
-  const [hasPlaced, setHasPlaced] = useState(false);
+  const { setElectricalMeter, setElectricalMeterPosition, setCurrentStepIndex, electricalMeterPosition } = useQuoteContext();
+  
+  // Check if meter was already placed (from persisted state)
+  const [hasPlaced, setHasPlaced] = useState(() => {
+    return Array.isArray(electricalMeterPosition) && electricalMeterPosition.length === 2;
+  });
 
   const handlePlace = useCallback((lngLat: { lng: number; lat: number }) => {
     setElectricalMeter({

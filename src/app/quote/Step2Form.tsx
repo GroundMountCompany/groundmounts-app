@@ -98,49 +98,26 @@ function Step2Form({
     setCurrentStepIndex(2);
   }
 
-  // Check if we have a valid meter position for interactive map
-  const showMap = Array.isArray(electricalMeterPosition) && electricalMeterPosition.length === 2;
-  
-  // Debug logging to understand why map isn't showing
-  console.log('Debug Step2Form:', {
-    showMap,
-    showForm,
-    electricalMeterPosition,
-    totalPanels,
-    computedPanels,
-    avgValue,
-    percentage
-  });
+  const hasMeter =
+    Array.isArray(electricalMeterPosition) &&
+    electricalMeterPosition.length === 2 &&
+    typeof electricalMeterPosition[0] === "number" &&
+    typeof electricalMeterPosition[1] === "number";
+
+  // Quick debug breadcrumb (temporary)
+  useEffect(() => {
+    console.log("[CALCS] meter pos", electricalMeterPosition);
+  }, [electricalMeterPosition?.[0], electricalMeterPosition?.[1]]);
 
   return (
     <div>
-      {/* Debug info - remove later */}
-      <div className="mb-2 text-xs text-gray-500">
-        Debug: showMap={String(showMap)}, showForm={String(showForm)}, panels={totalPanels || computedPanels || 0}
-      </div>
-      
-      {/* Interactive map with live panel sizing - show above form inputs */}
-      {showMap && showForm && (
+      {/* Interactive map with live panel sizing */}
+      {hasMeter && (
         <div className="mb-6">
           <MapDesignCanvas
             panels={totalPanels || computedPanels || 0}
             onDistance={() => {}} // Distance calculation handled internally
           />
-        </div>
-      )}
-      
-      {/* Fallback map display for debugging */}
-      {!showMap && showForm && (
-        <div className="mb-6 p-4 bg-blue-50 border border-blue-300 rounded">
-          <p className="text-sm text-blue-800 font-medium">Interactive map will appear after placing your electrical meter.</p>
-          <p className="text-xs text-blue-600 mt-1">Please go back to the previous step to place your meter if you haven&apos;t already.</p>
-          <button 
-            onClick={() => setCurrentStepIndex(2)}
-            className="mt-2 px-3 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700"
-          >
-            Go Back to Place Meter
-          </button>
-          <p className="text-xs text-gray-500 mt-2">Debug: Meter position: {JSON.stringify(electricalMeterPosition)}</p>
         </div>
       )}
       {

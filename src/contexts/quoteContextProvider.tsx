@@ -4,6 +4,9 @@ import { Feature, LineString } from 'geojson';
 import * as turf from '@turf/turf';
 import { v4 as uuid } from 'uuid';
 
+// Storage key for persisting quote state
+const STORAGE_KEY = "gmq:v2";
+
 interface Coordinates {
   latitude: number;
   longitude: number;
@@ -117,15 +120,86 @@ export const QuoteContextProvider = ({ children }: QuoteContextProviderProps): J
   const isAddressCoordinatesCompleted: boolean = !isAddressEmpty && !isCoordinatesZero;
   const shouldDrawPanels = useMemo(() => totalPanels > 0, [totalPanels]);
 
+  // Hydrate state from sessionStorage on mount
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const raw = sessionStorage.getItem(STORAGE_KEY);
+      if (!raw) return;
+      const saved = JSON.parse(raw);
+
+      // Hydrate only if not already set
+      if (saved?.electricalMeter && electricalMeter === null) {
+        setElectricalMeter(saved.electricalMeter);
+      }
+      if (Array.isArray(saved?.electricalMeterPosition) && saved.electricalMeterPosition.length === 2 && !electricalMeterPosition) {
+        setElectricalMeterPosition(saved.electricalMeterPosition);
+      }
+      if (Array.isArray(saved?.panelPosition) && saved.panelPosition.length === 2 && !panelPosition) {
+        setPanelPosition(saved.panelPosition);
+      }
+      // Optional: other values
+      if (typeof saved?.percentage === "number" && percentage === 50) {
+        setPercentage(saved.percentage);
+      }
+      if (typeof saved?.averageBill === "number" && avgValue === 0) {
+        setAvgValue(saved.averageBill);
+      }
+      if (typeof saved?.highestBill === "number" && highestValue === 0) {
+        setHighestValue(saved.highestBill);
+      }
+      if (typeof saved?.address === "string" && address === "") {
+        setAddress(saved.address);
+      }
+      if (saved?.coordinates && coordinates.latitude === 32.9007121) {
+        setCoordinates(saved.coordinates);
+      }
+    } catch (e) {
+      console.warn("[QUOTE_CTX] hydrate error", e);
+    }
+    // run once
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Persist state changes to sessionStorage
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const payload = {
+        electricalMeter,
+        electricalMeterPosition,
+        panelPosition,
+        percentage,
+        averageBill: avgValue,
+        highestBill: highestValue,
+        address,
+        coordinates,
+      };
+      sessionStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+    } catch (e) {
+      console.warn("[QUOTE_CTX] persist error", e);
+    }
+  }, [
+    electricalMeter,
+    electricalMeterPosition?.[0],
+    electricalMeterPosition?.[1],
+    panelPosition?.[0],
+    panelPosition?.[1],
+    percentage,
+    avgValue,
+    highestValue,
+    address,
+    coordinates.latitude,
+    coordinates.longitude,
+  ]);
+
   useEffect(() => {
     if (currentStepIndex === 0) {
+      // Only reset quotation-related state on step 0, preserve meter positions
       setTotalPanels(0);
       setQuotation(0);
       setPaymentMethod('unselected');
-      setElectricalMeter(null);
       setAdditionalCost(0);
-      setPanelPosition(null);
-      setElectricalMeterPosition(null);
       lineFeatureIdRef.current = null;
     }
     if (currentStepIndex === 1) {

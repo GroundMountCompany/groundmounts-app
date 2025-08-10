@@ -20,7 +20,18 @@ function percentFromZoom(z: number, min: number, max: number) {
   return Math.round(((z - min) / (max - min)) * 100);
 }
 
-export const MapDrawTool = () => {
+function zoomFromPercent(p: number, min: number, max: number) {
+  const clamped = Math.max(0, Math.min(100, p));
+  return min + (max - min) * (clamped / 100);
+}
+
+interface MapDrawToolProps {
+  mode?: "place-meter" | "default" | string;
+  onPlace?: (lngLat: { lng: number; lat: number }) => void;
+  initialZoomPercent?: number;
+}
+
+export const MapDrawTool = ({ mode = "default", onPlace, initialZoomPercent }: MapDrawToolProps = {}) => {
   const { coordinates, currentStepIndex, isAutoLocationError, shouldDrawPanels, setMapZoomPercentage, address } = useQuoteContext();
   
   // All hooks must be called before any conditional returns
@@ -33,6 +44,7 @@ export const MapDrawTool = () => {
   const [showLocationText, setShowLocationText] = useState(true);
   const [hasValidCoordinates, setHasValidCoordinates] = useState(false);
   const cleanupRef = useRef(false);
+  const meterMarkerRef = useRef<mapboxgl.Marker | null>(null);
 
   // Track when coordinates are set from AddressInput or geolocation
   useEffect(() => {
@@ -72,16 +84,19 @@ export const MapDrawTool = () => {
     newMap.touchZoomRotate.enable();    // pinch/rotate on mobile
     newMap.doubleClickZoom.disable();   // avoid jumpy zooms
     map.current = newMap;
-    setMapZoomPercentage(0); // Start at 0%
 
     // Wait for map to load before adding controls
     newMap.on('load', () => {
       if (cleanupRef.current) return;
       
-      // Force map to start at 0% (min zoom) on first load
+      // Set initial zoom based on props or default to 0%
       if (!initializedRef.current) {
-        newMap.jumpTo({ zoom: 17 }); // Jump to min zoom (0%)
-        setMapZoomPercentage(0);
+        const min = newMap.getMinZoom();
+        const max = newMap.getMaxZoom();
+        const startPercent = typeof initialZoomPercent === "number" ? initialZoomPercent : 0;
+        const clamped = Math.max(0, Math.min(100, startPercent));
+        newMap.jumpTo({ zoom: zoomFromPercent(clamped, min, max) });
+        setMapZoomPercentage(clamped);
         initializedRef.current = true;
       }
 
@@ -214,6 +229,36 @@ export const MapDrawTool = () => {
     }
   }, [shouldDrawPanels]);
 
+  // Click-to-place meter marker functionality
+  useEffect(() => {
+    if (!map.current) return;
+
+    const onMapClick = (e: mapboxgl.MapMouseEvent) => {
+      if (mode !== "place-meter") return;
+
+      const { lng, lat } = e.lngLat;
+
+      // Create or move one meter marker
+      if (!meterMarkerRef.current) {
+        meterMarkerRef.current = new mapboxgl.Marker({ color: "#f59e0b" }) // amber color
+          .setLngLat([lng, lat])
+          .addTo(map.current!);
+      } else {
+        meterMarkerRef.current.setLngLat([lng, lat]);
+      }
+
+      // Notify parent component so it can enable Continue button
+      onPlace?.({ lng, lat });
+    };
+
+    map.current.on("click", onMapClick);
+
+    return () => {
+      try { 
+        map.current?.off("click", onMapClick); 
+      } catch {}
+    };
+  }, [mode, onPlace]);
 
   // Guard against missing Mapbox token - moved after all hooks
   if (!process.env.NEXT_PUBLIC_MAPBOX_TOKEN) {

@@ -133,7 +133,7 @@ function Step2Form({
       {!showMap && showForm && (
         <div className="mb-6 p-4 bg-blue-50 border border-blue-300 rounded">
           <p className="text-sm text-blue-800 font-medium">Interactive map will appear after placing your electrical meter.</p>
-          <p className="text-xs text-blue-600 mt-1">Please go back to the previous step to place your meter if you haven't already.</p>
+          <p className="text-xs text-blue-600 mt-1">Please go back to the previous step to place your meter if you haven&apos;t already.</p>
           <button 
             onClick={() => setCurrentStepIndex(2)}
             className="mt-2 px-3 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700"

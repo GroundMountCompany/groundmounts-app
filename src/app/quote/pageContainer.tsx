@@ -65,27 +65,7 @@ export const PageContainer = (): JSX.Element => {
   }
 
   if (currentStep === QuoteStep.MeterIntro) {
-    return (
-      <>
-        <Step2MeterIntro />
-        {/* Mobile sticky CTA */}
-        <div className="fixed bottom-0 left-0 right-0 z-40 border-t bg-white/90 backdrop-blur px-4 py-3 md:hidden">
-          <button
-            type="button"
-            onClick={handleContinue}
-            disabled={isContinueDisabled}
-            className={cn(
-              "w-full h-12 rounded-xl text-base font-semibold shadow active:scale-[.99] hover:opacity-95",
-              isContinueDisabled 
-                ? "bg-gray-400 text-white cursor-not-allowed" 
-                : "bg-black text-white"
-            )}
-          >
-            I Understand, Continue
-          </button>
-        </div>
-      </>
-    );
+    return <Step2MeterIntro />;
   }
 
   if (currentStep === QuoteStep.MeterMap) {

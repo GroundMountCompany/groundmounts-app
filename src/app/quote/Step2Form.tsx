@@ -100,9 +100,25 @@ function Step2Form({
 
   // Check if we have a valid meter position for interactive map
   const showMap = Array.isArray(electricalMeterPosition) && electricalMeterPosition.length === 2;
+  
+  // Debug logging to understand why map isn't showing
+  console.log('Debug Step2Form:', {
+    showMap,
+    showForm,
+    electricalMeterPosition,
+    totalPanels,
+    computedPanels,
+    avgValue,
+    percentage
+  });
 
   return (
     <div>
+      {/* Debug info - remove later */}
+      <div className="mb-2 text-xs text-gray-500">
+        Debug: showMap={String(showMap)}, showForm={String(showForm)}, panels={totalPanels || computedPanels || 0}
+      </div>
+      
       {/* Interactive map with live panel sizing - show above form inputs */}
       {showMap && showForm && (
         <div className="mb-6">
@@ -110,6 +126,13 @@ function Step2Form({
             panels={totalPanels || computedPanels || 0}
             onDistance={() => {}} // Distance calculation handled internally
           />
+        </div>
+      )}
+      
+      {/* Fallback map display for debugging */}
+      {!showMap && showForm && (
+        <div className="mb-6 p-4 bg-gray-100 border border-gray-300 rounded">
+          <p className="text-sm text-gray-600">Map not showing. Meter position: {JSON.stringify(electricalMeterPosition)}</p>
         </div>
       )}
       {

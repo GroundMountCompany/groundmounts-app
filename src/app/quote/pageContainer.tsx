@@ -10,6 +10,7 @@ import { JSX, useState } from 'react';
 import { StepContent } from '@/types';
 import Step3Form from './Step3Form';
 import Step1Screen from './Step1Screen';
+import Step2Screen from './Step2Screen';
 
 export const PageContainer = (): JSX.Element => {
   const { currentStepIndex, setCurrentStepIndex, shouldContinueButtonDisabled } = useQuoteContext();
@@ -67,6 +68,11 @@ export const PageContainer = (): JSX.Element => {
         </div>
       </>
     );
+  }
+
+  // Render Step 2 with dedicated two-phase layout
+  if (currentStepIndex === 1) {
+    return <Step2Screen />;
   }
 
   return (

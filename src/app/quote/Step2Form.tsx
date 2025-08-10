@@ -7,7 +7,7 @@ import "./sliderStyle.css";
 import Button from "@/components/common/Button";
 import { useQuoteContext } from "@/contexts/quoteContext";
 import Image from "next/image";
-import MapPreview from "./MapPreview";
+import MapPreviewBare from "./MapPreviewBare";
 
 interface Step2FormProps {
   showForm: boolean;
@@ -102,36 +102,22 @@ function Step2Form({
     setCurrentStepIndex(2);
   }
 
-  // Debug: Log the values to understand why map doesn't show
-  console.log('Step2Form Debug:', {
-    electricalMeterPosition,
-    showForm,
-    isArray: Array.isArray(electricalMeterPosition),
-    length: electricalMeterPosition?.length,
-    shouldShow: Array.isArray(electricalMeterPosition) && electricalMeterPosition.length === 2 && showForm
-  });
+  // Check if we have a valid meter position
+  const hasMeter =
+    Array.isArray(electricalMeterPosition) &&
+    electricalMeterPosition.length === 2 &&
+    typeof electricalMeterPosition[0] === "number" &&
+    typeof electricalMeterPosition[1] === "number";
 
   return (
     <div>
       {/* Map preview - show only if meter position exists and form is shown */}
-      {Array.isArray(electricalMeterPosition) && electricalMeterPosition.length === 2 && showForm && (
-        <div className="mb-6">
-          <MapPreview
-            center={[electricalMeterPosition[0], electricalMeterPosition[1]]}
-            zoomPercent={50} // match the meter screen
-            className="h-[36vh] md:h-72 w-full rounded-xl border border-neutral-200 overflow-hidden"
-          />
-        </div>
-      )}
-      {/* Fallback debug div to see if component renders */}
-      {showForm && (
-        <div className="mb-4 p-4 bg-yellow-100 border border-yellow-400 rounded">
-          <p><strong>Debug Info:</strong></p>
-          <p>showForm: {String(showForm)}</p>
-          <p>electricalMeterPosition: {JSON.stringify(electricalMeterPosition)}</p>
-          <p>isArray: {String(Array.isArray(electricalMeterPosition))}</p>
-          <p>shouldShowMap: {String(Array.isArray(electricalMeterPosition) && electricalMeterPosition.length === 2 && showForm)}</p>
-        </div>
+      {hasMeter && showForm && (
+        <MapPreviewBare
+          center={[electricalMeterPosition[0], electricalMeterPosition[1]]}
+          zoomPercent={50}
+          className="mb-4 h-[36vh] md:h-72 w-full rounded-xl border border-neutral-200 overflow-hidden"
+        />
       )}
       {
         !showForm ? (

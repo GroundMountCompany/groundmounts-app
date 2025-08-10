@@ -2,63 +2,57 @@
 
 import { cn } from '@/lib/utils';
 import Step2Form from './Step2Form';
-// import ErrorTest from '@/components/test/ErrorTest'; // Temporarily disabled
-// import Step4Summary from './Step4Summary';
-import MapDrawTool from './MapDrawTool';
 import { useQuoteContext } from '@/contexts/quoteContext';
-import { JSX, useState } from 'react';
-import { StepContent } from '@/types';
+import { JSX } from 'react';
 import Step3Form from './Step3Form';
 import Step1Screen from './Step1Screen';
-import Step2Screen from './Step2Screen';
+import Step2MeterIntro from './Step2MeterIntro';
+import Step2MeterMap from './Step2MeterMap';
+enum QuoteStep {
+  Address = 0,
+  MeterIntro = 1,
+  MeterMap = 2,
+  EnergyCalcs = 3,
+}
 
 export const PageContainer = (): JSX.Element => {
-  const { currentStepIndex, setCurrentStepIndex, shouldContinueButtonDisabled } = useQuoteContext();
-  const [showForm, setShowForm] = useState(false)
+  const { currentStepIndex, setCurrentStepIndex, shouldContinueButtonDisabled, electricalMeterPosition } = useQuoteContext();
+  
+  const currentStep = currentStepIndex as QuoteStep;
 
-  const stepContent: StepContent[] = [{
-    label: "Step 1 - Information",
-    title: "Property Location and Information",
-    description: "Let's get started by locating your home and the ideal spot for your solar panels."
-  },{
-    label: "Step 2 - Energy Calculations",
-    title: "Energy Consumption and Offset",
-    description: "Tell us about your energy usage to determine the perfect solar panel system size for your needs."
-  },{
-    label: "Step 3 - Your Custom groundmount is ready!",
-    description: "Enter your best email and phone number, and we'll send the quote in seconds.",
-  },
-  // {
-  //   label: "Step 4 - Let's schedule a call",
-  //   title: "Book A Call",
-  //   description: "Free consultation 30 mins about your plan, Book now"
-  // }
-];
+  const isContinueDisabled = (() => {
+    if (currentStep === QuoteStep.MeterMap) {
+      return !electricalMeterPosition; // must place meter to continue
+    }
+    return shouldContinueButtonDisabled;
+  })();
+
+  const handleContinue = () => {
+    if (currentStep === QuoteStep.Address) setCurrentStepIndex(QuoteStep.MeterIntro);
+    else if (currentStep === QuoteStep.MeterIntro) setCurrentStepIndex(QuoteStep.MeterMap);
+    else if (currentStep === QuoteStep.MeterMap) setCurrentStepIndex(QuoteStep.EnergyCalcs);
+    else if (currentStep === QuoteStep.EnergyCalcs) setCurrentStepIndex(4); // Step 5 (final form)
+    else setCurrentStepIndex(currentStepIndex + 1);
+  };
 
   const handleClickStep = (index: number): void => {
     setCurrentStepIndex(index);
   };
 
-  const goNext = (): void => {
-    if (currentStepIndex < stepContent.length - 1) {
-      setCurrentStepIndex(currentStepIndex + 1);
-    }
-  };
-
-  // Render Step 1 with dedicated mobile-optimized layout
-  if (currentStepIndex === 0) {
+  // Render dedicated mobile-optimized layouts for specific steps
+  if (currentStep === QuoteStep.Address) {
     return (
       <>
         <Step1Screen />
-        {/* Mobile sticky CTA for Step 1 */}
+        {/* Mobile sticky CTA */}
         <div className="fixed bottom-0 left-0 right-0 z-40 border-t bg-white/90 backdrop-blur px-4 py-3 md:hidden">
           <button
             type="button"
-            onClick={goNext}
-            disabled={shouldContinueButtonDisabled}
+            onClick={handleContinue}
+            disabled={isContinueDisabled}
             className={cn(
               "w-full h-12 rounded-xl text-base font-semibold shadow active:scale-[.99] hover:opacity-95",
-              shouldContinueButtonDisabled 
+              isContinueDisabled 
                 ? "bg-gray-400 text-white cursor-not-allowed" 
                 : "bg-black text-white"
             )}
@@ -70,21 +64,111 @@ export const PageContainer = (): JSX.Element => {
     );
   }
 
-  // Render Step 2 with dedicated two-phase layout
-  if (currentStepIndex === 1) {
-    return <Step2Screen />;
+  if (currentStep === QuoteStep.MeterIntro) {
+    return (
+      <>
+        <Step2MeterIntro />
+        {/* Mobile sticky CTA */}
+        <div className="fixed bottom-0 left-0 right-0 z-40 border-t bg-white/90 backdrop-blur px-4 py-3 md:hidden">
+          <button
+            type="button"
+            onClick={handleContinue}
+            disabled={isContinueDisabled}
+            className={cn(
+              "w-full h-12 rounded-xl text-base font-semibold shadow active:scale-[.99] hover:opacity-95",
+              isContinueDisabled 
+                ? "bg-gray-400 text-white cursor-not-allowed" 
+                : "bg-black text-white"
+            )}
+          >
+            I Understand, Continue
+          </button>
+        </div>
+      </>
+    );
   }
 
+  if (currentStep === QuoteStep.MeterMap) {
+    return (
+      <>
+        <Step2MeterMap />
+        {/* Mobile sticky CTA */}
+        <div className="fixed bottom-0 left-0 right-0 z-40 border-t bg-white/90 backdrop-blur px-4 py-3 md:hidden">
+          <button
+            type="button"
+            onClick={handleContinue}
+            disabled={isContinueDisabled}
+            className={cn(
+              "w-full h-12 rounded-xl text-base font-semibold shadow active:scale-[.99] hover:opacity-95",
+              isContinueDisabled 
+                ? "bg-gray-400 text-white cursor-not-allowed" 
+                : "bg-black text-white"
+            )}
+          >
+            Continue
+          </button>
+        </div>
+      </>
+    );
+  }
+
+  // Energy Calculations step (formerly Step 2)
+  if (currentStep === QuoteStep.EnergyCalcs) {
+    return (
+      <>
+        <div className="pb-20 md:pb-0">
+          <div className="flex flex-row">
+            {/* step progress section */}
+            <div className="flex flex-row gap-4 lg:pl-[29px]">
+              {Array.from({ length: 5 }, (_, index) => (
+                <div key={index} className={cn("h-[5px] w-[37px] cursor-pointer", {
+                  'bg-custom-primary': index <= currentStepIndex,
+                  'bg-neutral-200': index > currentStepIndex,
+                })}
+                  onClick={() => handleClickStep(index)}
+                />
+              ))}
+            </div>
+          </div>
+          
+          <div className="flex flex-col lg:flex-row lg:flex-wrap">
+            <div className="w-full lg:w-[542px] lg:pl-[29px]">
+              <p className='text-lg leading-[19.8px] mt-6'>Step 4 - Energy Calculations</p>
+              <h3 className='text-4xl font-medium leading-[41.6px] mt-4'>Energy Consumption and Offset</h3>
+              <p className='text-lg mt-4'>Tell us about your energy usage to determine the perfect solar panel system size for your needs.</p>
+              <Step2Form showForm={true} setShowForm={() => {}} />
+            </div>
+          </div>
+        </div>
+
+        {/* Mobile sticky CTA */}
+        <div className="fixed bottom-0 left-0 right-0 z-40 border-t bg-white/90 backdrop-blur px-4 py-3 md:hidden">
+          <button
+            type="button"
+            onClick={handleContinue}
+            disabled={isContinueDisabled}
+            className={cn(
+              "w-full h-12 rounded-xl text-base font-semibold shadow active:scale-[.99] hover:opacity-95",
+              isContinueDisabled 
+                ? "bg-gray-400 text-white cursor-not-allowed" 
+                : "bg-black text-white"
+            )}
+          >
+            Continue
+          </button>
+        </div>
+      </>
+    );
+  }
+
+  // Final form step (Step 5)
   return (
     <>
       <div className="pb-20 md:pb-0">
         <div className="flex flex-row">
           {/* step progress section */}
-          <div className={cn("flex flex-row gap-4", {
-            'lg:pl-[29px]': currentStepIndex === 1,
-            'lg:pl-[40px]': [2,3].includes(currentStepIndex),
-          })}>
-            {Array.from({ length: stepContent.length }, (_, index) => (
+          <div className="flex flex-row gap-4 lg:pl-[40px]">
+            {Array.from({ length: 5 }, (_, index) => (
               <div key={index} className={cn("h-[5px] w-[37px] cursor-pointer", {
                 'bg-custom-primary': index <= currentStepIndex,
                 'bg-neutral-200': index > currentStepIndex,
@@ -94,96 +178,22 @@ export const PageContainer = (): JSX.Element => {
             ))}
           </div>
         </div>
-      <div className={cn("flex flex-col lg:flex-row lg:flex-wrap", {
-        'lg:justify-between': currentStepIndex === 3,
-      })}>
-        {/* step content section */}
-        {stepContent.map((step, index) => {
-          if (index !== currentStepIndex) return null;
-          return (
-            <div key={index} className={cn("w-full", {
-              'lg:w-[542px] lg:pl-[29px]': currentStepIndex === 1,
-              'lg:w-[630px]': currentStepIndex === 3,
-              'lg:pl-[40px]': [2,3].includes(currentStepIndex),
-            })}>
-              <div>
-                {
-                  currentStepIndex === 1?
-                  <>
-                  {
-                    showForm?
-                    <>
-                      <p className='text-lg leading-[19.8px] mt-6'>{step.label}</p>
-                      <h3 className='text-4xl font-medium leading-[41.6px] mt-4'>{step.title}</h3>
-                      <p className='text-lg mt-4'>{step.description}</p>
-                    </>
-                    :null
-                  }
-                  </>
-                  :
-                  <>
-                    <p className='text-lg leading-[19.8px] mt-6'>{step.label}</p>
-                    <h3 className='text-4xl font-medium leading-[41.6px] mt-4'>{step.title}</h3>
-                    {
-                      currentStepIndex === 2?
-                      <>
-                        <h3 className='text-2xl font-medium leading-[41.6px] mt-4'>What to expect:</h3>
-                        <ul className="mb-3">
-                            <li>Detailed price breakdown.</li>
-                            <li>Tax credit amount.</li>
-                            <li>Material List.</li>
-                            <li>Option to book a free call with a professional.</li>
-                        </ul>
-                      </>
-                      :null
-                    }
-                    <p className='text-lg mt-4'>{step.description}</p>
-                  </>
-                }
-                {currentStepIndex === 1 && <Step2Form showForm={showForm} setShowForm={setShowForm} />}
-                {/* {currentStepIndex === 2 && <Step3Content />} */}
-                {currentStepIndex === 2 && <Step3Form />}
-                {/* {currentStepIndex === 3 && <Step4Form />} */}
-              </div>
-            </div>
-          );
-        })}
-        <div className={cn("mt-10 w-full", {
-          'hidden': [2,3].includes(currentStepIndex),
-          'lg:ml-[80px] grow shrink-0 basis-1/2': currentStepIndex === 1
-        })}>
-          <MapDrawTool />
-        </div>
-        {/* {currentStepIndex === 1 &&
-        <div className='w-full py-[80px] px-10'>
-          <Step2Table />
-        </div>} */}
-        {/* {currentStepIndex === 3 &&
-        <div className='w-full lg:w-[515px] pr-0 lg:pr-10 lg:block hidden'>
-          <Step4Summary />
-        </div>
-        } */}
+        
+        <div className="flex flex-col lg:flex-row lg:flex-wrap lg:justify-between">
+          <div className="w-full lg:w-[630px] lg:pl-[40px]">
+            <p className='text-lg leading-[19.8px] mt-6'>Step 5 - Your Custom groundmount is ready!</p>
+            <h3 className='text-2xl font-medium leading-[41.6px] mt-4'>What to expect:</h3>
+            <ul className="mb-3">
+              <li>Detailed price breakdown.</li>
+              <li>Tax credit amount.</li>
+              <li>Material List.</li>
+              <li>Option to book a free call with a professional.</li>
+            </ul>
+            <p className='text-lg mt-4'>Enter your best email and phone number, and we&apos;ll send the quote in seconds.</p>
+            <Step3Form />
+          </div>
         </div>
       </div>
-
-      {/* Mobile sticky CTA - hidden on step 2 (final step with form) */}
-      {currentStepIndex < 2 && (
-        <div className="fixed bottom-0 left-0 right-0 z-40 border-t bg-white/90 backdrop-blur px-4 py-3 md:hidden">
-          <button
-            type="button"
-            onClick={goNext}
-            disabled={shouldContinueButtonDisabled}
-            className={cn(
-              "w-full h-12 rounded-xl text-base font-semibold shadow active:scale-[.99] hover:opacity-95",
-              shouldContinueButtonDisabled 
-                ? "bg-gray-400 text-white cursor-not-allowed" 
-                : "bg-black text-white"
-            )}
-          >
-            Continue
-          </button>
-        </div>
-      )}
     </>
   )
 }

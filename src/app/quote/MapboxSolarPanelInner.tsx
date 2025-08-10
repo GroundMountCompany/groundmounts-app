@@ -9,6 +9,12 @@ import ElectricalMeter from './ElectricalMeter';
 interface Props {
   map: mapboxgl.Map | null;
   mapLoaded: boolean;
+  mode?: "default" | "place-meter" | "preview";
+  onPlace?: (lngLat: { lng: number; lat: number }) => void;
+  initialZoomPercent?: number;
+  initialCenter?: [number, number];
+  showMeterAtCenter?: boolean;
+  disableInteractions?: boolean;
 }
 
 const ROWS = 4; // Fixed number of rows
@@ -33,7 +39,16 @@ function percentFromZoom(z: number, min: number, max: number) {
   return Math.round(Math.max(0, Math.min(100, p)));
 }
 
-const MapboxSolarPanelInner = ({ map, mapLoaded }: Props) => {
+const MapboxSolarPanelInner = ({ 
+  map, 
+  mapLoaded, 
+  mode = "default",
+  // onPlace,
+  initialZoomPercent,
+  initialCenter,
+  // showMeterAtCenter,
+  disableInteractions 
+}: Props) => {
   const {
     mapZoomPercentage,
     setMapZoomPercentage,
@@ -53,6 +68,7 @@ const MapboxSolarPanelInner = ({ map, mapLoaded }: Props) => {
   const solarMarkerRef = useRef<mapboxgl.Marker | null>(null);
   const raf = useRef<number | null>(null);
   const initializedRef = useRef(false);
+  const previewMarkerRef = useRef<mapboxgl.Marker | null>(null);
 
   // Calculate the actual number of panels (rounded up to multiple of 4)
   const actualPanels = useMemo(() => {
@@ -61,16 +77,22 @@ const MapboxSolarPanelInner = ({ map, mapLoaded }: Props) => {
 
   console.log('actualPanels', actualPanels)
 
-  // Default zoom to 0% on first load
+  // Initialize map zoom and center
   useEffect(() => {
     if (!map || initializedRef.current) return;
 
     const min = map.getMinZoom();
     const max = map.getMaxZoom();
 
-    // Start at 0% (min zoom)
-    map.jumpTo({ zoom: zoomFromPercent(0, min, max) });
-    try { setMapZoomPercentage?.(0); } catch {}
+    const startPercent = typeof initialZoomPercent === "number" ? initialZoomPercent : 0;
+    const clamped = Math.max(0, Math.min(100, startPercent));
+
+    // Center first if provided (for preview mode)
+    if (initialCenter && Array.isArray(initialCenter)) {
+      map.jumpTo({ center: initialCenter, zoom: zoomFromPercent(clamped, min, max) });
+    } else {
+      map.jumpTo({ zoom: zoomFromPercent(clamped, min, max) });
+    }
 
     const handleZoom = () => {
       const p = percentFromZoom(map.getZoom(), min, max);
@@ -79,6 +101,17 @@ const MapboxSolarPanelInner = ({ map, mapLoaded }: Props) => {
     map.on("zoomend", handleZoom);
     map.on("moveend", handleZoom);
 
+    // Disable interactions if requested (for preview mode)
+    if (disableInteractions) {
+      map.scrollZoom.disable();
+      map.boxZoom.disable();
+      map.dragRotate.disable();
+      map.dragPan.disable();
+      map.keyboard.disable();
+      map.doubleClickZoom.disable();
+      map.touchZoomRotate.disable();
+    }
+
     initializedRef.current = true;
     return () => {
       try {
@@ -86,7 +119,7 @@ const MapboxSolarPanelInner = ({ map, mapLoaded }: Props) => {
         map.off("moveend", handleZoom);
       } catch {}
     };
-  }, [map, setMapZoomPercentage]);
+  }, [map, setMapZoomPercentage, initialZoomPercent, initialCenter, disableInteractions]);
   const getMetersPerPixel = (latitude: number, zoom: number) => {
     const earthCircumference = 40075016.686; // in meters
     const latitudeRadians = latitude * (Math.PI / 180);
@@ -180,13 +213,37 @@ const MapboxSolarPanelInner = ({ map, mapLoaded }: Props) => {
     // Handle map drag logic here if needed
   }, []);
 
+  // Preview marker for preview mode
+  useEffect(() => {
+    if (!map) return;
+    if (mode !== "preview") return;
+    if (!initialCenter) return;
+
+    // Place or update fixed marker at center
+    if (!previewMarkerRef.current) {
+      previewMarkerRef.current = new mapboxgl.Marker({ color: "#f59e0b" })
+        .setLngLat(initialCenter)
+        .addTo(map);
+    } else {
+      previewMarkerRef.current.setLngLat(initialCenter);
+    }
+
+    return () => {
+      // Keep marker visible across unmounts of preview; cleanup handled in component unmount
+    };
+  }, [map, mode, initialCenter]);
+
   // Mobile gesture defaults
   useEffect(() => {
     if (!map) return;
+    if (mode === "preview" && disableInteractions) {
+      // In preview mode with disabled interactions, don't enable any gestures
+      return;
+    }
     map.scrollZoom.disable();          // prevent accidental page scroll fights
     map.touchZoomRotate.enable();      // pinch/rotate on mobile
     map.doubleClickZoom.disable();     // avoid jumpy zooms
-  }, [map]);
+  }, [map, mode, disableInteractions]);
 
   // Attach & detach map listeners with cleanup
   useEffect(() => {
@@ -547,7 +604,7 @@ const MapboxSolarPanelInner = ({ map, mapLoaded }: Props) => {
         </button>
       </div>
 
-      <ElectricalMeter map={map} mapLoaded={mapLoaded} />
+      <ElectricalMeter map={map} mapLoaded={mapLoaded} mode={mode} />
     </>
   );
 };

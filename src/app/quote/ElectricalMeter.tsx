@@ -8,6 +8,7 @@ import { updateSheet } from '@/lib/utils';
 interface Props {
   map: mapboxgl.Map | null;
   mapLoaded: boolean;
+  mode?: "default" | "place-meter" | "preview";
 }
 
 const METER_HTML_ELEMENT = `
@@ -52,7 +53,7 @@ const METER_HTML_ELEMENT = `
     </svg>
   </div>
 `
-const ElectricalMeter = ({ map, mapLoaded }: Props) => {
+const ElectricalMeter = ({ map, mapLoaded, mode = "default" }: Props) => {
   const {
     shouldDrawPanels,
     electricalMeter,
@@ -171,6 +172,7 @@ const ElectricalMeter = ({ map, mapLoaded }: Props) => {
 
   useEffect(() => {
     if (!map || !mapLoaded || !drawRef.current || (currentStepIndex === 0)) return;
+    if (mode === "preview") return; // Don't attach click listeners in preview mode
 
     const handleMapInteraction = (e: mapboxgl.MapMouseEvent | mapboxgl.MapTouchEvent) => {
       if (!markerRef.current) {

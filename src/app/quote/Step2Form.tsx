@@ -7,6 +7,7 @@ import "./sliderStyle.css";
 import Button from "@/components/common/Button";
 import { useQuoteContext } from "@/contexts/quoteContext";
 import Image from "next/image";
+import MapPreview from "./MapPreview";
 
 interface Step2FormProps {
   showForm: boolean;
@@ -103,6 +104,16 @@ function Step2Form({
 
   return (
     <div>
+      {/* Map preview - show only if meter position exists and form is shown */}
+      {Array.isArray(electricalMeterPosition) && electricalMeterPosition.length === 2 && showForm && (
+        <div className="mb-6">
+          <MapPreview
+            center={[electricalMeterPosition[0], electricalMeterPosition[1]]}
+            zoomPercent={50} // match the meter screen
+            className="h-[36vh] md:h-72 w-full rounded-xl border border-neutral-200 overflow-hidden"
+          />
+        </div>
+      )}
       {
         !showForm ? (
           <div className="mt-10">

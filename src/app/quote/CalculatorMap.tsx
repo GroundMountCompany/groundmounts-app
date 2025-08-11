@@ -21,7 +21,12 @@ export default function CalculatorMap() {
     if (Array.isArray(electricalMeterPosition) && electricalMeterPosition.length === 2) {
       return [electricalMeterPosition[0], electricalMeterPosition[1]];
     }
-    return [coordinates.longitude, coordinates.latitude];
+    // Use coordinates if they're valid (not 0,0)
+    if (coordinates.longitude !== 0 && coordinates.latitude !== 0) {
+      return [coordinates.longitude, coordinates.latitude];
+    }
+    // Default to US center if no valid coordinates
+    return [-98.5795, 39.8283]; // US center
   }, [coordinates.longitude, coordinates.latitude, electricalMeterPosition]);
 
   useEffect(() => {

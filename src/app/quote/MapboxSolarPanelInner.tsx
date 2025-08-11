@@ -7,7 +7,7 @@ import mapboxgl from 'mapbox-gl';
 import ElectricalMeter from './ElectricalMeter';
 import * as turf from '@turf/turf';
 import distance from '@turf/distance';
-import { point as turfPoint, lineString as turfLineString } from '@turf/helpers';
+import { point as turfPoint } from '@turf/helpers';
 
 
 
@@ -248,8 +248,15 @@ const MapboxSolarPanelInner = ({
     }
 
     try {
-      // Add the dashed line (must include meta: 'feature' for your styles)
-      const feature = turfLineString([meter, panels], { meta: 'feature' });
+      // Add the dashed line - create proper GeoJSON feature
+      const feature = {
+        type: 'Feature' as const,
+        properties: { meta: 'feature' },
+        geometry: {
+          type: 'LineString' as const,
+          coordinates: [meter, panels]
+        }
+      };
       const added = drawRef.current.add(feature);
       // mapbox-draw returns id(s)
       lineFeatureIdRef.current = Array.isArray(added) ? added[0] : (added as unknown as string);
@@ -498,6 +505,11 @@ const MapboxSolarPanelInner = ({
         ]
       });
       map.addControl(drawRef.current);
+      
+      // After Draw is initialized, update the line if both positions exist
+      if (panelPosition && electricalMeterPosition) {
+        updateMeterPanelLine(panelPosition, electricalMeterPosition);
+      }
     }
 
     return () => {
@@ -510,7 +522,7 @@ const MapboxSolarPanelInner = ({
         drawRef.current = null;
       }
     };
-  }, [map, mapLoaded]);
+  }, [map, mapLoaded, panelPosition, electricalMeterPosition, updateMeterPanelLine]);
 
   // create solar marker and remove solar marker if actuall panels is 0
   useEffect(() => {

@@ -16,6 +16,8 @@ interface Props {
   initialCenter?: [number, number];
   showMeterAtCenter?: boolean;
   disableInteractions?: boolean;
+  /** When false, do NOT mount the ElectricalMeter placement UI (calculator step). */
+  allowMeterPlacement?: boolean;
   // Design mode props
   designPanels?: number;
   designGrid?: { rows: number; cols: number };
@@ -56,6 +58,7 @@ const MapboxSolarPanelInner = ({
   initialCenter,
   // showMeterAtCenter,
   disableInteractions,
+  allowMeterPlacement = true,
   // Design mode props
   // designPanels = 0,
   designGrid = { rows: 1, cols: 1 },
@@ -702,7 +705,7 @@ const MapboxSolarPanelInner = ({
         </button>
       </div>
 
-      <ElectricalMeter map={map} mapLoaded={mapLoaded} mode={mode} />
+      {allowMeterPlacement && <ElectricalMeter map={map} mapLoaded={mapLoaded} mode={mode} />}
     </>
   );
 };

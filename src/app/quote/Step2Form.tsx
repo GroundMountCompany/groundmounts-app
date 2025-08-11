@@ -8,8 +8,8 @@ import Button from "@/components/common/Button";
 import { useQuoteContext } from "@/contexts/quoteContext";
 import Image from "next/image";
 import { estimateMonthlyKWh, kWFromMonthlyKWh, panelsFromkW } from "@/lib/solar";
-import MapDesignCanvas from "./MapDesignCanvas";
-import MapPreviewBare from "./MapPreviewBare";
+import dynamic from 'next/dynamic';
+const CalculatorMap = dynamic(() => import('./CalculatorMap'), { ssr: false });
 
 interface Step2FormProps {
   showForm: boolean;
@@ -100,12 +100,6 @@ function Step2Form({
     setCurrentStepIndex(2);
   }
 
-  const hasMeter =
-    Array.isArray(electricalMeterPosition) &&
-    electricalMeterPosition.length === 2 &&
-    typeof electricalMeterPosition[0] === "number" &&
-    typeof electricalMeterPosition[1] === "number";
-
   // TEMP debug – remove later
   useEffect(() => {
     console.log("[CALCS] hydrated:", hydrated, "meter:", electricalMeterPosition);
@@ -114,23 +108,14 @@ function Step2Form({
   return (
     <div>
       {/* Map first */}
-      {hydrated ? (
-        hasMeter ? (
-          <div className="mb-6">
-            <MapDesignCanvas
-              panels={totalPanels || computedPanels || 0}
-              onDistance={() => {}}
-            />
-          </div>
-        ) : (
-          // Fallback: if we somehow lost context, try to show a preview from storage
-          <div className="mb-6">
-            <FallbackPreviewFromStorage />
-          </div>
-        )
+      {Array.isArray(electricalMeterPosition) && electricalMeterPosition.length === 2 ? (
+        <div className="mb-6">
+          <CalculatorMap />
+        </div>
       ) : (
-        <div className="mb-6 h-[36vh] md:h-72 w-full rounded-xl border grid place-items-center text-neutral-500">
-          Loading map…
+        // If somehow user skipped meter step, show a gentle nudge
+        <div className="mb-6 rounded-lg bg-blue-50 border border-blue-200 p-4 text-sm text-blue-800">
+          Interactive map will appear after placing your electrical meter. Please go back and drop the meter pin.
         </div>
       )}
       {
@@ -290,26 +275,6 @@ function Step2Form({
       }
     </div>
   )
-}
-
-function FallbackPreviewFromStorage() {
-  if (typeof window === "undefined") return null;
-  try {
-    const raw = sessionStorage.getItem("gmq:v2");
-    if (!raw) return null;
-    const saved = JSON.parse(raw);
-    const pos = saved?.electricalMeterPosition;
-    if (Array.isArray(pos) && pos.length === 2) {
-      return (
-        <MapPreviewBare
-          center={[pos[0], pos[1]]}
-          zoomPercent={50}
-          className="h-[36vh] md:h-72 w-full rounded-xl border border-neutral-200 overflow-hidden"
-        />
-      );
-    }
-  } catch {}
-  return null;
 }
 
 export default React.memo(Step2Form);

@@ -306,7 +306,6 @@ export const MapDrawTool = ({ mode = "default", onPlace, initialZoomPercent }: M
             map={map.current} 
             mapLoaded={mapLoaded}
             mode={mode}
-            onPlace={onPlace}
           />
         )}
       </div>

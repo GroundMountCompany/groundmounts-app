@@ -13,7 +13,6 @@ interface Props {
   map: mapboxgl.Map | null;
   mapLoaded: boolean;
   mode?: "default" | "place-meter" | "preview" | "design";
-  onPlace?: (lngLat: { lng: number; lat: number }) => void;
   initialZoomPercent?: number;
   initialCenter?: [number, number];
   showMeterAtCenter?: boolean;
@@ -55,7 +54,6 @@ const MapboxSolarPanelInner = ({
   map, 
   mapLoaded, 
   mode = "default",
-  onPlace,
   initialZoomPercent,
   initialCenter,
   // showMeterAtCenter,
@@ -746,7 +744,7 @@ const MapboxSolarPanelInner = ({
         </button>
       </div>
 
-      {allowMeterPlacement && mode !== "place-meter" && <ElectricalMeter map={map} mapLoaded={mapLoaded} mode={mode} onPlace={onPlace} />}
+      {allowMeterPlacement && mode !== "place-meter" && <ElectricalMeter map={map} mapLoaded={mapLoaded} mode={mode} />}
     </>
   );
 };

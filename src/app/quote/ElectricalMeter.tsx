@@ -8,8 +8,7 @@ import { updateSheet } from '@/lib/utils';
 interface Props {
   map: mapboxgl.Map | null;
   mapLoaded: boolean;
-  mode?: "default" | "place-meter" | "preview" | "design";
-  onPlace?: (lngLat: { lng: number; lat: number }) => void;
+  mode?: "default" | "preview" | "design";
 }
 
 const METER_HTML_ELEMENT = `
@@ -54,7 +53,7 @@ const METER_HTML_ELEMENT = `
     </svg>
   </div>
 `
-const ElectricalMeter = ({ map, mapLoaded, mode = "default", onPlace }: Props) => {
+const ElectricalMeter = ({ map, mapLoaded, mode = "default" }: Props) => {
   const {
     shouldDrawPanels,
     electricalMeter,
@@ -173,12 +172,9 @@ const ElectricalMeter = ({ map, mapLoaded, mode = "default", onPlace }: Props) =
 
   useEffect(() => {
     if (!map || !mapLoaded || !drawRef.current || (currentStepIndex === 0)) return;
-    if (mode === "preview" || mode === "place-meter") return; // Don't attach click listeners in preview or place-meter mode
+    if (mode === "preview") return; // Don't attach click listeners in preview mode
 
     const handleMapInteraction = (e: mapboxgl.MapMouseEvent | mapboxgl.MapTouchEvent) => {
-      // Extra safety check - don't handle clicks in place-meter mode
-      if (mode === "place-meter") return;
-      
       if (!markerRef.current) {
         try {
           const meterCoords: [number, number] = [e.lngLat.lng, e.lngLat.lat];
@@ -287,11 +283,9 @@ const ElectricalMeter = ({ map, mapLoaded, mode = "default", onPlace }: Props) =
       markerRef.current.on('dragend', onDragEnd);
     }
 
-    // Only add click handlers if we're not in place-meter mode
-    if (mode !== "place-meter") {
-      map.on('click', handleMapInteraction);
-      map.on('touchend', handleMapInteraction);
-    }
+    // Add click and touch handlers
+    map.on('click', handleMapInteraction);
+    map.on('touchend', handleMapInteraction);
     console.log("electricalMeterPosition", electricalMeterPosition)
     if (!electricalMeterPosition) return;
 
@@ -311,11 +305,8 @@ const ElectricalMeter = ({ map, mapLoaded, mode = "default", onPlace }: Props) =
       clearTimeout(timeout)
       if (map && map.loaded()) {
         try {
-          // Only clean up event listeners if they were added
-          if (mode !== "place-meter") {
-            map.off('click', handleMapInteraction);
-            map.off('touchend', handleMapInteraction);
-          }
+          map.off('click', handleMapInteraction);
+          map.off('touchend', handleMapInteraction);
         } catch (error) {
           console.error('Error cleaning up ElectricalMeter:', error);
         }

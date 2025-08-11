@@ -61,11 +61,16 @@ export const MapDrawTool = ({ mode = "default", onPlace }: MapDrawToolProps = {}
 
     cleanupRef.current = false;
 
-    // Initialize map
+    // Initialize map with sensible defaults when coordinates are not yet valid
+    const hasCoords = coordinates.longitude !== 0 && coordinates.latitude !== 0;
+    const initialCenter: [number, number] = hasCoords 
+      ? [coordinates.longitude, coordinates.latitude]
+      : [-98.5795, 39.8283]; // US center as default
+    
     const newMap = new mapboxgl.Map({
       container: mapContainer.current,
       style: 'mapbox://styles/mapbox/satellite-v9',
-      center: [coordinates.longitude, coordinates.latitude],
+      center: initialCenter,
       zoom: START_ZOOM,
       pitch: 0,
       bearing: 0,

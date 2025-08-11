@@ -7,6 +7,35 @@ import { v4 as uuid } from 'uuid';
 // Storage key for persisting quote state
 const STORAGE_KEY = "gmq:v2";
 
+// Specific key for electrical meter position persistence
+const METER_KEY = 'gm_electrical_meter_pos_v1';
+
+// Helper functions for meter persistence
+function readMeterFromStorage(): PanelorMeterCoordinates | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = sessionStorage.getItem(METER_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) && parsed.length === 2 ? [parsed[0], parsed[1]] : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeMeterToStorage(pos: PanelorMeterCoordinates | null): void {
+  if (typeof window === 'undefined') return;
+  try {
+    if (pos) {
+      sessionStorage.setItem(METER_KEY, JSON.stringify(pos));
+    } else {
+      sessionStorage.removeItem(METER_KEY);
+    }
+  } catch {
+    // Silent fail
+  }
+}
+
 interface Coordinates {
   latitude: number;
   longitude: number;
@@ -64,6 +93,7 @@ export interface QuoteContextValues {
   setElectricalMeterPosition: (value: PanelorMeterCoordinates | null) => void;
   createOrUpdateLine: (meterCoords: PanelorMeterCoordinates, panelCoords: PanelorMeterCoordinates, draw: MapboxDraw) => void;
   updateDistanceAndCost: (meterCoords: [number, number], panelCoords: [number, number]) => void;
+  ensureMeterFromStorage: () => void;
 }
 
 interface QuoteContextProviderProps {
@@ -137,6 +167,11 @@ export const QuoteContextProvider = ({ children }: QuoteContextProviderProps): J
         }
         if (Array.isArray(saved?.electricalMeterPosition) && saved.electricalMeterPosition.length === 2 && !electricalMeterPosition) {
           setElectricalMeterPosition(saved.electricalMeterPosition);
+        }
+        // Also check the dedicated meter storage
+        const meterFromStorage = readMeterFromStorage();
+        if (meterFromStorage && !electricalMeterPosition) {
+          setElectricalMeterPosition(meterFromStorage);
         }
         if (Array.isArray(saved?.panelPosition) && saved.panelPosition.length === 2 && !panelPosition) {
           setPanelPosition(saved.panelPosition);
@@ -295,7 +330,20 @@ export const QuoteContextProvider = ({ children }: QuoteContextProviderProps): J
   const stableSetElectricalMeter = useCallback(setElectricalMeter, []);
   const stableSetAdditionalCost = useCallback(setAdditionalCost, []);
   const stableSetPanelPosition = useCallback(setPanelPosition, []);
-  const stableSetElectricalMeterPosition = useCallback(setElectricalMeterPosition, []);
+  const stableSetElectricalMeterPosition = useCallback((pos: PanelorMeterCoordinates | null) => {
+    setElectricalMeterPosition(pos);
+    writeMeterToStorage(pos);
+  }, []);
+
+  // Helper to restore meter from storage if missing
+  const ensureMeterFromStorage = useCallback(() => {
+    if (!electricalMeterPosition) {
+      const stored = readMeterFromStorage();
+      if (stored) {
+        setElectricalMeterPosition(stored);
+      }
+    }
+  }, [electricalMeterPosition]);
   const stableSetIsAutoLocationError = useCallback(setIsAutoLocationError, []);
 
   const values: QuoteContextValues = React.useMemo(() => ({
@@ -341,6 +389,7 @@ export const QuoteContextProvider = ({ children }: QuoteContextProviderProps): J
     setElectricalMeterPosition: stableSetElectricalMeterPosition,
     createOrUpdateLine,
     updateDistanceAndCost,
+    ensureMeterFromStorage,
   }), [
     hydrated,
     currentStepIndex,
@@ -383,7 +432,8 @@ export const QuoteContextProvider = ({ children }: QuoteContextProviderProps): J
     stableSetPanelPosition,
     stableSetElectricalMeterPosition,
     createOrUpdateLine,
-    updateDistanceAndCost
+    updateDistanceAndCost,
+    ensureMeterFromStorage
   ]);
 
   return (

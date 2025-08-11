@@ -36,7 +36,8 @@ function Step2Form({
     electricalMeter,
     electricalMeterPosition,
     coordinates,
-    quotation
+    quotation,
+    ensureMeterFromStorage
   } = useQuoteContext();
   const [showTooltip, setShowTooltip] = useState<boolean>(false);
   const [meterBtn, setMeterBtn] = useState<boolean>(false);
@@ -100,6 +101,11 @@ function Step2Form({
     setCurrentStepIndex(2);
   }
 
+  // Restore meter position from storage on mount if missing
+  useEffect(() => {
+    ensureMeterFromStorage();
+  }, [ensureMeterFromStorage]);
+
   // TEMP debug – remove later
   useEffect(() => {
     console.log("[CALCS] hydrated:", hydrated, "meter:", electricalMeterPosition);
@@ -107,17 +113,10 @@ function Step2Form({
 
   return (
     <div>
-      {/* Map first */}
-      {Array.isArray(electricalMeterPosition) && electricalMeterPosition.length === 2 ? (
-        <div className="mb-6">
-          <CalculatorMap />
-        </div>
-      ) : (
-        // If somehow user skipped meter step, show a gentle nudge
-        <div className="mb-6 rounded-lg bg-blue-50 border border-blue-200 p-4 text-sm text-blue-800">
-          Interactive map will appear after placing your electrical meter. Please go back and drop the meter pin.
-        </div>
-      )}
+      {/* Map - render unconditionally */}
+      <div className="mb-6">
+        <CalculatorMap />
+      </div>
       {
         !showForm ? (
           <div className="mt-10">

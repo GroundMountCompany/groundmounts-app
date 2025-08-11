@@ -262,9 +262,9 @@ const MapboxSolarPanelInner = ({
     try {
       const p1 = turfPoint([electricalMeterPosition[0], electricalMeterPosition[1]]);
       const p2 = turfPoint([panelPosition[0], panelPosition[1]]);
-      // distance() defaults to kilometers; request miles and convert to feet
-      const miles = distance(p1, p2, { units: 'miles' });
-      const feet = Math.round(miles * 5280);
+      // distance() returns kilometers by default, convert to feet
+      const kilometers = distance(p1, p2);
+      const feet = Math.round(kilometers * 3280.84); // 1 km = 3280.84 feet
 
       setElectricalMeter({
         coordinates: {

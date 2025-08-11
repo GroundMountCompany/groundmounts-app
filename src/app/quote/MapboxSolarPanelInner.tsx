@@ -746,7 +746,7 @@ const MapboxSolarPanelInner = ({
         </button>
       </div>
 
-      {allowMeterPlacement && <ElectricalMeter map={map} mapLoaded={mapLoaded} mode={mode} onPlace={onPlace} />}
+      {allowMeterPlacement && mode !== "place-meter" && <ElectricalMeter map={map} mapLoaded={mapLoaded} mode={mode} onPlace={onPlace} />}
     </>
   );
 };

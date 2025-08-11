@@ -19,13 +19,16 @@ export default function CalculatorMap() {
   const center = useMemo<[number, number]>(() => {
     // Prefer the user's meter coordinate to keep context consistent
     if (Array.isArray(electricalMeterPosition) && electricalMeterPosition.length === 2) {
+      console.log('Using meter position:', electricalMeterPosition);
       return [electricalMeterPosition[0], electricalMeterPosition[1]];
     }
     // Use coordinates if they're valid (not 0,0)
     if (coordinates.longitude !== 0 && coordinates.latitude !== 0) {
+      console.log('Using coordinates:', coordinates);
       return [coordinates.longitude, coordinates.latitude];
     }
     // Default to US center if no valid coordinates
+    console.log('Using default US center - coords are:', coordinates);
     return [-98.5795, 39.8283]; // US center
   }, [coordinates.longitude, coordinates.latitude, electricalMeterPosition]);
 
@@ -64,7 +67,19 @@ export default function CalculatorMap() {
       } catch {}
       mapRef.current = null;
     };
-  }, [center]);
+  }, []); // Remove center dependency to prevent re-creating map
+
+  // Update map center when coordinates change
+  useEffect(() => {
+    if (!mapRef.current || !mapLoaded) return;
+    
+    console.log('Updating map center to:', center);
+    mapRef.current.flyTo({
+      center,
+      zoom: 18,
+      duration: 0 // Immediate jump
+    });
+  }, [center, mapLoaded]);
 
   // Draw a FIXED meter marker here (not draggable)
   useEffect(() => {

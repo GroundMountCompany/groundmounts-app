@@ -239,26 +239,34 @@ const MapboxSolarPanelInner = ({
 
     // Remove previous line
     if (lineFeatureIdRef.current) {
-      try { drawRef.current.delete(lineFeatureIdRef.current); } catch {}
+      try { 
+        drawRef.current.delete(lineFeatureIdRef.current); 
+      } catch (e) {
+        console.warn('Failed to delete line:', e);
+      }
       lineFeatureIdRef.current = null;
     }
 
-    // Add the dashed line (must include meta: 'feature' for your styles)
-    const feature = turfLineString([meter, panels], { meta: 'feature' });
-    const added = drawRef.current.add(feature);
-    // mapbox-draw returns id(s)
-    lineFeatureIdRef.current = Array.isArray(added) ? added[0] : (added as unknown as string);
+    try {
+      // Add the dashed line (must include meta: 'feature' for your styles)
+      const feature = turfLineString([meter, panels], { meta: 'feature' });
+      const added = drawRef.current.add(feature);
+      // mapbox-draw returns id(s)
+      lineFeatureIdRef.current = Array.isArray(added) ? added[0] : (added as unknown as string);
 
-    // Compute distance + costs
-    const kilometers = distance(turfPoint(meter), turfPoint(panels));
-    const feet = Math.round(kilometers * 3280.84); // 1 km = 3280.84 feet
-    
-    setElectricalMeter({
-      coordinates: { longitude: meter[0], latitude: meter[1] },
-      distanceInFeet: feet
-    });
-    setAdditionalCost(Math.round(feet * 45));
-  }, [map, mapLoaded, drawRef, setElectricalMeter, setAdditionalCost]);
+      // Compute distance + costs
+      const kilometers = distance(turfPoint(meter), turfPoint(panels));
+      const feet = Math.round(kilometers * 3280.84); // 1 km = 3280.84 feet
+      
+      setElectricalMeter({
+        coordinates: { longitude: meter[0], latitude: meter[1] },
+        distanceInFeet: feet
+      });
+      setAdditionalCost(Math.round(feet * 45));
+    } catch (e) {
+      console.warn('Failed to update meter-panel line:', e);
+    }
+  }, [map, mapLoaded, setElectricalMeter, setAdditionalCost]);
 
   // Preview marker for preview mode
   useEffect(() => {
@@ -375,7 +383,10 @@ const MapboxSolarPanelInner = ({
 
   // Call the updater whenever either position changes
   useEffect(() => {
-    updateMeterPanelLine(panelPosition ?? null, electricalMeterPosition ?? null);
+    // Only update if both positions exist
+    if (panelPosition && electricalMeterPosition) {
+      updateMeterPanelLine(panelPosition, electricalMeterPosition);
+    }
   }, [panelPosition, electricalMeterPosition, updateMeterPanelLine]);
 
   // Attach & detach map listeners with cleanup
@@ -534,15 +545,20 @@ const MapboxSolarPanelInner = ({
   const onDragPanel = useCallback(() => {
     if (!solarMarkerRef.current) return;
     const { lng, lat } = solarMarkerRef.current.getLngLat();
-    // Live line update without forcing state churn
-    updateMeterPanelLine([lng, lat], electricalMeterPosition ?? null);
+    // Live line update without forcing state churn - only if meter exists
+    if (electricalMeterPosition) {
+      updateMeterPanelLine([lng, lat], electricalMeterPosition);
+    }
   }, [updateMeterPanelLine, electricalMeterPosition]);
 
   const onDragEndPanel = useCallback(() => {
     if (!solarMarkerRef.current) return;
     const { lng, lat } = solarMarkerRef.current.getLngLat();
     setPanelPosition([lng, lat]); // Commit to context on end
-    updateMeterPanelLine([lng, lat], electricalMeterPosition ?? null);
+    // Only update line if meter exists
+    if (electricalMeterPosition) {
+      updateMeterPanelLine([lng, lat], electricalMeterPosition);
+    }
   }, [setPanelPosition, updateMeterPanelLine, electricalMeterPosition]);
 
   // React to meter/panel changes - now handled by updateMeterPanelLine

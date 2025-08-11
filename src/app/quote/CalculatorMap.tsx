@@ -41,7 +41,7 @@ export default function CalculatorMap() {
       container: containerRef.current,
       style: 'mapbox://styles/mapbox/satellite-streets-v12',
       center,
-      zoom: 20.7, // Calculator view default (15% closer)
+      zoom: 18, // Calculator view default
       pitch: 0,
       attributionControl: false,
       cooperativeGestures: true,
@@ -72,7 +72,7 @@ export default function CalculatorMap() {
     
     mapRef.current.flyTo({
       center,
-      zoom: 20.7,
+      zoom: 18,
       duration: 0 // Immediate jump
     });
   }, [center, mapLoaded]);

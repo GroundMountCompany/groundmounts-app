@@ -79,7 +79,7 @@ export default function MapDesignCanvas({ panels, panelSize = DEFAULT_SIZE, onDi
       container: mapContainer.current,
       style: 'mapbox://styles/mapbox/satellite-v9',
       center,
-      zoom: 19.6, // 15% closer
+      zoom: 17,
       pitch: 0,
       bearing: 0,
       dragRotate: false,

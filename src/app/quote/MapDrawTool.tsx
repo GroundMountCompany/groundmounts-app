@@ -14,7 +14,7 @@ if (process.env.NEXT_PUBLIC_MAPBOX_TOKEN) {
   mapboxgl.accessToken = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
 }
 
-const START_ZOOM = 21.3; // Proper zoom level - not from space (15% closer)
+const START_ZOOM = 18.5; // Proper zoom level - not from space
 
 // Zoom conversion helper
 function percentFromZoom(z: number, min: number, max: number) {

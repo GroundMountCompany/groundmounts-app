@@ -635,7 +635,7 @@ const MapboxSolarPanelInner = ({
 
     map.flyTo({
       center: [panelPosition[0], panelPosition[1]],
-      zoom: 19,
+      zoom: 21.9, // 15% closer
       duration: 1500,
       essential: true
     });

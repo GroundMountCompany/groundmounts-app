@@ -42,7 +42,7 @@ export default function MapPreview({ center, zoomPercent = 50, className = "h-[3
       container: mapContainer.current,
       style: 'mapbox://styles/mapbox/satellite-v9',
       center: center,
-      zoom: 17, // Will be set by inner component based on zoomPercent
+      zoom: 19.6, // Will be set by inner component based on zoomPercent (15% closer)
       pitch: 0,
       bearing: 0,
       dragRotate: false,

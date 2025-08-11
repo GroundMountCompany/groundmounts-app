@@ -19,16 +19,13 @@ export default function CalculatorMap() {
   const center = useMemo<[number, number]>(() => {
     // Prefer the user's meter coordinate to keep context consistent
     if (Array.isArray(electricalMeterPosition) && electricalMeterPosition.length === 2) {
-      console.log('Using meter position:', electricalMeterPosition);
       return [electricalMeterPosition[0], electricalMeterPosition[1]];
     }
     // Use coordinates if they're valid (not 0,0)
     if (coordinates.longitude !== 0 && coordinates.latitude !== 0) {
-      console.log('Using coordinates:', coordinates);
       return [coordinates.longitude, coordinates.latitude];
     }
     // Default to US center if no valid coordinates
-    console.log('Using default US center - coords are:', coordinates);
     return [-98.5795, 39.8283]; // US center
   }, [coordinates.longitude, coordinates.latitude, electricalMeterPosition]);
 
@@ -44,7 +41,7 @@ export default function CalculatorMap() {
       container: containerRef.current,
       style: 'mapbox://styles/mapbox/satellite-streets-v12',
       center,
-      zoom: 18, // Calculator view default
+      zoom: 20.7, // Calculator view default (15% closer)
       pitch: 0,
       attributionControl: false,
       cooperativeGestures: true,
@@ -73,10 +70,9 @@ export default function CalculatorMap() {
   useEffect(() => {
     if (!mapRef.current || !mapLoaded) return;
     
-    console.log('Updating map center to:', center);
     mapRef.current.flyTo({
       center,
-      zoom: 18,
+      zoom: 20.7,
       duration: 0 // Immediate jump
     });
   }, [center, mapLoaded]);

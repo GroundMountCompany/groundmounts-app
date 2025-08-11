@@ -351,6 +351,28 @@ const ElectricalMeter = ({ map, mapLoaded, mode = "default" }: Props) => {
     }
   }, [drawRef, electricalMeter, shouldDrawPanels]);
 
+  // Ensure the meter point is drawn via Draw for line connections
+  useEffect(() => {
+    if (!map || !mapLoaded || !drawRef.current) return;
+    if (!electricalMeterPosition) return;
+
+    // Remove old meter point if any
+    const existing = drawRef.current.getAll()?.features?.find(f => f.properties?.role === 'meter');
+    if (existing) {
+      try { drawRef.current.delete(existing.id as string); } catch {}
+    }
+
+    // Add a styled point (your styles use meta:'feature'; add a role for easy lookup)
+    drawRef.current.add({
+      type: 'Feature',
+      properties: { meta: 'feature', role: 'meter' },
+      geometry: {
+        type: 'Point',
+        coordinates: [electricalMeterPosition[0], electricalMeterPosition[1]]
+      }
+    });
+  }, [map, mapLoaded, drawRef, electricalMeterPosition]);
+
   return (<></>);
 };
 

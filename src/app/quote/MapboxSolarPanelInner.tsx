@@ -6,6 +6,8 @@ import { useEffect, useMemo, useRef, useCallback } from 'react';
 import mapboxgl from 'mapbox-gl';
 import ElectricalMeter from './ElectricalMeter';
 import * as turf from '@turf/turf';
+import distance from '@turf/distance';
+import { point as turfPoint } from '@turf/helpers';
 
 interface Props {
   map: mapboxgl.Map | null;
@@ -174,11 +176,6 @@ const MapboxSolarPanelInner = ({
     return scale * 1.8;
   }, [map?.getZoom(), map?.getCenter(), totalPanels]);
 
-  // rAF-safe setState for smooth drag performance
-  const safeSetPanelPosition = useCallback((updater: [number, number]) => {
-    if (raf.current) cancelAnimationFrame(raf.current);
-    raf.current = requestAnimationFrame(() => setPanelPosition(updater));
-  }, [setPanelPosition]);
 
   // Cleanup rAF on unmount
   useEffect(() => {
@@ -495,23 +492,56 @@ const MapboxSolarPanelInner = ({
     }
   }, [actualPanels, map, mapLoaded]);
 
+  // Helper to update/create the line + distance
+  const updateMeterLine = useCallback(() => {
+    if (!map || !mapLoaded || !drawRef.current) return;
+    if (!electricalMeterPosition || !panelPosition) return;
+
+    const from: [number, number] = [electricalMeterPosition[0], electricalMeterPosition[1]];
+    const to: [number, number] = [panelPosition[0], panelPosition[1]];
+
+    // Compute distance (feet)
+    const meters = distance(turfPoint(from), turfPoint(to), 'meters');
+    const feet = meters * 3.28084;
+
+    // (Re)draw dashed line feature
+    try {
+      if (lineFeatureIdRef.current) {
+        drawRef.current.delete(lineFeatureIdRef.current);
+        lineFeatureIdRef.current = null;
+      }
+    } catch {}
+
+    const feature = {
+      type: 'Feature' as const,
+      properties: { meta: 'feature' },
+      geometry: { type: 'LineString' as const, coordinates: [from, to] }
+    };
+
+    const added = drawRef.current.add(feature);
+    lineFeatureIdRef.current = Array.isArray(added) ? added[0] : (added as string);
+
+    // Persist distance in context (keeps your cost calc working)
+    setElectricalMeter({
+      coordinates: { latitude: electricalMeterPosition[1], longitude: electricalMeterPosition[0] },
+      distanceInFeet: Math.round(feet)
+    });
+  }, [map, mapLoaded, drawRef, electricalMeterPosition, panelPosition, lineFeatureIdRef, setElectricalMeter]);
+
   // Define callbacks outside useEffect to avoid Rules of Hooks violations
   const onDragPanel = useCallback(() => {
     if (!solarMarkerRef.current) return;
-    const solarMarkerLngLat = solarMarkerRef.current.getLngLat();
-    const newCoords: [number, number] = [solarMarkerLngLat.lng, solarMarkerLngLat.lat];
-    console.log('newCoords1', newCoords)
-    safeSetPanelPosition(newCoords);
-  }, [safeSetPanelPosition]);
+    const { lng, lat } = solarMarkerRef.current.getLngLat();
+    setPanelPosition([lng, lat]);
+    updateMeterLine(); // live update while dragging
+  }, [setPanelPosition, updateMeterLine]);
 
   const onDragEndPanel = useCallback(() => {
     if (!solarMarkerRef.current) return;
-    const solarMarkerLngLat = solarMarkerRef.current.getLngLat();
-    const newCoords = [solarMarkerLngLat.lng, solarMarkerLngLat.lat];
-    if (newCoords.length === 2) {
-      setPanelPosition([newCoords[0], newCoords[1]]);
-    }
-  }, [setPanelPosition]);
+    const { lng, lat } = solarMarkerRef.current.getLngLat();
+    setPanelPosition([lng, lat]);
+    updateMeterLine();
+  }, [setPanelPosition, updateMeterLine]);
 
   // Add handler for solar panel marker movement - using rAF-safe updates
   useEffect(() => {
@@ -584,6 +614,17 @@ const MapboxSolarPanelInner = ({
       essential: true
     });
   }, [map, panelPosition]);
+
+  // Recompute line whenever panel or meter changes
+  useEffect(() => {
+    updateMeterLine();
+  }, [updateMeterLine]);
+
+  // Also recompute after zoom/center changes (map loads) so pixels rescale but line stays correct
+  useEffect(() => {
+    if (!map || !mapLoaded) return;
+    updateMeterLine();
+  }, [map, mapLoaded, updateMeterLine]);
 
   const systemSizeFeet = useMemo(() => {
     const panelWidthFeet = 6; // each panel 6 feet width

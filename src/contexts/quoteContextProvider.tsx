@@ -3,6 +3,7 @@ import { QuoteContext } from './quoteContext';
 import { Feature, LineString } from 'geojson';
 import * as turf from '@turf/turf';
 import { v4 as uuid } from 'uuid';
+import MapboxDraw from '@mapbox/mapbox-gl-draw';
 
 // Storage key for persisting quote state
 const STORAGE_KEY = "gmq:v2";

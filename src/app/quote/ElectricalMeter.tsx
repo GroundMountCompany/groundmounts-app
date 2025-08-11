@@ -352,26 +352,45 @@ const ElectricalMeter = ({ map, mapLoaded, mode = "default" }: Props) => {
   }, [drawRef, electricalMeter, shouldDrawPanels]);
 
   // Ensure the meter point is drawn via Draw for line connections
+  // Only do this when we have panels to draw lines to
   useEffect(() => {
     if (!map || !mapLoaded || !drawRef.current) return;
     if (!electricalMeterPosition) return;
-
-    // Remove old meter point if any
-    const existing = drawRef.current.getAll()?.features?.find(f => f.properties?.role === 'meter');
-    if (existing) {
-      try { drawRef.current.delete(existing.id as string); } catch {}
-    }
-
-    // Add a styled point (your styles use meta:'feature'; add a role for easy lookup)
-    drawRef.current.add({
-      type: 'Feature',
-      properties: { meta: 'feature', role: 'meter' },
-      geometry: {
-        type: 'Point',
-        coordinates: [electricalMeterPosition[0], electricalMeterPosition[1]]
+    if (!shouldDrawPanels) return; // Only add Draw point when we're drawing panels
+    
+    try {
+      // Check if drawRef.current has the methods we need
+      if (typeof drawRef.current.getAll !== 'function' || typeof drawRef.current.add !== 'function') {
+        console.warn('Draw instance not fully initialized');
+        return;
       }
-    });
-  }, [map, mapLoaded, drawRef, electricalMeterPosition]);
+
+      // Remove old meter point if any
+      const allFeatures = drawRef.current.getAll();
+      if (allFeatures?.features) {
+        const existing = allFeatures.features.find((f) => f.properties?.role === 'meter');
+        if (existing?.id) {
+          try { 
+            drawRef.current.delete(existing.id as string); 
+          } catch (e) {
+            console.warn('Could not delete existing meter point:', e);
+          }
+        }
+      }
+
+      // Add a styled point (your styles use meta:'feature'; add a role for easy lookup)
+      drawRef.current.add({
+        type: 'Feature',
+        properties: { meta: 'feature', role: 'meter' },
+        geometry: {
+          type: 'Point',
+          coordinates: [electricalMeterPosition[0], electricalMeterPosition[1]]
+        }
+      });
+    } catch (error) {
+      console.error('Error updating meter point in Draw:', error);
+    }
+  }, [map, mapLoaded, drawRef, electricalMeterPosition, shouldDrawPanels]);
 
   return (<></>);
 };

@@ -9,6 +9,7 @@ interface Props {
   map: mapboxgl.Map | null;
   mapLoaded: boolean;
   mode?: "default" | "place-meter" | "preview" | "design";
+  onPlace?: (lngLat: { lng: number; lat: number }) => void;
 }
 
 const METER_HTML_ELEMENT = `
@@ -53,7 +54,7 @@ const METER_HTML_ELEMENT = `
     </svg>
   </div>
 `
-const ElectricalMeter = ({ map, mapLoaded, mode = "default" }: Props) => {
+const ElectricalMeter = ({ map, mapLoaded, mode = "default", onPlace }: Props) => {
   const {
     shouldDrawPanels,
     electricalMeter,
@@ -175,6 +176,13 @@ const ElectricalMeter = ({ map, mapLoaded, mode = "default" }: Props) => {
     if (mode === "preview") return; // Don't attach click listeners in preview mode
 
     const handleMapInteraction = (e: mapboxgl.MapMouseEvent | mapboxgl.MapTouchEvent) => {
+      // In place-meter mode, just call the onPlace callback
+      if (mode === "place-meter" && onPlace) {
+        onPlace({ lng: e.lngLat.lng, lat: e.lngLat.lat });
+        return;
+      }
+      
+      // Default behavior for other modes
       if (!markerRef.current) {
         try {
           const meterCoords: [number, number] = [e.lngLat.lng, e.lngLat.lat];

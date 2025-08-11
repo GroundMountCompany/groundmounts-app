@@ -5,6 +5,8 @@ import mapboxgl from 'mapbox-gl';
 interface Props {
   map: mapboxgl.Map | null;
   mapLoaded: boolean;
+  mode?: "default" | "place-meter" | "preview" | "design";
+  onPlace?: (lngLat: { lng: number; lat: number }) => void;
 }
 
 const Inner = dynamic(() => import("./MapboxSolarPanelInner"), {
@@ -14,6 +16,6 @@ const Inner = dynamic(() => import("./MapboxSolarPanelInner"), {
   ),
 });
 
-export default function MapboxSolarPanel({ map, mapLoaded }: Props) {
-  return <Inner map={map} mapLoaded={mapLoaded} />;
+export default function MapboxSolarPanel({ map, mapLoaded, mode, onPlace }: Props) {
+  return <Inner map={map} mapLoaded={mapLoaded} mode={mode} onPlace={onPlace} />;
 }

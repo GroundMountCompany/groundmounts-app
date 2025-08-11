@@ -55,7 +55,7 @@ const MapboxSolarPanelInner = ({
   map, 
   mapLoaded, 
   mode = "default",
-  // onPlace,
+  onPlace,
   initialZoomPercent,
   initialCenter,
   // showMeterAtCenter,
@@ -746,7 +746,7 @@ const MapboxSolarPanelInner = ({
         </button>
       </div>
 
-      {allowMeterPlacement && <ElectricalMeter map={map} mapLoaded={mapLoaded} mode={mode} />}
+      {allowMeterPlacement && <ElectricalMeter map={map} mapLoaded={mapLoaded} mode={mode} onPlace={onPlace} />}
     </>
   );
 };

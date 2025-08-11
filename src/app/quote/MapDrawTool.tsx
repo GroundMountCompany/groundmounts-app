@@ -26,7 +26,7 @@ function zoomFromPercent(p: number, min: number, max: number) {
 }
 
 interface MapDrawToolProps {
-  mode?: "place-meter" | "default" | string;
+  mode?: "default" | "place-meter" | "preview" | "design";
   onPlace?: (lngLat: { lng: number; lat: number }) => void;
   initialZoomPercent?: number;
 }
@@ -302,7 +302,12 @@ export const MapDrawTool = ({ mode = "default", onPlace, initialZoomPercent }: M
         )}
 
         {mapLoaded && map.current && (
-          <MapboxSolarPanel map={map.current} mapLoaded={mapLoaded} />
+          <MapboxSolarPanel 
+            map={map.current} 
+            mapLoaded={mapLoaded}
+            mode={mode}
+            onPlace={onPlace}
+          />
         )}
       </div>
     </div>

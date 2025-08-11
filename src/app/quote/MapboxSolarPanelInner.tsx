@@ -9,6 +9,21 @@ import * as turf from '@turf/turf';
 import distance from '@turf/distance';
 import { point as turfPoint } from '@turf/helpers';
 
+// distance helpers
+const toRad = (d: number) => (d * Math.PI) / 180;
+const feetBetween = (a: [number, number], b: [number, number]) => {
+  const R = 6371000; // meters
+  const dLat = toRad(b[1] - a[1]);
+  const dLng = toRad(b[0] - a[0]);
+  const lat1 = toRad(a[1]);
+  const lat2 = toRad(b[1]);
+  const h =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
+  const meters = 2 * R * Math.asin(Math.sqrt(h));
+  return meters * 3.28084; // → feet
+};
+
 interface Props {
   map: mapboxgl.Map | null;
   mapLoaded: boolean;
@@ -89,6 +104,47 @@ const MapboxSolarPanelInner = ({
   const previewMarkerRef = useRef<mapboxgl.Marker | null>(null);
   const arrayMarkerRef = useRef<mapboxgl.Marker | null>(null);
   const arrayCenterRef = useRef<[number, number] | null>(null);
+
+  const upsertMeterLine = useCallback((
+    meter: [number, number] | null,
+    panels: [number, number] | null
+  ) => {
+    if (!map || !drawRef.current) return;
+
+    // Remove if we don't have both ends
+    if (!meter || !panels) {
+      if (lineFeatureIdRef.current) {
+        try { drawRef.current.delete(lineFeatureIdRef.current); } catch {}
+        lineFeatureIdRef.current = null;
+      }
+      return;
+    }
+
+    // Replace existing dashed line
+    const feature = {
+      id: `meter-to-panel-${Date.now()}`,
+      type: 'Feature' as const,
+      properties: { meta: 'feature' },
+      geometry: { type: 'LineString' as const, coordinates: [meter, panels] }
+    };
+
+    if (lineFeatureIdRef.current) {
+      try { drawRef.current.delete(lineFeatureIdRef.current); } catch {}
+    }
+    const added = drawRef.current.add(feature);
+    const newId =
+      Array.isArray(added) && added.length ? added[0] :
+      (added as { id?: string })?.id ?? feature.id;
+
+    lineFeatureIdRef.current = newId;
+
+    // compute + store distance for pricing/UI
+    const feet = Math.round(feetBetween(meter, panels));
+    setElectricalMeter({
+      coordinates: { latitude: meter[1], longitude: meter[0] },
+      distanceInFeet: feet
+    });
+  }, [map, drawRef, lineFeatureIdRef, setElectricalMeter]);
 
   // Calculate the actual number of panels (rounded up to multiple of 4)
   const actualPanels = useMemo(() => {
@@ -482,13 +538,21 @@ const MapboxSolarPanelInner = ({
         createPanelMarker([center.lng, center.lat]);
       }
       // setShowDragNotice(true);
+      
+      // Update meter line when panels are created/refreshed
+      if (electricalMeterPosition) {
+        upsertMeterLine(
+          [electricalMeterPosition[0], electricalMeterPosition[1]],
+          panelPosition ?? [center.lng, center.lat]
+        );
+      }
     } else {
       // setShowDragNotice(false);
       // eslint-disable-next-line @typescript-eslint/no-unused-expressions
       lineFeatureIdRef.current && drawRef.current?.delete(lineFeatureIdRef.current);
       lineFeatureIdRef.current = null;
     }
-  }, [actualPanels, map, mapLoaded]);
+  }, [actualPanels, map, mapLoaded, electricalMeterPosition, panelPosition, createPanelMarker, upsertMeterLine]);
 
   // Helper to update/create the line + distance
   const updateMeterLine = useCallback(() => {
@@ -529,17 +593,37 @@ const MapboxSolarPanelInner = ({
   // Define callbacks outside useEffect to avoid Rules of Hooks violations
   const onDragPanel = useCallback(() => {
     if (!solarMarkerRef.current) return;
-    const { lng, lat } = solarMarkerRef.current.getLngLat();
-    setPanelPosition([lng, lat]);
-    updateMeterLine(); // live update while dragging
-  }, [setPanelPosition, updateMeterLine]);
+    const ll = solarMarkerRef.current.getLngLat();
+    const newCoords: [number, number] = [ll.lng, ll.lat];
+    setPanelPosition(newCoords);
+
+    if (electricalMeterPosition) {
+      upsertMeterLine(
+        [electricalMeterPosition[0], electricalMeterPosition[1]],
+        newCoords
+      );
+    }
+  }, [setPanelPosition, electricalMeterPosition, upsertMeterLine]);
 
   const onDragEndPanel = useCallback(() => {
     if (!solarMarkerRef.current) return;
-    const { lng, lat } = solarMarkerRef.current.getLngLat();
-    setPanelPosition([lng, lat]);
-    updateMeterLine();
-  }, [setPanelPosition, updateMeterLine]);
+    const ll = solarMarkerRef.current.getLngLat();
+    const newCoords: [number, number] = [ll.lng, ll.lat];
+    setPanelPosition(newCoords);
+    
+    if (electricalMeterPosition) {
+      upsertMeterLine(
+        [electricalMeterPosition[0], electricalMeterPosition[1]],
+        newCoords
+      );
+    }
+  }, [setPanelPosition, electricalMeterPosition, upsertMeterLine]);
+
+  // React to meter/panel changes
+  useEffect(() => {
+    if (!map || !mapLoaded) return;
+    upsertMeterLine(electricalMeterPosition ?? null, panelPosition ?? null);
+  }, [map, mapLoaded, electricalMeterPosition, panelPosition, upsertMeterLine]);
 
   // Add handler for solar panel marker movement - using rAF-safe updates
   useEffect(() => {

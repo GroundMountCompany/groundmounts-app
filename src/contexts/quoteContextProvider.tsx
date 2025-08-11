@@ -315,6 +315,13 @@ export const QuoteContextProvider = ({ children }: QuoteContextProviderProps): J
     }
   }, [electricalMeterPosition, panelPosition, createOrUpdateLine, drawRef]);
 
+  // Update additional cost when distance changes - price = $45/ft
+  useEffect(() => {
+    const feet = electricalMeter?.distanceInFeet ?? 0;
+    const cost = Math.max(0, Math.round(feet) * 45);
+    setAdditionalCost(cost);
+  }, [electricalMeter?.distanceInFeet, setAdditionalCost]);
+
   // Stabilize setter functions with useCallback
   const stableSetCurrentStepIndex = useCallback(setCurrentStepIndex, []);
   const stableSetAddress = useCallback(setAddress, []);

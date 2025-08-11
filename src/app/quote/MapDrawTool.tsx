@@ -14,16 +14,15 @@ if (process.env.NEXT_PUBLIC_MAPBOX_TOKEN) {
   mapboxgl.accessToken = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
 }
 
+const START_ZOOM = 18.5; // Proper zoom level - not from space
+
 // Zoom conversion helper
 function percentFromZoom(z: number, min: number, max: number) {
   if (max === min) return 0;
   return Math.round(((z - min) / (max - min)) * 100);
 }
 
-function zoomFromPercent(p: number, min: number, max: number) {
-  const clamped = Math.max(0, Math.min(100, p));
-  return min + (max - min) * (clamped / 100);
-}
+// Removed unused zoomFromPercent function
 
 interface MapDrawToolProps {
   mode?: "default" | "place-meter" | "preview" | "design";
@@ -31,13 +30,13 @@ interface MapDrawToolProps {
   initialZoomPercent?: number;
 }
 
-export const MapDrawTool = ({ mode = "default", onPlace, initialZoomPercent }: MapDrawToolProps = {}) => {
+export const MapDrawTool = ({ mode = "default", onPlace }: MapDrawToolProps = {}) => {
   const { coordinates, currentStepIndex, isAutoLocationError, shouldDrawPanels, setMapZoomPercentage, address } = useQuoteContext();
   
   // All hooks must be called before any conditional returns
   const mapContainer = useRef<HTMLDivElement | null>(null);
   const map = useRef<mapboxgl.Map | null>(null);
-  const [zoom, setZoom] = useState(17); // Start at min zoom (0%)
+  const [, setZoom] = useState(START_ZOOM); // Only used in setter
   const initializedRef = useRef(false);
   const [mapLoaded, setMapLoaded] = useState(false);
   const [marker, setMarker] = useState<mapboxgl.Marker | null>(null);
@@ -67,7 +66,7 @@ export const MapDrawTool = ({ mode = "default", onPlace, initialZoomPercent }: M
       container: mapContainer.current,
       style: 'mapbox://styles/mapbox/satellite-v9',
       center: [coordinates.longitude, coordinates.latitude],
-      zoom: zoom,
+      zoom: START_ZOOM,
       pitch: 0,
       bearing: 0,
       dragRotate: false,
@@ -89,14 +88,12 @@ export const MapDrawTool = ({ mode = "default", onPlace, initialZoomPercent }: M
     newMap.on('load', () => {
       if (cleanupRef.current) return;
       
-      // Set initial zoom based on props or default to 0%
+      // Set initial zoom percentage based on START_ZOOM
       if (!initializedRef.current) {
         const min = newMap.getMinZoom();
         const max = newMap.getMaxZoom();
-        const startPercent = typeof initialZoomPercent === "number" ? initialZoomPercent : 0;
-        const clamped = Math.max(0, Math.min(100, startPercent));
-        newMap.jumpTo({ zoom: zoomFromPercent(clamped, min, max) });
-        setMapZoomPercentage(clamped);
+        const startPercent = percentFromZoom(START_ZOOM, min, max);
+        setMapZoomPercentage(startPercent);
         initializedRef.current = true;
       }
 
@@ -169,7 +166,11 @@ export const MapDrawTool = ({ mode = "default", onPlace, initialZoomPercent }: M
         Math.abs(currentCenter.lat - coordinates.latitude) > 0.0001;
 
       if (hasLocationChanged) {
-        map.current.setCenter([coordinates.longitude, coordinates.latitude]);
+        map.current.flyTo({
+          center: [coordinates.longitude, coordinates.latitude],
+          zoom: START_ZOOM,
+          duration: 0 // Jump immediately so it never shows space
+        });
       }
       map.current.resize();
     }

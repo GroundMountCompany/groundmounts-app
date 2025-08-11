@@ -83,3 +83,14 @@
     pointer-events: auto !important;
   }
 }
+
+/* Smooth solar marker dragging */
+.solar-marker {
+  pointer-events: auto;
+  cursor: move;
+}
+
+.solar-marker .grid {
+  will-change: transform;
+  transition: transform 0.1s ease-out;
+}

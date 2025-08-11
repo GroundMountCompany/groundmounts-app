@@ -231,65 +231,34 @@ const MapboxSolarPanelInner = ({
   }, []);
 
   // Helper to (re)draw the dashed line and compute distance/cost
-  const updateMeterPanelLine = useCallback(() => {
-    if (!map || !mapLoaded || !drawRef.current) return;
-    if (!electricalMeterPosition || !panelPosition) return;
+  const updateMeterPanelLine = useCallback((
+    panels: [number, number] | null,
+    meter: [number, number] | null
+  ) => {
+    if (!map || !mapLoaded || !drawRef.current || !panels || !meter) return;
 
-    // 1) (Re)draw the dashed line
-    try {
-      if (lineFeatureIdRef.current) {
-        drawRef.current.delete(lineFeatureIdRef.current);
-        lineFeatureIdRef.current = null;
-      }
-
-      const line = turfLineString([
-        [electricalMeterPosition[0], electricalMeterPosition[1]],
-        [panelPosition[0], panelPosition[1]]
-      ], {
-        // tag it so our Draw styles pick it up (matches "LineString" + meta=feature)
-        meta: 'feature'
-      });
-
-      const added = drawRef.current.add(line);
-      // draw.add returns an array of IDs
-      const ids = Array.isArray(added) ? added : [added];
-      if (ids.length > 0) lineFeatureIdRef.current = String(ids[0]);
-    } catch (e) {
-      console.warn('Failed to update meter-to-panel line:', e);
+    // Remove previous line
+    if (lineFeatureIdRef.current) {
+      try { drawRef.current.delete(lineFeatureIdRef.current); } catch {}
+      lineFeatureIdRef.current = null;
     }
 
-    // 2) Compute distance (feet) and update cost
-    try {
-      const p1 = turfPoint([electricalMeterPosition[0], electricalMeterPosition[1]]);
-      const p2 = turfPoint([panelPosition[0], panelPosition[1]]);
-      // distance() returns kilometers by default, convert to feet
-      const kilometers = distance(p1, p2);
-      const feet = Math.round(kilometers * 3280.84); // 1 km = 3280.84 feet
+    // Add the dashed line (must include meta: 'feature' for your styles)
+    const feature = turfLineString([meter, panels], { meta: 'feature' });
+    const added = drawRef.current.add(feature);
+    // mapbox-draw returns id(s)
+    lineFeatureIdRef.current = Array.isArray(added) ? added[0] : (added as unknown as string);
 
-      setElectricalMeter({
-        coordinates: {
-          latitude: electricalMeterPosition[1],
-          longitude: electricalMeterPosition[0]
-        },
-        distanceInFeet: feet
-      });
-
-      // $45/ft (existing rule)
-      setAdditionalCost(feet * 45);
-    } catch (e) {
-      console.warn('Failed to compute distance/cost:', e);
-    }
-  }, [
-    map,
-    mapLoaded,
-    drawRef.current,
-    electricalMeterPosition?.[0],
-    electricalMeterPosition?.[1],
-    panelPosition?.[0],
-    panelPosition?.[1],
-    setElectricalMeter,
-    setAdditionalCost
-  ]);
+    // Compute distance + costs
+    const kilometers = distance(turfPoint(meter), turfPoint(panels));
+    const feet = Math.round(kilometers * 3280.84); // 1 km = 3280.84 feet
+    
+    setElectricalMeter({
+      coordinates: { longitude: meter[0], latitude: meter[1] },
+      distanceInFeet: feet
+    });
+    setAdditionalCost(Math.round(feet * 45));
+  }, [map, mapLoaded, drawRef, setElectricalMeter, setAdditionalCost]);
 
   // Preview marker for preview mode
   useEffect(() => {
@@ -406,8 +375,8 @@ const MapboxSolarPanelInner = ({
 
   // Call the updater whenever either position changes
   useEffect(() => {
-    updateMeterPanelLine();
-  }, [updateMeterPanelLine]);
+    updateMeterPanelLine(panelPosition ?? null, electricalMeterPosition ?? null);
+  }, [panelPosition, electricalMeterPosition, updateMeterPanelLine]);
 
   // Attach & detach map listeners with cleanup
   useEffect(() => {
@@ -564,17 +533,17 @@ const MapboxSolarPanelInner = ({
   // Define callbacks outside useEffect to avoid Rules of Hooks violations
   const onDragPanel = useCallback(() => {
     if (!solarMarkerRef.current) return;
-    const ll = solarMarkerRef.current.getLngLat();
-    setPanelPosition([ll.lng, ll.lat]); // triggers effect automatically
-    updateMeterPanelLine();
-  }, [setPanelPosition, updateMeterPanelLine]);
+    const { lng, lat } = solarMarkerRef.current.getLngLat();
+    // Live line update without forcing state churn
+    updateMeterPanelLine([lng, lat], electricalMeterPosition ?? null);
+  }, [updateMeterPanelLine, electricalMeterPosition]);
 
   const onDragEndPanel = useCallback(() => {
     if (!solarMarkerRef.current) return;
-    const ll = solarMarkerRef.current.getLngLat();
-    setPanelPosition([ll.lng, ll.lat]); // triggers effect automatically
-    updateMeterPanelLine();
-  }, [setPanelPosition, updateMeterPanelLine]);
+    const { lng, lat } = solarMarkerRef.current.getLngLat();
+    setPanelPosition([lng, lat]); // Commit to context on end
+    updateMeterPanelLine([lng, lat], electricalMeterPosition ?? null);
+  }, [setPanelPosition, updateMeterPanelLine, electricalMeterPosition]);
 
   // React to meter/panel changes - now handled by updateMeterPanelLine
   // This effect is replaced by the updateMeterPanelLine callback and its useEffect

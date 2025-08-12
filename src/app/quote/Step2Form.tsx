@@ -98,7 +98,7 @@ function Step2Form({
     for (const val of vals) {
       await updateSheet(val.col, val.val)
     }
-    setCurrentStepIndex(2);
+    setCurrentStepIndex(4); // Move to Step3Form (lead capture form)
   }
 
   // Restore meter position from storage on mount if missing

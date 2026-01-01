@@ -31,7 +31,7 @@ interface MapDrawToolProps {
 }
 
 export const MapDrawTool = ({ mode = "default", onPlace }: MapDrawToolProps = {}) => {
-  const { coordinates, currentStepIndex, isAutoLocationError, shouldDrawPanels, setMapZoomPercentage, address } = useQuoteContext();
+  const { coordinates, currentStepIndex, isAutoLocationError, shouldDrawPanels, setMapZoomPercentage, address, setCoordinates } = useQuoteContext();
   
   // All hooks must be called before any conditional returns
   const mapContainer = useRef<HTMLDivElement | null>(null);
@@ -83,8 +83,8 @@ export const MapDrawTool = ({ mode = "default", onPlace }: MapDrawToolProps = {}
       touchPitch: false
     });
     
-    // Configure mobile gestures for buttery performance
-    newMap.scrollZoom.disable();        // prevent accidental page scroll fights
+    // Configure gestures for good UX
+    newMap.scrollZoom.enable();         // allow scroll-wheel zoom on desktop
     newMap.touchZoomRotate.enable();    // pinch/rotate on mobile
     newMap.doubleClickZoom.disable();   // avoid jumpy zooms
     map.current = newMap;
@@ -210,13 +210,25 @@ export const MapDrawTool = ({ mode = "default", onPlace }: MapDrawToolProps = {}
             customMakerElement.appendChild(locationDiv);
           }
         }
-        const options: mapboxgl.MarkerOptions = {};
+        const options: mapboxgl.MarkerOptions = {
+          draggable: true  // Allow user to drag pin if geocoding is off
+        };
         if (customMakerElement) {
           options.element = customMakerElement;
         }
         const newMarker = new mapboxgl.Marker(options)
           .setLngLat([coordinates.longitude, coordinates.latitude])
           .addTo(map.current);
+
+        // Update coordinates when user drags the pin
+        newMarker.on('dragend', () => {
+          const lngLat = newMarker.getLngLat();
+          setCoordinates({
+            latitude: lngLat.lat,
+            longitude: lngLat.lng
+          });
+        });
+
         setMarker(newMarker);
       }
     } else {
@@ -226,7 +238,7 @@ export const MapDrawTool = ({ mode = "default", onPlace }: MapDrawToolProps = {}
         setMarker(null);
       }
     }
-  }, [coordinates, marker, currentStepIndex, showLocationText, hasValidCoordinates, map]);
+  }, [coordinates, marker, currentStepIndex, showLocationText, hasValidCoordinates, map, setCoordinates]);
 
   // Hide location text when solar panels are generated
   useEffect(() => {
@@ -281,9 +293,9 @@ export const MapDrawTool = ({ mode = "default", onPlace }: MapDrawToolProps = {}
   return (
     <div className="w-full h-full">
       <div className="relative w-full h-full overflow-hidden">
-        <div 
-          ref={mapContainer} 
-          className="relative h-full w-full select-none touch-none pointer-events-auto" 
+        <div
+          ref={mapContainer}
+          className="relative h-full w-full select-none touch-manipulation pointer-events-auto"
         />
         
 

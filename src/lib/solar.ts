@@ -1,6 +1,7 @@
-export const PANEL_WATTS = 400; // adjust if needed
-export const CAP_FACTOR = 0.18; // average capacity factor; tweak per region
-export const BILL_PER_KWH = 0.14; // $/kWh; tweak per utility/region
+export const PANEL_WATTS = 400; // 400W panels (industry standard 2024+)
+export const CAP_FACTOR = 0.18; // capacity factor for Texas (~5.25 peak sun hours accounting for losses)
+export const BILL_PER_KWH = 0.14; // $/kWh - Texas average (ERCOT residential)
+export const TRENCHING_COST_PER_FT = 45; // $/ft - includes labor, conduit, backfill (Texas average)
 
 // Estimate monthly kWh from monthly bill
 export function estimateMonthlyKWh(avgBillUSD: number, $perKWh = BILL_PER_KWH) {

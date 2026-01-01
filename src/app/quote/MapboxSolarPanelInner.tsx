@@ -295,14 +295,14 @@ const MapboxSolarPanelInner = ({
     };
   }, [map, mode, initialCenter]);
 
-  // Mobile gesture defaults
+  // Gesture defaults
   useEffect(() => {
     if (!map) return;
     if (mode === "preview" && disableInteractions) {
       // In preview mode with disabled interactions, don't enable any gestures
       return;
     }
-    map.scrollZoom.disable();          // prevent accidental page scroll fights
+    map.scrollZoom.enable();           // allow scroll-wheel zoom on desktop
     map.touchZoomRotate.enable();      // pinch/rotate on mobile
     map.doubleClickZoom.disable();     // avoid jumpy zooms
   }, [map, mode, disableInteractions]);
@@ -389,12 +389,12 @@ const MapboxSolarPanelInner = ({
   }, [map, mode, designGrid.rows, designGrid.cols, designPanelSize.w, designPanelSize.h, meterPosition, arrayPosition, onArrayMove]);
 
   // Call the updater whenever either position changes
+  // Only draw line when meter is placed AND panels exist (totalPanels > 0)
   useEffect(() => {
-    // Only update if both positions exist
-    if (panelPosition && electricalMeterPosition) {
+    if (panelPosition && electricalMeterPosition && totalPanels > 0) {
       updateMeterPanelLine(panelPosition, electricalMeterPosition);
     }
-  }, [panelPosition, electricalMeterPosition, updateMeterPanelLine]);
+  }, [panelPosition, electricalMeterPosition, updateMeterPanelLine, totalPanels]);
 
   // Attach & detach map listeners with cleanup
   useEffect(() => {
@@ -711,12 +711,12 @@ const MapboxSolarPanelInner = ({
   </div>
 )}
 
-      {/* Zoom HUD: bottom-right, stays above safe-area and clear of sticky CTA */}
+      {/* Zoom HUD: desktop only - mobile uses native Mapbox controls */}
       <div
         className="
           absolute z-30 right-3
-          bottom-[calc(env(safe-area-inset-bottom)+84px)] md:bottom-3
-          flex items-center gap-2 rounded-full bg-neutral-900/85 px-2 py-1
+          bottom-3
+          hidden md:flex items-center gap-2 rounded-full bg-neutral-900/85 px-2 py-1
           text-[12px] text-white shadow-lg pointer-events-auto
         "
         role="group"
@@ -741,7 +741,7 @@ const MapboxSolarPanelInner = ({
         </button>
 
         <span className="px-2 font-semibold tabular-nums">
-          Zoom: {mapZoomPercentage ?? 0}%
+          {mapZoomPercentage ?? 0}%
         </span>
 
         <button

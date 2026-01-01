@@ -12,37 +12,45 @@ export async function POST(request: Request) {
   try {
     const resend = getResendOrThrow();
     
+    const body = await request.json();
     const {
       email,
       address,
       coordinates,
       quotation,
       totalPanels,
-      paymentMethod,
       additionalCost,
       electricalMeter,
       percentage
-    } = await request.json();
+    } = body;
 
-    const totalCost = quotation + (additionalCost || 0);
-    const federalTaxCredit = Math.floor(totalCost * 0.3);
-    const netCostAfterTax = totalCost - federalTaxCredit;
-    const systemSizeWatts = totalPanels * 400;
+    // Calculate values for email
+    const systemCostRaw = quotation || 0;
+    const trenchingCostRaw = additionalCost || 0;
+    const trenchingDistance = electricalMeter?.distanceInFeet || 0;
+    const totalCostRaw = systemCostRaw + trenchingCostRaw;
+    const systemSizeKw = (totalPanels * 400) / 1000;
+
+    // Estimate monthly bill from the quote (reverse calculation)
+    // If percentage is the offset and we know panels, we can estimate the original bill
+    const monthlyBill = body.avgBill || Math.round((totalPanels * 400 * 0.18 * 30 * 24 / 1000) * 0.14 / (percentage / 100));
+
     const formattedDate = new Date().toLocaleDateString('en-US', { day: '2-digit', month: 'short', year: 'numeric' });
-    const calendlyUrl = process.env.NEXT_PUBLIC_CALENDLY_URL;
+    const calendlyUrl = process.env.NEXT_PUBLIC_CALENDLY_URL || 'https://calendly.com/groundmounts/consultation';
 
     const emailTemplate = EmailTemplate({
       client: email,
-      systemType: 'Ground Mount Solar System',
-      address: `Address: ${address}, Coordinates: ${coordinates.latitude.toFixed(2)}° N, ${coordinates.longitude.toFixed(2)}° W`,
-      coordinates: `Lon: ${coordinates.longitude}, Lat: ${coordinates.latitude}`,
-      materials: `${totalPanels} Panels (${systemSizeWatts}W) - ${percentage}% Offset`,
-      estimatedCost: `$${totalCost}`,
-      fedralTax: federalTaxCredit?.toString(),
-      totalCost: `Net Out-of-Pocket Cost: $${paymentMethod === 'cash' ? netCostAfterTax : 0}`,
-      trenching: trenchingSection(electricalMeter?.distanceInFeet || 0, additionalCost),
+      address: address || 'Your Property',
+      systemCostRaw,
+      trenchingCostRaw,
+      trenchingDistance,
+      totalCostRaw,
+      totalPanels: totalPanels || 0,
+      systemSizeKw,
+      monthlyBill,
+      offsetPercentage: percentage || 100,
       date: formattedDate,
-      calendlyUrl
+      calendlyUrl,
     }) as ReactElement;
 
     console.log("emailTemplate", emailTemplate)
@@ -118,11 +126,4 @@ export async function POST(request: Request) {
     console.log("error", error)
     return Response.json({ error }, { status: 500 });
   }
-}
-
-function trenchingSection(distance: number, cost: number) {
-  if (cost > 0) {
-    return `Trenching: Distance = ${distance}ft, Cost = $${cost} ($45/ft)`;
-  }
-  return 'Trenching: Not required';
 }

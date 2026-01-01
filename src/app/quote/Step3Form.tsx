@@ -42,6 +42,7 @@ function Step3Form({}: Step3FormProps) {
     percentage,
     leadId,
     startedAt,
+    avgValue,
   } = useQuoteContext();
 
   // Phase 1: Loading sequence
@@ -89,6 +90,7 @@ function Step3Form({}: Step3FormProps) {
           additionalCost,
           electricalMeter,
           percentage,
+          avgBill: avgValue,
           honeypot: company,
           ttc_ms: Date.now() - startedAt,
         }),
@@ -195,13 +197,13 @@ function Step3Form({}: Step3FormProps) {
           {/* Header */}
           <div className="border-b border-neutral-200 px-6 py-5 sm:px-8">
             <p className="text-sm font-medium tracking-wide text-neutral-500">
-              Step 3
+              Almost there
             </p>
             <h2 className="mt-1 text-2xl font-extrabold leading-tight text-neutral-900">
-              Get Your Custom Ground Mount Quote
+              Your {totalPanels}-Panel Quote is Ready
             </h2>
             <p className="mt-2 text-sm text-neutral-600">
-              Enter your best email (and phone if you want SMS). We&apos;ll send your full quote now and follow up if you want help choosing options.
+              We&apos;ll email you the full breakdown: exact costs, 30% federal tax credit savings, and your estimated payback period. Takes 10 seconds.
             </p>
           </div>
 
@@ -263,7 +265,7 @@ function Step3Form({}: Step3FormProps) {
               <button
                 type="submit"
                 disabled={isSubmitting}
-                className="flex h-12 w-full items-center justify-center rounded-xl bg-neutral-900 text-base font-semibold text-white transition hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-70"
+                className="flex h-14 w-full items-center justify-center rounded-xl bg-neutral-900 text-base font-semibold text-white transition hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-70"
               >
                 {isSubmitting ? (
                   <span className="inline-flex items-center gap-2">
@@ -271,23 +273,35 @@ function Step3Form({}: Step3FormProps) {
                     Sending…
                   </span>
                 ) : (
-                  "Send Me My Quote"
+                  "Get My Free Quote Now"
                 )}
               </button>
+              <p className="mt-2 text-center text-xs text-neutral-500">
+                500+ Texas homeowners quoted • Instant delivery
+              </p>
             </div>
 
             {/* Trust & expectations */}
-            <div className="mt-6 grid gap-3 text-sm text-neutral-700">
-              <div className="rounded-lg bg-neutral-50 p-4">
-                <ul className="list-disc space-y-1 pl-5">
-                  <li>You&apos;ll get your full custom quote instantly.</li>
-                  <li>We may follow up with a quick email or text to offer a free, no‑pressure call to walk through the numbers.</li>
-                  <li>Not interested? Just reply <span className="rounded bg-neutral-200 px-1 py-0.5 text-xs font-semibold">STOP</span>.</li>
+            <div className="mt-5 grid gap-3 text-sm text-neutral-700">
+              <div className="rounded-lg bg-amber-50 border border-amber-100 p-4">
+                <p className="font-medium text-neutral-800 mb-2">What you&apos;ll get:</p>
+                <ul className="space-y-1.5 text-[13px]">
+                  <li className="flex items-start gap-2">
+                    <span className="text-green-600 mt-0.5">✓</span>
+                    <span>Itemized cost breakdown (panels, mounting, trenching)</span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <span className="text-green-600 mt-0.5">✓</span>
+                    <span>Your 30% federal tax credit amount</span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <span className="text-green-600 mt-0.5">✓</span>
+                    <span>Estimated payback period and monthly savings</span>
+                  </li>
                 </ul>
               </div>
-              <p className="text-center text-[13px] text-neutral-500">
-                We will <span className="font-semibold">NEVER</span> sell your info.
-                This design tool wasn&apos;t free to build—we just ask for your email in return (fair, right?).
+              <p className="text-center text-[12px] text-neutral-500">
+                Your info stays with us. We never sell data. Ever.
               </p>
             </div>
 

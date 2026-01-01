@@ -39,13 +39,14 @@ export default function QuizContent() {
     };
   });
 
-  // Ensure userId is set even after page refresh
+  // Ensure userId is set even after page refresh (intentionally runs once on mount)
   useEffect(() => {
     if (!quizData.userId) {
       const userId = uuidv4();
       localStorage.setItem('solar_quiz_user_id', userId);
       setQuizData(prev => ({ ...prev, userId }));
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // useEffect(() => {

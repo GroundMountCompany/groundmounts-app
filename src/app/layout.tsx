@@ -53,7 +53,8 @@ export default function RootLayout({
           } catch(e) { /* swallow */ }`}
         </Script>
 
-        <noscript><img height="1" width="1" style={{display:'none'}} src="https://www.facebook.com/tr?id=1711326086132514&ev=PageView&noscript=1"/></noscript>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <noscript><img height="1" width="1" style={{display:'none'}} src="https://www.facebook.com/tr?id=1711326086132514&ev=PageView&noscript=1" alt="" /></noscript>
       </body>
     </html>
   );

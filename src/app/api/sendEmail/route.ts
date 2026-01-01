@@ -19,6 +19,7 @@ export async function POST(request: Request) {
       coordinates,
       quotation,
       totalPanels,
+      paymentMethod,
       additionalCost,
       electricalMeter,
       percentage

@@ -120,6 +120,8 @@ export default function EmailTemplate({
   calendlyUrl = "https://calendly.com/groundmounts/consultation",
 
   // Quote data
+  // client is kept for future personalization but currently unused
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   client = "Homeowner",
   address = "Your Property",
   systemCostRaw = 0,

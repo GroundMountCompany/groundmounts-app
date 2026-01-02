@@ -209,15 +209,26 @@ export const MapDrawTool = ({ mode = "default", onPlace }: MapDrawToolProps = {}
                 <img src="/images/icons/location.png" alt="location" />
               </div>
               Your Location
-              <button class="ml-2 close-location-btn">
-                <img src="/images/icons/nav-2.png" alt="close" class="w-4 h-4 transform rotate-45" />
+              <button class="ml-2 close-location-btn p-1" style="touch-action: manipulation;">
+                <img src="/images/icons/nav-2.png" alt="close" class="w-4 h-4 transform rotate-45 pointer-events-none" />
               </button>
             `;
             // Add click handler for the close button
             const closeBtn = locationDiv.querySelector('.close-location-btn');
             if (closeBtn) {
               closeBtn.addEventListener('click', (e) => {
-                e.stopPropagation(); // Prevent marker drag
+                e.stopPropagation();
+                e.preventDefault();
+                // Hide the label immediately (DOM update)
+                locationDiv.style.display = 'none';
+                // Update state
+                setShowLocationText(false);
+              });
+              // Also handle touch for mobile
+              closeBtn.addEventListener('touchend', (e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                locationDiv.style.display = 'none';
                 setShowLocationText(false);
               });
             }

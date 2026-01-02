@@ -235,29 +235,32 @@ const ElectricalMeter = ({ map, mapLoaded, mode = "default" }: Props) => {
 
     const onDragEnd = () => {
       if (!markerRef.current) return;
-      
+
+      // Re-enable map panning after drag ends
+      map?.dragPan.enable();
+
       // Set dragging state to false
       setIsDragging(false);
-      
+
       // Restore original colors
       const element = markerRef.current.getElement();
       const bgElement = element.querySelector('.meter-bg');
       const pathElement = element.querySelector('.meter-path');
       const rippleElement = element.querySelector('.meter-ripple');
-      
+
       if (bgElement) {
         (bgElement as SVGElement).setAttribute('fill', '#FF9F18');
       }
-      
+
       if (pathElement) {
         (pathElement as SVGElement).setAttribute('fill', '#FFFFFF');
       }
-      
+
       if (rippleElement) {
         (rippleElement as HTMLElement).classList.remove('bg-white');
         (rippleElement as HTMLElement).classList.add('bg-yellow-500');
       }
-      
+
       const markerLngLat = markerRef.current.getLngLat();
       const newCoords: [number, number] = [markerLngLat.lng, markerLngLat.lat];
       setElectricalMeterPosition(newCoords);
@@ -270,24 +273,27 @@ const ElectricalMeter = ({ map, mapLoaded, mode = "default" }: Props) => {
 
     const onDragStart = () => {
       if (!markerRef.current) return;
-      
+
+      // Disable map panning when dragging the meter marker (mobile fix)
+      map?.dragPan.disable();
+
       // Set dragging state to true
       setIsDragging(true);
-      
+
       // Change colors when dragging starts
       const element = markerRef.current.getElement();
       const bgElement = element.querySelector('.meter-bg');
       const pathElement = element.querySelector('.meter-path');
       const rippleElement = element.querySelector('.meter-ripple');
-      
+
       if (bgElement) {
         (bgElement as SVGElement).setAttribute('fill', '#FFFFFF');
       }
-      
+
       if (pathElement) {
         (pathElement as SVGElement).setAttribute('fill', '#002868');
       }
-      
+
       if (rippleElement) {
         (rippleElement as HTMLElement).classList.remove('bg-yellow-500');
         (rippleElement as HTMLElement).classList.add('bg-white');

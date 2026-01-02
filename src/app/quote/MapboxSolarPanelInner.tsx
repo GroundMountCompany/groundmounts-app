@@ -280,6 +280,11 @@ const MapboxSolarPanelInner = ({
       .setLngLat(coordinates)
       .addTo(map);
 
+    // Disable map panning when starting to drag the panel marker (mobile fix)
+    marker.on('dragstart', () => {
+      map?.dragPan.disable();
+    });
+
     // Live line update during drag
     marker.on('drag', () => {
       const { lng, lat } = marker.getLngLat();
@@ -290,6 +295,8 @@ const MapboxSolarPanelInner = ({
 
     // State update on dragend
     marker.on('dragend', () => {
+      // Re-enable map panning after drag ends
+      map?.dragPan.enable();
       const { lng, lat } = marker.getLngLat();
       setPanelPosition([lng, lat]);
       if (electricalMeterPosition) {

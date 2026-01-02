@@ -209,10 +209,18 @@ export const MapDrawTool = ({ mode = "default", onPlace }: MapDrawToolProps = {}
                 <img src="/images/icons/location.png" alt="location" />
               </div>
               Your Location
-              <button class="ml-2">
+              <button class="ml-2 close-location-btn">
                 <img src="/images/icons/nav-2.png" alt="close" class="w-4 h-4 transform rotate-45" />
               </button>
             `;
+            // Add click handler for the close button
+            const closeBtn = locationDiv.querySelector('.close-location-btn');
+            if (closeBtn) {
+              closeBtn.addEventListener('click', (e) => {
+                e.stopPropagation(); // Prevent marker drag
+                setShowLocationText(false);
+              });
+            }
             customMakerElement.appendChild(locationDiv);
           }
         }

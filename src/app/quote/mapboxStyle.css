@@ -76,11 +76,10 @@
   }
 }
 
-/* Smooth solar marker dragging */
+/* Solar marker - only the marker itself is draggable, not surrounding area */
 .solar-marker {
-  pointer-events: auto !important;
+  pointer-events: auto;
   cursor: grab;
-  touch-action: none;
   -webkit-user-select: none;
   user-select: none;
 }
@@ -90,6 +89,6 @@
 }
 
 .solar-marker .grid {
-  will-change: transform, box-shadow;
-  pointer-events: none; /* Let parent handle touch */
+  will-change: transform;
+  pointer-events: auto; /* Grid itself captures touches */
 }

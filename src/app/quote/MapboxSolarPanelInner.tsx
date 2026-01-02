@@ -73,7 +73,6 @@ const MapboxSolarPanelInner = ({
     mapZoomPercentage,
     setMapZoomPercentage,
     totalPanels,
-    shouldDrawPanels,
     panelPosition,
     setPanelPosition,
     electricalMeterPosition,
@@ -185,74 +184,6 @@ const MapboxSolarPanelInner = ({
     };
   }, []);
 
-  // Create panel marker
-  const createPanelMarker = useCallback((coordinates: [number, number]) => {
-    if (!map) return;
-
-    if (solarMarkerRef.current) {
-      solarMarkerRef.current.remove();
-      solarMarkerRef.current = null;
-    }
-
-    // Create wrapper with large touch target
-    const solarMarkerElement = document.createElement('div');
-    solarMarkerElement.className = 'solar-marker';
-    solarMarkerElement.style.cssText = 'padding: 20px; margin: -20px; cursor: grab; touch-action: none;';
-
-    const elements: string[] = [];
-    elements.push(SOLAR_WRAP_ELEMENT);
-    for (let i = 0; i < actualPanels; i++) {
-      elements.push(SOLAR_SINGLE_ELEMENT);
-    }
-    elements.push('</div>');
-    solarMarkerElement.innerHTML = elements.join('');
-
-    const childElement = solarMarkerElement.querySelector('.grid');
-    if (childElement) {
-      (childElement as HTMLElement).style.transform = `scale(${scaleFactor})`;
-      (childElement as HTMLElement).style.transformOrigin = 'center center';
-      (childElement as HTMLElement).style.transition = 'transform 0.15s ease-out, box-shadow 0.15s ease-out';
-    }
-
-    const marker = new mapboxgl.Marker({
-      element: solarMarkerElement,
-      draggable: true
-    })
-      .setLngLat(coordinates)
-      .addTo(map);
-
-    // Visual feedback during drag
-    marker.on('dragstart', () => {
-      solarMarkerElement.style.cursor = 'grabbing';
-      const grid = solarMarkerElement.querySelector('.grid') as HTMLElement;
-      if (grid) {
-        grid.style.transform = `scale(${scaleFactor * 1.05})`;
-        grid.style.boxShadow = '0 8px 24px rgba(0,0,0,0.4)';
-      }
-    });
-
-    marker.on('dragend', () => {
-      solarMarkerElement.style.cursor = 'grab';
-      const grid = solarMarkerElement.querySelector('.grid') as HTMLElement;
-      if (grid) {
-        grid.style.transform = `scale(${scaleFactor})`;
-        grid.style.boxShadow = '';
-      }
-    });
-
-    solarMarkerRef.current = marker;
-  }, [scaleFactor, map, actualPanels]);
-
-  // Map move handler - stable with useCallback
-  const onMove = useCallback(() => {
-    // Handle map movement logic here if needed
-  }, []);
-
-  // Map drag handler - stable with useCallback  
-  const onDrag = useCallback(() => {
-    // Handle map drag logic here if needed
-  }, []);
-
   // Safe delete helper - checks if draw instance and its store are valid
   const safeDrawDelete = useCallback((featureId: string | null): boolean => {
     if (!drawRef.current || !featureId) return false;
@@ -314,6 +245,70 @@ const MapboxSolarPanelInner = ({
       console.warn('Failed to update meter-panel line:', e);
     }
   }, [map, mapLoaded, setElectricalMeter, setAdditionalCost, safeDrawDelete]);
+
+  // Create panel marker with integrated drag handlers
+  const createPanelMarker = useCallback((coordinates: [number, number]) => {
+    if (!map) return;
+
+    if (solarMarkerRef.current) {
+      solarMarkerRef.current.remove();
+      solarMarkerRef.current = null;
+    }
+
+    // Create marker element - NO extra padding, only the panel itself is draggable
+    const solarMarkerElement = document.createElement('div');
+    solarMarkerElement.className = 'solar-marker';
+
+    const elements: string[] = [];
+    elements.push(SOLAR_WRAP_ELEMENT);
+    for (let i = 0; i < actualPanels; i++) {
+      elements.push(SOLAR_SINGLE_ELEMENT);
+    }
+    elements.push('</div>');
+    solarMarkerElement.innerHTML = elements.join('');
+
+    const childElement = solarMarkerElement.querySelector('.grid');
+    if (childElement) {
+      (childElement as HTMLElement).style.transform = `scale(${scaleFactor})`;
+      (childElement as HTMLElement).style.transformOrigin = 'center center';
+    }
+
+    const marker = new mapboxgl.Marker({
+      element: solarMarkerElement,
+      draggable: true
+    })
+      .setLngLat(coordinates)
+      .addTo(map);
+
+    // Live line update during drag
+    marker.on('drag', () => {
+      const { lng, lat } = marker.getLngLat();
+      if (electricalMeterPosition) {
+        updateMeterPanelLine([lng, lat], electricalMeterPosition);
+      }
+    });
+
+    // State update on dragend
+    marker.on('dragend', () => {
+      const { lng, lat } = marker.getLngLat();
+      setPanelPosition([lng, lat]);
+      if (electricalMeterPosition) {
+        updateMeterPanelLine([lng, lat], electricalMeterPosition);
+      }
+    });
+
+    solarMarkerRef.current = marker;
+  }, [scaleFactor, map, actualPanels, electricalMeterPosition, updateMeterPanelLine, setPanelPosition]);
+
+  // Map move handler - stable with useCallback
+  const onMove = useCallback(() => {
+    // Handle map movement logic here if needed
+  }, []);
+
+  // Map drag handler - stable with useCallback
+  const onDrag = useCallback(() => {
+    // Handle map drag logic here if needed
+  }, []);
 
   // Preview marker for preview mode
   useEffect(() => {
@@ -593,49 +588,7 @@ const MapboxSolarPanelInner = ({
   }, [actualPanels, map, mapLoaded, electricalMeterPosition, panelPosition, createPanelMarker, mode]);
 
 
-  // Define callbacks outside useEffect to avoid Rules of Hooks violations
-  const onDragPanel = useCallback(() => {
-    if (!solarMarkerRef.current) return;
-    const { lng, lat } = solarMarkerRef.current.getLngLat();
-    // Live line update without forcing state churn - only if meter exists
-    if (electricalMeterPosition) {
-      updateMeterPanelLine([lng, lat], electricalMeterPosition);
-    }
-  }, [updateMeterPanelLine, electricalMeterPosition]);
-
-  const onDragEndPanel = useCallback(() => {
-    if (!solarMarkerRef.current) return;
-    const { lng, lat } = solarMarkerRef.current.getLngLat();
-    setPanelPosition([lng, lat]); // Commit to context on end
-    // Only update line if meter exists
-    if (electricalMeterPosition) {
-      updateMeterPanelLine([lng, lat], electricalMeterPosition);
-    }
-  }, [setPanelPosition, updateMeterPanelLine, electricalMeterPosition]);
-
-  // React to meter/panel changes - now handled by updateMeterPanelLine
-  // This effect is replaced by the updateMeterPanelLine callback and its useEffect
-
-  // Add handler for solar panel marker movement - using rAF-safe updates
-  useEffect(() => {
-    if (!map || !mapLoaded || !shouldDrawPanels || !drawRef.current) return;
-
-    if (solarMarkerRef.current) {
-      solarMarkerRef.current.on('drag', onDragPanel);
-      solarMarkerRef.current.on('dragend', onDragEndPanel);
-    }
-
-    return () => {
-      if (solarMarkerRef.current) {
-        try {
-          solarMarkerRef.current?.off('drag', onDragPanel);
-          solarMarkerRef.current?.off('dragend', onDragEndPanel);
-        } catch (error) {
-          console.error('Error cleaning up solar panel:', error);
-        }
-      }
-    };
-  }, [map, mapLoaded, shouldDrawPanels, electricalMeterPosition, panelPosition, actualPanels, onDragPanel, onDragEndPanel]);
+  // Note: Drag handlers are now attached directly in createPanelMarker for reliability
 
   // Clean up when panels reset to 0
   useEffect(() => {

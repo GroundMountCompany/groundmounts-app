@@ -57,7 +57,7 @@ const ElectricalMeter = ({ map, mapLoaded, mode = "default" }: Props) => {
   const {
     shouldDrawPanels,
     electricalMeter,
-    // mapZoomPercentage, // unused
+    mapZoomPercentage,
     setElectricalMeterPosition,
     panelPosition,
     drawRef,
@@ -73,8 +73,9 @@ const ElectricalMeter = ({ map, mapLoaded, mode = "default" }: Props) => {
     if (!map) return 1;
     const zoom = map.getZoom(); // this gives live map zoom
     // For example, at zoom 17 => small, zoom 20 => bigger
-    return Math.pow(2, zoom - 18); 
-  }, [map?.getZoom()]);
+    return Math.pow(2, zoom - 18);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [map, mapZoomPercentage]);
 
   // Modifikasi fungsi createCustomMarker untuk menerapkan scaleFactor
   const createCustomMarker = useCallback((coordinates: [number, number]) => {

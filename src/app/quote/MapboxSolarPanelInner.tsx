@@ -153,28 +153,29 @@ const MapboxSolarPanelInner = ({
     const zoom = map.getZoom();
     const center = map.getCenter();
     const metersPerPixel = getMetersPerPixel(center.lat, zoom);
-  
+
     // Your panel system real-world size
     const panelWidthFeet = 6; // 1 panel = 6 feet wide
     // const panelHeightFeet = 2.5; // assume height like 2.5 feet
     const systemRows = 4; // always 4 rows = height fixed
     const systemCols = Math.ceil(totalPanels / systemRows); // columns based on total panels
-  
+
     const systemWidthFeet = systemCols * panelWidthFeet;
     // const systemHeightFeet = systemRows * panelHeightFeet;
-  
+
     // Convert feet to meters
     const feetToMeters = 0.3048;
     const systemWidthMeters = systemWidthFeet * feetToMeters;
     // const systemHeightMeters = systemHeightFeet * feetToMeters;
-  
+
     // Calculate desired pixel size based on meters
     const desiredWidthPixels = systemWidthMeters / metersPerPixel;
     const baseSvgWidthPixels = systemCols * 37; // 37 is your <svg width="37"> you set per panel
     const scale = desiredWidthPixels / baseSvgWidthPixels;
-  
+
     return scale * 1.8;
-  }, [map?.getZoom(), map?.getCenter(), totalPanels]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [map, mapZoomPercentage, totalPanels]);
 
 
   // Cleanup rAF on unmount

@@ -63,23 +63,15 @@
 
 /* Mobile touch handling */
 @media (max-width: 767px) {
-  /* When map is not interactive, ensure page scrolling works */
+  /* Enable touch interactions on the map */
   .mapboxgl-map {
-    touch-action: pan-y pinch-zoom;
-    pointer-events: none; /* Disable map interactions by default on mobile */
-  }
-  
-  /* Apply a slight visual indicator when map is interactive */
-  .mapboxgl-map.interactive {
     touch-action: manipulation;
-    outline: 2px solid rgba(25, 118, 210, 0.5);
-    pointer-events: auto; /* Enable map interactions when interactive */
   }
-  
-  /* Ensure all map controls are visible and clickable when in interactive mode */
-  .mapboxgl-map.interactive .mapboxgl-control-container,
-  .mapboxgl-map.interactive .mapboxgl-popup,
-  .mapboxgl-map.interactive .mapboxgl-marker {
+
+  /* Ensure all map controls, popups, and markers are clickable */
+  .mapboxgl-control-container,
+  .mapboxgl-popup,
+  .mapboxgl-marker {
     pointer-events: auto !important;
   }
 }

@@ -37,7 +37,7 @@ export default function Step2MeterMap() {
   }, [hasPlaced, setCurrentStepIndex]);
 
   return (
-    <section className="flex flex-col h-[100svh] w-full overflow-hidden bg-white">
+    <section className="flex flex-col w-full overflow-hidden bg-white h-[100svh] md:h-auto">
       {/* Header */}
       <div className="flex-shrink-0 border-b border-neutral-200 bg-white px-4 py-3 sm:px-6">
         <h2 className="text-base font-semibold text-neutral-900">
@@ -48,8 +48,8 @@ export default function Step2MeterMap() {
         </p>
       </div>
 
-      {/* Map - takes remaining space minus button area */}
-      <div className="flex-1 min-h-0 relative">
+      {/* Map - full height on mobile, fixed height on desktop */}
+      <div className="flex-1 min-h-0 relative md:flex-none md:h-[500px]">
         <MapDrawTool
           mode="place-meter"
           initialZoomPercent={50}

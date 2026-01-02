@@ -37,35 +37,39 @@ export default function Step2MeterMap() {
   }, [hasPlaced, setCurrentStepIndex]);
 
   return (
-    <section className="grid h-[100svh] w-full grid-rows-[auto_1fr_auto] overflow-hidden bg-white">
-      <div className="border-b border-neutral-200 bg-white/95 px-4 py-3 sm:px-6">
-        <h2 className="text-[clamp(14px,2.4vw,18px)] font-semibold text-neutral-900">
-          Click Your Electrical Meter on the Map
+    <section className="flex flex-col h-[100svh] w-full overflow-hidden bg-white">
+      {/* Header */}
+      <div className="flex-shrink-0 border-b border-neutral-200 bg-white px-4 py-3 sm:px-6">
+        <h2 className="text-base font-semibold text-neutral-900">
+          Tap Your Electrical Meter Location
         </h2>
-        <p className="mt-1 text-[clamp(12px,2vw,14px)] text-neutral-600">
-          Find your property and click the exact spot where your electrical meter is. You can click again to adjust.
+        <p className="mt-1 text-sm text-neutral-600">
+          Find your property and tap where your meter is. You can tap again to adjust.
         </p>
       </div>
 
-      <div className="relative">
-        <div className="absolute inset-0 pb-[calc(env(safe-area-inset-bottom)+72px)] md:pb-0">
-          <MapDrawTool 
-            mode="place-meter"
-            initialZoomPercent={50}
-            onPlace={handlePlace}
-          />
-        </div>
+      {/* Map - takes remaining space minus button area */}
+      <div className="flex-1 min-h-0 relative">
+        <MapDrawTool
+          mode="place-meter"
+          initialZoomPercent={50}
+          onPlace={handlePlace}
+        />
       </div>
 
-      {/* Local sticky Continue */}
-      <div className="px-4 pb-[env(safe-area-inset-bottom)] pt-2 sm:px-6">
+      {/* Continue button - always visible at bottom */}
+      <div className="flex-shrink-0 bg-white border-t border-neutral-200 px-4 py-3 pb-[max(12px,env(safe-area-inset-bottom))] sm:px-6">
         <button
           type="button"
           onClick={goNext}
           disabled={!hasPlaced}
-          className={`w-full rounded-xl px-4 py-3 text-white shadow-lg ${hasPlaced ? "bg-neutral-900 hover:bg-neutral-800 active:bg-neutral-700" : "bg-neutral-300 cursor-not-allowed"}`}
+          className={`w-full rounded-xl px-4 py-3.5 text-white font-semibold shadow-lg transition-all ${
+            hasPlaced
+              ? "bg-neutral-900 hover:bg-neutral-800 active:scale-[0.98]"
+              : "bg-neutral-300 cursor-not-allowed"
+          }`}
         >
-          Continue
+          {hasPlaced ? "Continue" : "Tap the map to place your meter"}
         </button>
       </div>
     </section>

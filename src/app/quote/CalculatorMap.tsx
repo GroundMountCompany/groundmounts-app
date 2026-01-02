@@ -95,13 +95,12 @@ export default function CalculatorMap() {
     }
   }, [mapLoaded, electricalMeterPosition]);
 
-  // Responsive height: full width, ~55vh on mobile, 420px min
+  // Responsive height: compact on mobile, much larger on desktop
   return (
     <div className="w-full">
       <div
         ref={containerRef}
-        className="w-full rounded-xl overflow-hidden"
-        style={{ height: 'min(60vh, 460px)' }}
+        className="w-full rounded-xl overflow-hidden h-[min(60vh,420px)] md:h-[70vh] md:min-h-[500px] md:max-h-[700px]"
       />
       {/* Panels & distance logic render on top of the same map */}
       {mapRef.current && (

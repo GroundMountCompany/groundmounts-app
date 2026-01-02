@@ -194,8 +194,10 @@ const MapboxSolarPanelInner = ({
       solarMarkerRef.current = null;
     }
 
+    // Create wrapper with large touch target
     const solarMarkerElement = document.createElement('div');
     solarMarkerElement.className = 'solar-marker';
+    solarMarkerElement.style.cssText = 'padding: 20px; margin: -20px; cursor: grab; touch-action: none;';
 
     const elements: string[] = [];
     elements.push(SOLAR_WRAP_ELEMENT);
@@ -209,6 +211,7 @@ const MapboxSolarPanelInner = ({
     if (childElement) {
       (childElement as HTMLElement).style.transform = `scale(${scaleFactor})`;
       (childElement as HTMLElement).style.transformOrigin = 'center center';
+      (childElement as HTMLElement).style.transition = 'transform 0.15s ease-out, box-shadow 0.15s ease-out';
     }
 
     const marker = new mapboxgl.Marker({
@@ -217,6 +220,25 @@ const MapboxSolarPanelInner = ({
     })
       .setLngLat(coordinates)
       .addTo(map);
+
+    // Visual feedback during drag
+    marker.on('dragstart', () => {
+      solarMarkerElement.style.cursor = 'grabbing';
+      const grid = solarMarkerElement.querySelector('.grid') as HTMLElement;
+      if (grid) {
+        grid.style.transform = `scale(${scaleFactor * 1.05})`;
+        grid.style.boxShadow = '0 8px 24px rgba(0,0,0,0.4)';
+      }
+    });
+
+    marker.on('dragend', () => {
+      solarMarkerElement.style.cursor = 'grab';
+      const grid = solarMarkerElement.querySelector('.grid') as HTMLElement;
+      if (grid) {
+        grid.style.transform = `scale(${scaleFactor})`;
+        grid.style.boxShadow = '';
+      }
+    });
 
     solarMarkerRef.current = marker;
   }, [scaleFactor, map, actualPanels]);
@@ -699,10 +721,11 @@ const MapboxSolarPanelInner = ({
           </div>
         </div>
       )}
+      {/* Panel info - positioned in top-left on mobile to avoid blocking panel drag */}
       { actualPanels > 0 && (
-  <div className="absolute bottom-[30px] left-1/2 transform -translate-x-1/2 z-10 flex flex-col items-center gap-2">
-    <div className="bg-white/70 backdrop-blur-md px-4 py-2 rounded-full shadow-lg text-sm font-medium text-gray-700">
-      System Size: {systemSizeFeet.widthFeet} ft x {systemSizeFeet.heightFeet} ft
+  <div className="absolute top-2 left-2 z-10 flex flex-col items-start gap-1 pointer-events-none md:bottom-[30px] md:top-auto md:left-1/2 md:transform md:-translate-x-1/2 md:items-center md:gap-2">
+    <div className="bg-white/90 backdrop-blur-md px-3 py-1.5 rounded-full shadow-lg text-xs md:text-sm font-medium text-gray-700 pointer-events-auto">
+      {systemSizeFeet.widthFeet} × {systemSizeFeet.heightFeet} ft
     </div>
 
     <button
@@ -711,10 +734,10 @@ const MapboxSolarPanelInner = ({
         e.preventDefault();
         focusOnPanels();
       }}
-      className="flex items-center gap-2 px-4 py-2 bg-white/70 backdrop-blur-md rounded-full shadow-lg text-sm font-medium text-gray-700 hover:bg-white/90 transition-all duration-200"
+      className="flex items-center gap-1.5 px-3 py-1.5 bg-white/90 backdrop-blur-md rounded-full shadow-lg text-xs md:text-sm font-medium text-gray-700 hover:bg-white transition-all duration-200 pointer-events-auto"
     >
       <svg
-        className="w-4 h-4"
+        className="w-3 h-3 md:w-4 md:h-4"
         viewBox="0 0 24 24"
         fill="none"
         stroke="currentColor"
@@ -722,9 +745,9 @@ const MapboxSolarPanelInner = ({
       >
         <circle cx="12" cy="12" r="3" />
         <path d="M12 2v3m0 14v3M2 12h3m14 0h3" />
-        <path d="M19 19l-1.5-1.5M19 5l-1.5 1.5M5 19l1.5-1.5M5 5l1.5 1.5" strokeLinecap="round" />
       </svg>
-      Focus on Panels
+      <span className="hidden md:inline">Focus on Panels</span>
+      <span className="md:hidden">Find</span>
     </button>
   </div>
 )}

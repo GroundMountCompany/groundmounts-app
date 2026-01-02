@@ -78,11 +78,18 @@
 
 /* Smooth solar marker dragging */
 .solar-marker {
-  pointer-events: auto;
-  cursor: move;
+  pointer-events: auto !important;
+  cursor: grab;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.solar-marker:active {
+  cursor: grabbing;
 }
 
 .solar-marker .grid {
-  will-change: transform;
-  transition: transform 0.1s ease-out;
+  will-change: transform, box-shadow;
+  pointer-events: none; /* Let parent handle touch */
 }

@@ -189,11 +189,17 @@ export const MapDrawTool = ({ mode = "default", onPlace }: MapDrawToolProps = {}
         let customMakerElement: HTMLDivElement | undefined = undefined;
         if (typeof document !== 'undefined') {
           customMakerElement = document.createElement('div');
-          customMakerElement.className = 'flex items-center justify-center flex-col gap-2';
+          customMakerElement.className = 'flex items-center justify-center flex-col gap-1 cursor-grab active:cursor-grabbing';
+
+          // Large touch target wrapper (min 44x44 for Apple HIG)
+          const touchTarget = document.createElement('div');
+          touchTarget.className = 'w-[56px] h-[56px] flex items-center justify-center';
+
           const markerImage = document.createElement('img');
           markerImage.src = '/images/icons/marker.png';
-          markerImage.className = 'w-[40px] h-[40px] rounded-full border-0';
-          customMakerElement.appendChild(markerImage);
+          markerImage.className = 'w-[40px] h-[40px] rounded-full border-0 pointer-events-none transition-transform duration-150';
+          touchTarget.appendChild(markerImage);
+          customMakerElement.appendChild(touchTarget);
 
           if (showLocationText) {
             const locationDiv = document.createElement('div');
@@ -220,8 +226,24 @@ export const MapDrawTool = ({ mode = "default", onPlace }: MapDrawToolProps = {}
           .setLngLat([coordinates.longitude, coordinates.latitude])
           .addTo(map.current);
 
-        // Update coordinates when user drags the pin
+        // Visual feedback during drag
+        newMarker.on('dragstart', () => {
+          const el = newMarker.getElement();
+          const img = el.querySelector('img');
+          if (img) {
+            img.style.transform = 'scale(1.15)';
+            img.style.filter = 'drop-shadow(0 4px 8px rgba(0,0,0,0.3))';
+          }
+        });
+
         newMarker.on('dragend', () => {
+          const el = newMarker.getElement();
+          const img = el.querySelector('img');
+          if (img) {
+            img.style.transform = 'scale(1)';
+            img.style.filter = '';
+          }
+          // Update coordinates when user drags the pin
           const lngLat = newMarker.getLngLat();
           setCoordinates({
             latitude: lngLat.lat,
@@ -258,9 +280,42 @@ export const MapDrawTool = ({ mode = "default", onPlace }: MapDrawToolProps = {}
 
       // Create or move one meter marker
       if (!meterMarkerRef.current) {
-        meterMarkerRef.current = new mapboxgl.Marker({ color: "#f59e0b" }) // amber color
+        // Create custom element with larger touch target
+        const el = document.createElement('div');
+        el.className = 'flex items-center justify-center w-[56px] h-[56px] cursor-grab active:cursor-grabbing';
+        el.innerHTML = `
+          <div class="w-10 h-10 rounded-full bg-amber-500 border-[3px] border-white shadow-lg flex items-center justify-center transition-transform duration-150">
+            <svg class="w-5 h-5 text-white" fill="currentColor" viewBox="0 0 20 20">
+              <path d="M10 2a6 6 0 00-6 6c0 1.887.87 3.583 2.236 4.682L10 18l3.764-5.318A5.973 5.973 0 0016 8a6 6 0 00-6-6zm0 8a2 2 0 110-4 2 2 0 010 4z"/>
+            </svg>
+          </div>
+        `;
+
+        meterMarkerRef.current = new mapboxgl.Marker({
+          element: el,
+          draggable: true,
+          anchor: 'center'
+        })
           .setLngLat([lng, lat])
           .addTo(map.current!);
+
+        // Visual feedback during drag
+        meterMarkerRef.current.on('dragstart', () => {
+          const innerEl = el.querySelector('div');
+          if (innerEl) {
+            innerEl.style.transform = 'scale(1.15)';
+          }
+        });
+
+        meterMarkerRef.current.on('dragend', () => {
+          const innerEl = el.querySelector('div');
+          if (innerEl) {
+            innerEl.style.transform = 'scale(1)';
+          }
+          // Update position after drag
+          const lngLat = meterMarkerRef.current!.getLngLat();
+          onPlace?.({ lng: lngLat.lng, lat: lngLat.lat });
+        });
       } else {
         meterMarkerRef.current.setLngLat([lng, lat]);
       }
@@ -269,6 +324,7 @@ export const MapDrawTool = ({ mode = "default", onPlace }: MapDrawToolProps = {}
       onPlace?.({ lng, lat });
     };
 
+    // Handle both click and touch
     map.current.on("click", onMapClick);
 
     return () => {

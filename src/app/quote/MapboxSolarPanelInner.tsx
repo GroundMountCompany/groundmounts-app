@@ -258,6 +258,8 @@ const MapboxSolarPanelInner = ({
     // Create marker element - NO extra padding, only the panel itself is draggable
     const solarMarkerElement = document.createElement('div');
     solarMarkerElement.className = 'solar-marker';
+    // Critical for mobile: prevent touch from propagating to map
+    solarMarkerElement.style.touchAction = 'none';
 
     const elements: string[] = [];
     elements.push(SOLAR_WRAP_ELEMENT);

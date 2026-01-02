@@ -76,12 +76,15 @@
   }
 }
 
-/* Solar marker - only the marker itself is draggable, not surrounding area */
+/* Solar marker - draggable panel array */
 .solar-marker {
   pointer-events: auto;
   cursor: grab;
   -webkit-user-select: none;
   user-select: none;
+  /* Critical for mobile: prevent touch events from propagating to map */
+  touch-action: none;
+  -webkit-touch-callout: none;
 }
 
 .solar-marker:active {
@@ -90,5 +93,20 @@
 
 .solar-marker .grid {
   will-change: transform;
-  pointer-events: auto; /* Grid itself captures touches */
+  pointer-events: auto;
+  touch-action: none;
+}
+
+/* Electrical meter marker - draggable */
+.custom-marker {
+  pointer-events: auto;
+  cursor: grab;
+  -webkit-user-select: none;
+  user-select: none;
+  touch-action: none;
+  -webkit-touch-callout: none;
+}
+
+.custom-marker:active {
+  cursor: grabbing;
 }

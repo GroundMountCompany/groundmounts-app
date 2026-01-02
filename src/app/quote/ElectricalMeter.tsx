@@ -110,6 +110,8 @@ const ElectricalMeter = ({ map, mapLoaded, mode = "default" }: Props) => {
     // Create marker element with proper styling
     const markerElement = document.createElement('div');
     markerElement.className = 'custom-marker';
+    // Critical for mobile: prevent touch from propagating to map
+    markerElement.style.touchAction = 'none';
     
     // Use the current isDragging state to determine the colors
     const bgColor = isDragging ? '#FFFFFF' : '#FF9F18';

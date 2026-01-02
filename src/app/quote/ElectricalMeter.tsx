@@ -69,6 +69,22 @@ const ElectricalMeter = ({ map, mapLoaded, mode = "default" }: Props) => {
   const lineFeatureIdRef = useRef<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
 
+  // Safe delete helper - checks if draw instance and its store are valid
+  const safeDrawDelete = useCallback((featureId: string | null): boolean => {
+    if (!drawRef.current || !featureId) return false;
+    try {
+      if (typeof drawRef.current.delete !== 'function' || typeof drawRef.current.getAll !== 'function') {
+        return false;
+      }
+      drawRef.current.getAll();
+      drawRef.current.delete(featureId);
+      return true;
+    } catch (e) {
+      console.warn('[DRAW] Safe delete failed:', e);
+      return false;
+    }
+  }, [drawRef]);
+
   const scaleFactor = useMemo(() => {
     if (!map) return 1;
     const zoom = map.getZoom(); // this gives live map zoom
@@ -341,16 +357,12 @@ const ElectricalMeter = ({ map, mapLoaded, mode = "default" }: Props) => {
         }
       }
 
-      if (lineFeatureIdRef.current && drawRef.current) {
-        try {
-          drawRef.current.delete(lineFeatureIdRef.current);
-          lineFeatureIdRef.current = null;
-        } catch (error) {
-          console.error('Error cleaning up line:', error);
-        }
+      if (lineFeatureIdRef.current) {
+        safeDrawDelete(lineFeatureIdRef.current);
+        lineFeatureIdRef.current = null;
       }
     }
-  }, [drawRef, electricalMeter, shouldDrawPanels]);
+  }, [drawRef, electricalMeter, shouldDrawPanels, safeDrawDelete]);
 
   // Ensure the meter point is drawn via Draw for line connections
   // Only do this when we have panels to draw lines to
@@ -371,11 +383,7 @@ const ElectricalMeter = ({ map, mapLoaded, mode = "default" }: Props) => {
       if (allFeatures?.features) {
         const existing = allFeatures.features.find((f) => f.properties?.role === 'meter');
         if (existing?.id) {
-          try { 
-            drawRef.current.delete(existing.id as string); 
-          } catch (e) {
-            console.warn('Could not delete existing meter point:', e);
-          }
+          safeDrawDelete(existing.id as string);
         }
       }
 

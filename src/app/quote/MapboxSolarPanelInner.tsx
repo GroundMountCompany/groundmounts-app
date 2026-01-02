@@ -231,6 +231,24 @@ const MapboxSolarPanelInner = ({
     // Handle map drag logic here if needed
   }, []);
 
+  // Safe delete helper - checks if draw instance and its store are valid
+  const safeDrawDelete = useCallback((featureId: string | null): boolean => {
+    if (!drawRef.current || !featureId) return false;
+    try {
+      // Check if draw has required methods and internal state
+      if (typeof drawRef.current.delete !== 'function' || typeof drawRef.current.getAll !== 'function') {
+        return false;
+      }
+      // Try to verify the store exists by calling getAll first
+      drawRef.current.getAll();
+      drawRef.current.delete(featureId);
+      return true;
+    } catch (e) {
+      console.warn('[DRAW] Safe delete failed:', e);
+      return false;
+    }
+  }, [drawRef]);
+
   // Helper to (re)draw the dashed line and compute distance/cost
   const updateMeterPanelLine = useCallback((
     panels: [number, number] | null,
@@ -240,15 +258,14 @@ const MapboxSolarPanelInner = ({
 
     // Remove previous line
     if (lineFeatureIdRef.current) {
-      try { 
-        drawRef.current.delete(lineFeatureIdRef.current); 
-      } catch (e) {
-        console.warn('Failed to delete line:', e);
-      }
+      safeDrawDelete(lineFeatureIdRef.current);
       lineFeatureIdRef.current = null;
     }
 
     try {
+      // Check draw is still valid before adding
+      if (typeof drawRef.current.add !== 'function') return;
+
       // Add the dashed line - create proper GeoJSON feature
       const feature = {
         type: 'Feature' as const,
@@ -265,7 +282,7 @@ const MapboxSolarPanelInner = ({
       // Compute distance + costs
       const kilometers = distance(turfPoint(meter), turfPoint(panels));
       const feet = Math.round(kilometers * 3280.84); // 1 km = 3280.84 feet
-      
+
       setElectricalMeter({
         coordinates: { longitude: meter[0], latitude: meter[1] },
         distanceInFeet: feet
@@ -274,7 +291,7 @@ const MapboxSolarPanelInner = ({
     } catch (e) {
       console.warn('Failed to update meter-panel line:', e);
     }
-  }, [map, mapLoaded, setElectricalMeter, setAdditionalCost]);
+  }, [map, mapLoaded, setElectricalMeter, setAdditionalCost, safeDrawDelete]);
 
   // Preview marker for preview mode
   useEffect(() => {
@@ -548,7 +565,7 @@ const MapboxSolarPanelInner = ({
     } else {
       // setShowDragNotice(false);
       // eslint-disable-next-line @typescript-eslint/no-unused-expressions
-      lineFeatureIdRef.current && drawRef.current?.delete(lineFeatureIdRef.current);
+      if (lineFeatureIdRef.current) safeDrawDelete(lineFeatureIdRef.current);
       lineFeatureIdRef.current = null;
     }
   }, [actualPanels, map, mapLoaded, electricalMeterPosition, panelPosition, createPanelMarker, mode]);
@@ -610,8 +627,8 @@ const MapboxSolarPanelInner = ({
       }
 
       // Remove line
-      if (lineFeatureIdRef.current && drawRef.current) {
-        drawRef.current.delete(lineFeatureIdRef.current);
+      if (lineFeatureIdRef.current) {
+        safeDrawDelete(lineFeatureIdRef.current);
         lineFeatureIdRef.current = null;
       }
 

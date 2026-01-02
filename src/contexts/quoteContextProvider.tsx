@@ -249,12 +249,30 @@ export const QuoteContextProvider = ({ children }: QuoteContextProviderProps): J
     }
   }, [currentStepIndex])
 
+  // Safe delete helper - checks if draw instance and its store are valid
+  const safeDrawDelete = useCallback((draw: MapboxDraw | null, featureId: string | null): boolean => {
+    if (!draw || !featureId) return false;
+    try {
+      // Check if draw has required methods and internal state
+      if (typeof draw.delete !== 'function' || typeof draw.getAll !== 'function') {
+        return false;
+      }
+      // Try to verify the store exists by calling getAll first
+      draw.getAll();
+      draw.delete(featureId);
+      return true;
+    } catch (e) {
+      console.warn('[DRAW] Safe delete failed:', e);
+      return false;
+    }
+  }, []);
+
   const createOrUpdateLine = useCallback((meterCoords: [number, number], panelCoords: [number, number], draw: MapboxDraw) => {
     try {
       // Calculate the center point of the solar panel array
       // The panel marker's visual center is offset from its coordinates
       // We need to adjust the panel coordinates to target the visual center
-      
+
       const lineFeature: Feature<LineString> = {
         type: 'Feature',
         id: 'meter-to-panel-line',
@@ -266,14 +284,14 @@ export const QuoteContextProvider = ({ children }: QuoteContextProviderProps): J
       };
 
       if (lineFeatureIdRef.current) {
-        draw.delete(lineFeatureIdRef.current);
+        safeDrawDelete(draw, lineFeatureIdRef.current);
       }
       const ids = draw.add(lineFeature);
       lineFeatureIdRef.current = ids[0];
     } catch (error) {
       console.error('Error creating/updating line:', error);
     }
-  }, [lineFeatureIdRef]);
+  }, [lineFeatureIdRef, safeDrawDelete]);
 
   const calculateDistance = useCallback((meterCoords: [number, number], panelCoords: [number, number]) => {
     try {

@@ -1,6 +1,8 @@
 // src/lib/leadQueue.ts
 const KEY = "gm_lead_queue_v1";
 const MAX_RETRIES = 3;
+const MAX_QUEUE_SIZE = 10; // Prevent queue from growing too large
+const MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours - drop old items
 
 type Payload = {
   id: string;            // lead_id (UUID)
@@ -20,8 +22,31 @@ const load = (): Payload[] => {
 };
 const save = (items: Payload[]) => localStorage.setItem(KEY, JSON.stringify(items));
 
+// Clean stale/old items from queue
+function cleanQueue(): void {
+  const q = load();
+  const now = Date.now();
+  const cleaned = q.filter(item => {
+    // Remove items older than MAX_AGE_MS
+    if (now - item.ts > MAX_AGE_MS) return false;
+    // Remove items that have exceeded retries
+    if ((item._retries ?? 0) >= MAX_RETRIES) return false;
+    return true;
+  });
+  // Limit queue size
+  if (cleaned.length > MAX_QUEUE_SIZE) {
+    cleaned.splice(0, cleaned.length - MAX_QUEUE_SIZE);
+  }
+  if (cleaned.length !== q.length) {
+    save(cleaned);
+    console.log(`[LEAD_QUEUE] Cleaned ${q.length - cleaned.length} stale items`);
+  }
+}
+
 // Track if flush is already running to prevent concurrent flushes
 let isFlushRunning = false;
+let lastFlushTime = 0;
+const MIN_FLUSH_INTERVAL = 2000; // Minimum 2s between flushes
 
 export async function enqueueOrSend(payload: Payload, url = "/api/leads") {
   try {
@@ -40,10 +65,18 @@ export function flushQueue(url = "/api/leads") {
   // Prevent concurrent flushes
   if (isFlushRunning) return;
 
+  // Rate limit flushes
+  const now = Date.now();
+  if (now - lastFlushTime < MIN_FLUSH_INTERVAL) return;
+
+  // Clean stale items first
+  cleanQueue();
+
   const q = load();
   if (!q.length) return;
 
   isFlushRunning = true;
+  lastFlushTime = now;
   const next = q.shift()!;
   save(q);
 
@@ -91,10 +124,19 @@ export function initLeadQueue() {
   if ((window as unknown as { __leadQueueInit?: boolean }).__leadQueueInit) return;
   (window as unknown as { __leadQueueInit?: boolean }).__leadQueueInit = true;
 
+  // Clean any stale/corrupted items on init
+  cleanQueue();
+
   window.addEventListener("online", () => flushQueue());
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible") flushQueue();
   });
   // kick initial flush shortly after page load
   setTimeout(() => flushQueue(), 2000);
+}
+
+// Export for manual queue clearing if needed
+export function clearLeadQueue() {
+  save([]);
+  console.log("[LEAD_QUEUE] Queue cleared manually");
 }

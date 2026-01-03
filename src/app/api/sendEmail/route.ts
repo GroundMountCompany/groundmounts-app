@@ -30,11 +30,11 @@ export async function POST(request: Request) {
     const trenchingCostRaw = additionalCost || 0;
     const trenchingDistance = electricalMeter?.distanceInFeet || 0;
     const totalCostRaw = systemCostRaw + trenchingCostRaw;
-    const systemSizeKw = (totalPanels * 400) / 1000;
+    const systemSizeKw = (totalPanels * 435) / 1000;
 
     // Estimate monthly bill from the quote (reverse calculation)
     // If percentage is the offset and we know panels, we can estimate the original bill
-    const monthlyBill = body.avgBill || Math.round((totalPanels * 400 * 0.18 * 30 * 24 / 1000) * 0.14 / (percentage / 100));
+    const monthlyBill = body.avgBill || Math.round((totalPanels * 435 * 0.18 * 30 * 24 / 1000) * 0.14 / (percentage / 100));
 
     const formattedDate = new Date().toLocaleDateString('en-US', { day: '2-digit', month: 'short', year: 'numeric' });
     const calendlyUrl = process.env.NEXT_PUBLIC_CALENDLY_URL || 'https://calendly.com/groundmounts/consultation';

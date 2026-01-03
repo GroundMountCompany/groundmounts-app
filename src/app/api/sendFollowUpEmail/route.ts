@@ -27,7 +27,7 @@ export async function POST(request: Request) {
     const totalCost = quotation + (additionalCost || 0);
     const federalTaxCredit = Math.floor(totalCost * 0.3);
     const netCostAfterTax = totalCost - federalTaxCredit;
-    const systemSizeWatts = totalPanels * 400;
+    const systemSizeWatts = totalPanels * 435;
     const formattedDate = new Date().toLocaleDateString('en-US', { day: '2-digit', month: 'short', year: 'numeric' });
     const calendlyUrl = process.env.NEXT_PUBLIC_CALENDLY_URL;
 

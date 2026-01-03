@@ -59,7 +59,7 @@ function Step2Form({
   // Keep existing quotation calculation logic
   useEffect(() => {
     if (totalPanels > 0) {
-      const panelWattage: number = 400; // New constant for panel wattage
+      const panelWattage: number = 435; // Mission Solar MSX10-435HN0B
       const costPerWatt: number = 3.50;
       const systemSizeWatts: number = totalPanels * panelWattage;
       const baseQuotation: number = systemSizeWatts * costPerWatt;

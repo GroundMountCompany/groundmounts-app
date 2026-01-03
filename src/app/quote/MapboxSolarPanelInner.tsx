@@ -153,19 +153,17 @@ const MapboxSolarPanelInner = ({
     const center = map.getCenter();
     const metersPerPixel = getMetersPerPixel(center.lat, zoom);
 
-    // Your panel system real-world size
-    const panelWidthFeet = 6; // 1 panel = 6 feet wide
-    // const panelHeightFeet = 2.5; // assume height like 2.5 feet
+    // Mission Solar MSX10-435HN0B panel dimensions: 44.7" x 67.8" (3.73ft x 5.65ft)
+    const panelWidthFeet = 3.73; // 44.7 inches = 3.73 feet
+    // Panel height: 5.65 feet (67.8 inches) - used in systemSizeFeet calculation
     const systemRows = 4; // always 4 rows = height fixed
     const systemCols = Math.ceil(totalPanels / systemRows); // columns based on total panels
 
     const systemWidthFeet = systemCols * panelWidthFeet;
-    // const systemHeightFeet = systemRows * panelHeightFeet;
 
     // Convert feet to meters
     const feetToMeters = 0.3048;
     const systemWidthMeters = systemWidthFeet * feetToMeters;
-    // const systemHeightMeters = systemHeightFeet * feetToMeters;
 
     // Calculate desired pixel size based on meters
     const desiredWidthPixels = systemWidthMeters / metersPerPixel;
@@ -645,14 +643,15 @@ const MapboxSolarPanelInner = ({
 
 
   const systemSizeFeet = useMemo(() => {
-    const panelWidthFeet = 6; // each panel 6 feet width
-    const panelHeightFeet = 2.5; // height for 1 panel (estimate)
+    // Mission Solar MSX10-435HN0B: 44.7" x 67.8" (3.73ft x 5.65ft)
+    const panelWidthFeet = 3.73;
+    const panelHeightFeet = 5.65;
     const systemRows = 4; // fixed
     const systemCols = Math.ceil(totalPanels / systemRows);
-  
-    const widthFeet = systemCols * panelWidthFeet;
-    const heightFeet = systemRows * panelHeightFeet;
-  
+
+    const widthFeet = Math.round(systemCols * panelWidthFeet);
+    const heightFeet = Math.round(systemRows * panelHeightFeet);
+
     return { widthFeet, heightFeet };
   }, [totalPanels]);
   

@@ -222,7 +222,7 @@ export default function EmailTemplate({
                     <table style={styles.table}>
                       <tr>
                         <td style={styles.costRow}>
-                          System Cost ({totalPanels} panels × 400W)
+                          System Cost ({totalPanels} panels × 435W)
                         </td>
                         <td align="right" style={{ ...styles.costRow, fontWeight: 600 }}>
                           {formatCurrency(systemCostRaw)}

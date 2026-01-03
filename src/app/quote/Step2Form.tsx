@@ -93,7 +93,7 @@ function Step2Form({
           },{
             col: "L", val: `Trenching: Distance = ${electricalMeter?.distanceInFeet}ft, Cost = $${additionalCost} ($45/ft)`,
           },{
-            col: "M", val: String(Math.floor(totalCost * 0.3)),
+            col: "M", val: "N/A (tax credit expired 2025)",
           }]
     for (const val of vals) {
       await updateSheet(val.col, val.val)

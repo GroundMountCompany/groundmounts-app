@@ -145,8 +145,8 @@ export const PageContainer = (): JSX.Element => {
             <h3 className='text-2xl font-medium leading-[41.6px] mt-4'>What to expect:</h3>
             <ul className="mb-3">
               <li>Detailed price breakdown.</li>
-              <li>Tax credit amount.</li>
-              <li>Material List.</li>
+              <li>Material list.</li>
+              <li>Estimated savings and payback period.</li>
               <li>Option to book a free call with a professional.</li>
             </ul>
             <p className='text-lg mt-4'>Enter your best email and phone number, and we&apos;ll send the quote in seconds.</p>

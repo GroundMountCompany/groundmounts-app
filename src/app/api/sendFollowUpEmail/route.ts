@@ -18,15 +18,12 @@ export async function POST(request: Request) {
       coordinates,
       quotation,
       totalPanels,
-      paymentMethod,
       additionalCost,
       electricalMeter,
       percentage
     } = await request.json();
 
     const totalCost = quotation + (additionalCost || 0);
-    const federalTaxCredit = Math.floor(totalCost * 0.3);
-    const netCostAfterTax = totalCost - federalTaxCredit;
     const systemSizeWatts = totalPanels * 435;
     const formattedDate = new Date().toLocaleDateString('en-US', { day: '2-digit', month: 'short', year: 'numeric' });
     const calendlyUrl = process.env.NEXT_PUBLIC_CALENDLY_URL;
@@ -38,9 +35,8 @@ export async function POST(request: Request) {
       address: `Address: ${address}, Coordinates: ${coordinates.latitude.toFixed(2)}° N, ${coordinates.longitude.toFixed(2)}° W`,
       coordinates: `Lon: ${coordinates.longitude}, Lat: ${coordinates.latitude}`,
       materials: `${totalPanels} Panels (${systemSizeWatts}W) - ${percentage}% Offset`,
-      estimatedCost: `$${totalCost}`,
-      fedralTax: federalTaxCredit?.toString(),
-      totalCost: `Net Out-of-Pocket Cost: $${paymentMethod === 'cash' ? netCostAfterTax : 0}`,
+      estimatedCost: `$${totalCost.toLocaleString()}`,
+      totalCost: `Total Investment: $${totalCost.toLocaleString()}`,
       trenching: trenchingSection(electricalMeter?.distanceInFeet || 0, additionalCost),
       date: formattedDate,
       calendlyUrl

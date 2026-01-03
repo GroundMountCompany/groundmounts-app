@@ -27,8 +27,7 @@ export async function GET() {
           coordinates: 'GPS coordinates on file',
           materials: 'Custom solar panel system',
           estimatedCost: 'See original quote',
-          fedralTax: 'Federal tax credit available',
-          totalCost: 'Net cost after incentives',
+          totalCost: 'Total investment on file',
           trenching: 'Trenching cost included',
           date: new Date().toLocaleDateString('en-US', { day: '2-digit', month: 'short', year: 'numeric' }),
           calendlyUrl: process.env.NEXT_PUBLIC_CALENDLY_URL || '#'

@@ -27,7 +27,6 @@ interface FollowUpEmailTemplateProps {
   totalCost?: string;
   date?: string;
   calendlyUrl?: string;
-  fedralTax?: string;
 }
 
 interface BodyStyle {
@@ -51,7 +50,6 @@ export default function FollowUpEmailTemplate({
   totalCost,
   date,
   calendlyUrl,
-  fedralTax
 }: FollowUpEmailTemplateProps): React.JSX.Element {
   const body: BodyStyle = {
     fontFamily: "'Manrope', 'Helvetica', 'Arial', sans-serif",
@@ -75,9 +73,8 @@ export default function FollowUpEmailTemplate({
                 I wanted to follow up and see if you have any questions about the system we designed for your property.
               </div>
               <div className='text-[16px] leading-[24px] text-left font-normal text-[#46586B] mt-4 mb-0'>
-                Your {materials} system is designed to provide {estimatedCost} in energy savings while maximizing 
-                the efficiency of your open land. With the federal tax credit of ${fedralTax}, your net investment 
-                becomes even more attractive.
+                Your {materials} system is designed to provide significant energy savings while maximizing
+                the efficiency of your open land. At {estimatedCost}, this turnkey installation is ready to start saving you money.
               </div>
             </Section>
             
@@ -140,14 +137,6 @@ export default function FollowUpEmailTemplate({
                   </Column>
                   <Column className='w-1/2'>
                     <div className='text-[16px] leading-[24px] tracking-[-0.02em] text-left font-bold text-[#183776] mt-6 mb-0'>{estimatedCost}</div>
-                  </Column>
-                </Row>
-                <Row>
-                  <Column className='w-1/2 relative'>
-                    <div className='text-[16px] leading-[24px] text-left font-normal text-[#46586B] mt-6 mb-0 absolute top-0 left-0'>Federal Tax Credit:</div>
-                  </Column>
-                  <Column className='w-1/2'>
-                    <div className='text-[16px] leading-[24px] tracking-[-0.02em] text-left font-bold text-[#183776] mt-6 mb-0'>${fedralTax}</div>
                   </Column>
                 </Row>
                 <Row>

@@ -10,7 +10,7 @@ interface Step3FormProps {}
 
 const loadingMessages = [
   "Calculating your system size...",
-  "Estimating federal tax credits...",
+  "Estimating your savings...",
   "Finalizing your custom quote...",
 ];
 
@@ -45,10 +45,8 @@ function Step3Form({}: Step3FormProps) {
 
   // Calculate derived values for display
   const systemSizeKw = useMemo(() => ((totalPanels * 435) / 1000).toFixed(1), [totalPanels]);
-  const totalCost = useMemo(() => quotation + (additionalCost || 0), [quotation, additionalCost]);
-  const taxCredit = useMemo(() => Math.floor(totalCost * 0.3), [totalCost]);
-  const netCost = useMemo(() => totalCost - taxCredit, [totalCost, taxCredit]);
-  const monthlySavings = useMemo(() => Math.round(avgValue * (percentage / 100)), [avgValue, percentage]);
+  // Monthly production estimate: kW × 30 days × 24 hours × 0.18 capacity factor
+  const monthlyProductionKwh = useMemo(() => Math.round(parseFloat(systemSizeKw) * 30 * 24 * 0.18), [systemSizeKw]);
 
   // Phase 1: Loading sequence (faster)
   useEffect(() => {
@@ -204,17 +202,17 @@ function Step3Form({}: Step3FormProps) {
       <div className="min-h-full flex items-center justify-center p-4 py-8">
         <div className="w-full max-w-lg">
 
-          {/* Your System Summary - Show them what they built */}
+          {/* Your System Summary */}
           <div className="bg-white/10 backdrop-blur rounded-2xl p-4 mb-4 border border-white/10">
             <div className="flex items-center gap-2 mb-3">
-              <div className="w-8 h-8 rounded-full bg-green-500 flex items-center justify-center">
+              <div className="w-8 h-8 rounded-full bg-neutral-700 flex items-center justify-center">
                 <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                 </svg>
               </div>
-              <span className="text-white/90 text-sm font-medium">Your Custom System</span>
+              <span className="text-white/90 text-sm font-medium">Your System Design</span>
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-3 gap-3">
               <div className="bg-white/5 rounded-xl p-3">
                 <p className="text-white/60 text-xs mb-0.5">Panels</p>
                 <p className="text-white text-lg font-bold">{totalPanels}</p>
@@ -224,26 +222,21 @@ function Step3Form({}: Step3FormProps) {
                 <p className="text-white text-lg font-bold">{systemSizeKw} kW</p>
               </div>
               <div className="bg-white/5 rounded-xl p-3">
-                <p className="text-white/60 text-xs mb-0.5">Est. Tax Credit</p>
-                <p className="text-green-400 text-lg font-bold">${taxCredit.toLocaleString()}</p>
-              </div>
-              <div className="bg-white/5 rounded-xl p-3">
-                <p className="text-white/60 text-xs mb-0.5">Monthly Savings</p>
-                <p className="text-green-400 text-lg font-bold">~${monthlySavings}</p>
+                <p className="text-white/60 text-xs mb-0.5">Est. Production</p>
+                <p className="text-white text-lg font-bold">{monthlyProductionKwh.toLocaleString()} kWh/mo</p>
               </div>
             </div>
           </div>
 
           {/* Main Form Card */}
           <div className="bg-white rounded-2xl shadow-2xl overflow-hidden">
-            {/* Header - Urgency + Specificity */}
+            {/* Header */}
             <div className="px-5 pt-6 pb-4 sm:px-6 text-center">
               <h1 className="text-2xl sm:text-[26px] font-extrabold text-neutral-900 leading-tight">
-                Get Your ${netCost.toLocaleString()} Quote
+                Your {totalPanels}-Panel System is Ready
               </h1>
               <p className="mt-2 text-neutral-600 text-sm leading-relaxed">
-                The full breakdown hits your inbox in under 60 seconds.<br className="hidden sm:block" />
-                Exact costs. Tax credits. Payback timeline.
+                Get your detailed quote with system specs, costs, and installation timeline.
               </p>
             </div>
 
@@ -297,7 +290,7 @@ function Step3Form({}: Step3FormProps) {
                 />
               </div>
 
-              {/* CTA Button - Benefit Focused */}
+              {/* CTA Button */}
               <button
                 type="submit"
                 disabled={isSubmitting || !email}
@@ -310,7 +303,7 @@ function Step3Form({}: Step3FormProps) {
                   </>
                 ) : (
                   <>
-                    See My Exact Savings
+                    Get My Quote
                     <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M13 7l5 5m0 0l-5 5m5-5H6" />
                     </svg>
@@ -323,25 +316,20 @@ function Step3Form({}: Step3FormProps) {
                 <p className="mt-3 text-sm text-red-600 text-center">{status}</p>
               )}
 
-              {/* Trust Signals - Tight */}
+              {/* Trust Signals */}
               <div className="mt-4 flex items-center justify-center gap-4 text-xs text-neutral-500">
-                <span className="flex items-center gap-1">
-                  <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
-                    <path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" />
-                  </svg>
-                  No spam, ever
-                </span>
+                <span>Free detailed quote</span>
                 <span className="w-1 h-1 rounded-full bg-neutral-300"></span>
-                <span>Instant delivery</span>
+                <span>No obligation</span>
                 <span className="w-1 h-1 rounded-full bg-neutral-300"></span>
-                <span>Free</span>
+                <span>Local Texas installer</span>
               </div>
             </form>
 
             {/* Social Proof Bar */}
             <div className="bg-neutral-50 border-t border-neutral-100 px-5 py-3 sm:px-6">
               <p className="text-center text-xs text-neutral-600">
-                <span className="font-semibold text-neutral-800">847 Texas homeowners</span> got their quote this month
+                Serving Texas homeowners since 2020
               </p>
             </div>
           </div>

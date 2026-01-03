@@ -24,7 +24,6 @@ export type QuoteEmailProps = {
   estimatedCost?: string;
   systemCostRaw?: number;
   trenchingCostRaw?: number;
-  fedralTax?: string;
   totalCost?: string;
   totalCostRaw?: number;
   totalPanels?: number;
@@ -60,25 +59,19 @@ const styles = {
     boxShadow: "0 8px 32px rgba(0,0,0,0.06)",
   } as React.CSSProperties,
   header: {
-    padding: "24px",
+    padding: "32px 24px",
     borderBottom: "1px solid #e5e7eb",
-    backgroundColor: "#111827",
+    backgroundColor: "#1a1a2e",
     borderTopLeftRadius: "16px",
     borderTopRightRadius: "16px",
+    textAlign: "center" as const,
   } as React.CSSProperties,
-  h1: { margin: 0, fontSize: "22px", lineHeight: "30px", fontWeight: 800, color: "#ffffff" } as React.CSSProperties,
+  h1: { margin: 0, fontSize: "26px", lineHeight: "34px", fontWeight: 800, color: "#ffffff" } as React.CSSProperties,
   section: { padding: "24px" } as React.CSSProperties,
   table: { width: "100%", borderCollapse: "collapse" } as React.CSSProperties,
   label: { fontSize: "11px", color: "#6b7280", letterSpacing: ".04em", textTransform: "uppercase" as const } as React.CSSProperties,
   value: { fontSize: "15px", fontWeight: 600, color: "#111827" } as React.CSSProperties,
   costRow: { fontSize: "14px", color: "#111827", padding: "8px 0" } as React.CSSProperties,
-  highlight: {
-    backgroundColor: "#ecfdf5",
-    border: "1px solid #a7f3d0",
-    borderRadius: "8px",
-    padding: "16px",
-    marginBottom: "16px",
-  } as React.CSSProperties,
   ctaWrap: { padding: "8px 24px 24px" } as React.CSSProperties,
   cta: {
     display: "block",
@@ -130,23 +123,18 @@ export default function EmailTemplate({
   totalCostRaw = 0,
   totalPanels = 0,
   systemSizeKw = 0,
-  monthlyBill = 0,
-  offsetPercentage = 100,
   date = new Date().toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' }),
   installationTimeline = "2-3 weeks",
 }: QuoteEmailProps): React.JSX.Element {
 
-  // Calculate ROI metrics
-  const federalCredit = Math.round(totalCostRaw * 0.30);
-  const netCost = totalCostRaw - federalCredit;
-  const estimatedMonthlySavings = Math.round(monthlyBill * (offsetPercentage / 100));
-  const yearlySavings = estimatedMonthlySavings * 12;
-  const paybackYears = yearlySavings > 0 ? Math.round((netCost / yearlySavings) * 10) / 10 : 0;
-  const twentyYearSavings = yearlySavings * 20;
+  // Calculate key metrics
+  const annualProductionKwh = Math.round(systemSizeKw * 1500); // Texas average: ~1,500 kWh per kW per year
+  const systemLifespan = 25;
+  const costPerYear = Math.round(totalCostRaw / systemLifespan);
 
   const formatCurrency = (n: number) => `$${n.toLocaleString()}`;
 
-  const emailPreview = previewText || `Your ${totalPanels}-panel ground mount quote: ${formatCurrency(netCost)} after tax credit`;
+  const emailPreview = previewText || `Your ${systemSizeKw.toFixed(1)} kW energy independence system is ready`;
 
   return (
     <html>
@@ -166,155 +154,242 @@ export default function EmailTemplate({
           <tr>
             <td align="center">
               <table role="presentation" style={styles.card}>
-                {/* Header */}
+                {/* Hero Header - Independence Focused */}
                 <tr>
                   <td style={styles.header}>
-                    <h1 style={styles.h1}>Your Ground Mount Quote is Ready</h1>
-                    <p style={{ margin: "8px 0 0", fontSize: "14px", color: "#9ca3af" }}>
-                      {totalPanels} panels • {systemSizeKw.toFixed(1)} kW system • {address}
-                    </p>
-                  </td>
-                </tr>
-
-                {/* Big Number - Net Cost After Tax Credit */}
-                <tr>
-                  <td style={{ padding: "24px", textAlign: "center" as const }}>
-                    <div style={{ fontSize: "12px", color: "#6b7280", letterSpacing: ".04em", textTransform: "uppercase" as const }}>
-                      YOUR TOTAL INVESTMENT
+                    <div style={{ fontSize: "13px", color: "#9ca3af", letterSpacing: "0.05em", textTransform: "uppercase" as const, marginBottom: "8px" }}>
+                      Your Property • {address}
                     </div>
-                    <div style={{ fontSize: "42px", fontWeight: 800, color: "#111827", margin: "8px 0" }}>
-                      {formatCurrency(netCost)}
+                    <h1 style={styles.h1}>Your Energy Independence Blueprint</h1>
+                    <div style={{
+                      marginTop: "16px",
+                      fontSize: "42px",
+                      fontWeight: 800,
+                      color: "#ffffff",
+                      letterSpacing: "-0.02em"
+                    }}>
+                      {systemSizeKw.toFixed(1)} kW
                     </div>
-                    <div style={{ fontSize: "14px", color: "#16a34a", fontWeight: 600 }}>
-                      After 30% Federal Tax Credit ({formatCurrency(federalCredit)} savings)
+                    <div style={{ fontSize: "14px", color: "#9ca3af", marginTop: "4px" }}>
+                      Personal Power Station
                     </div>
                   </td>
                 </tr>
 
-                {/* ROI Highlight Box */}
+                {/* System Specs - Key Metrics */}
                 <tr>
-                  <td style={{ padding: "0 24px" }}>
-                    <div style={styles.highlight}>
-                      <table style={styles.table}>
-                        <tr>
-                          <td style={{ textAlign: "center" as const, padding: "8px" }}>
-                            <div style={{ fontSize: "24px", fontWeight: 700, color: "#059669" }}>{paybackYears} years</div>
-                            <div style={{ fontSize: "12px", color: "#6b7280" }}>Payback Period</div>
-                          </td>
-                          <td style={{ textAlign: "center" as const, padding: "8px", borderLeft: "1px solid #a7f3d0" }}>
-                            <div style={{ fontSize: "24px", fontWeight: 700, color: "#059669" }}>{formatCurrency(estimatedMonthlySavings)}/mo</div>
-                            <div style={{ fontSize: "12px", color: "#6b7280" }}>Est. Monthly Savings</div>
-                          </td>
-                          <td style={{ textAlign: "center" as const, padding: "8px", borderLeft: "1px solid #a7f3d0" }}>
-                            <div style={{ fontSize: "24px", fontWeight: 700, color: "#059669" }}>{formatCurrency(twentyYearSavings)}</div>
-                            <div style={{ fontSize: "12px", color: "#6b7280" }}>20-Year Savings</div>
-                          </td>
-                        </tr>
-                      </table>
+                  <td style={{ padding: "24px" }}>
+                    <div style={{ fontSize: "12px", fontWeight: 700, color: "#6b7280", letterSpacing: "0.05em", textTransform: "uppercase" as const, marginBottom: "16px" }}>
+                      Your System Specifications
                     </div>
-                  </td>
-                </tr>
-
-                {/* Cost Breakdown */}
-                <tr>
-                  <td style={styles.section}>
-                    <div style={{ fontSize: "14px", fontWeight: 700, marginBottom: "16px" }}>Cost Breakdown</div>
-                    <table style={styles.table}>
+                    <table style={{ width: "100%", borderCollapse: "collapse" }}>
                       <tr>
-                        <td style={styles.costRow}>
-                          System Cost ({totalPanels} panels × 435W)
+                        <td style={{
+                          padding: "16px",
+                          backgroundColor: "#f9fafb",
+                          borderRadius: "8px",
+                          textAlign: "center" as const,
+                          width: "50%"
+                        }}>
+                          <div style={{ fontSize: "28px", fontWeight: 700, color: "#111827" }}>{totalPanels}</div>
+                          <div style={{ fontSize: "12px", color: "#6b7280", marginTop: "4px" }}>Solar Panels</div>
                         </td>
-                        <td align="right" style={{ ...styles.costRow, fontWeight: 600 }}>
-                          {formatCurrency(systemCostRaw)}
+                        <td style={{ width: "12px" }}></td>
+                        <td style={{
+                          padding: "16px",
+                          backgroundColor: "#f9fafb",
+                          borderRadius: "8px",
+                          textAlign: "center" as const,
+                          width: "50%"
+                        }}>
+                          <div style={{ fontSize: "28px", fontWeight: 700, color: "#111827" }}>{systemSizeKw.toFixed(1)} kW</div>
+                          <div style={{ fontSize: "12px", color: "#6b7280", marginTop: "4px" }}>System Size</div>
                         </td>
                       </tr>
-                      {trenchingCostRaw > 0 && (
-                        <tr>
-                          <td style={styles.costRow}>
-                            Trenching ({trenchingDistance} ft × $45/ft)
-                          </td>
-                          <td align="right" style={{ ...styles.costRow, fontWeight: 600 }}>
-                            {formatCurrency(trenchingCostRaw)}
-                          </td>
-                        </tr>
-                      )}
+                      <tr><td colSpan={3} style={{ height: "12px" }}></td></tr>
                       <tr>
-                        <td style={{ ...styles.costRow, borderTop: "1px solid #e5e7eb", paddingTop: "12px" }}>
-                          Subtotal
+                        <td style={{
+                          padding: "16px",
+                          backgroundColor: "#f9fafb",
+                          borderRadius: "8px",
+                          textAlign: "center" as const,
+                          width: "50%"
+                        }}>
+                          <div style={{ fontSize: "28px", fontWeight: 700, color: "#111827" }}>{annualProductionKwh.toLocaleString()}</div>
+                          <div style={{ fontSize: "12px", color: "#6b7280", marginTop: "4px" }}>Est. kWh/Year</div>
                         </td>
-                        <td align="right" style={{ ...styles.costRow, borderTop: "1px solid #e5e7eb", paddingTop: "12px", fontWeight: 600 }}>
-                          {formatCurrency(totalCostRaw)}
-                        </td>
-                      </tr>
-                      <tr>
-                        <td style={{ ...styles.costRow, color: "#16a34a" }}>
-                          30% Federal Tax Credit
-                        </td>
-                        <td align="right" style={{ ...styles.costRow, color: "#16a34a", fontWeight: 600 }}>
-                          -{formatCurrency(federalCredit)}
-                        </td>
-                      </tr>
-                      <tr>
-                        <td style={{ ...styles.costRow, fontSize: "16px", fontWeight: 700, borderTop: "2px solid #111827", paddingTop: "12px" }}>
-                          Net Cost to You
-                        </td>
-                        <td align="right" style={{ ...styles.costRow, fontSize: "20px", fontWeight: 800, borderTop: "2px solid #111827", paddingTop: "12px" }}>
-                          {formatCurrency(netCost)}
+                        <td style={{ width: "12px" }}></td>
+                        <td style={{
+                          padding: "16px",
+                          backgroundColor: "#f9fafb",
+                          borderRadius: "8px",
+                          textAlign: "center" as const,
+                          width: "50%"
+                        }}>
+                          <div style={{ fontSize: "28px", fontWeight: 700, color: "#111827" }}>25-30</div>
+                          <div style={{ fontSize: "12px", color: "#6b7280", marginTop: "4px" }}>Year Lifespan</div>
                         </td>
                       </tr>
                     </table>
+
+                    {/* Trenching scope if applicable */}
+                    {trenchingDistance > 0 && (
+                      <div style={{
+                        marginTop: "16px",
+                        padding: "12px 16px",
+                        backgroundColor: "#fef3c7",
+                        borderRadius: "8px",
+                        fontSize: "14px",
+                        color: "#92400e"
+                      }}>
+                        <strong>Installation scope:</strong> {trenchingDistance} ft trenching from panels to meter
+                      </div>
+                    )}
+                  </td>
+                </tr>
+
+                {/* Investment Section */}
+                <tr>
+                  <td style={{ padding: "0 24px 24px" }}>
+                    <div style={{
+                      backgroundColor: "#1a1a2e",
+                      borderRadius: "12px",
+                      padding: "24px",
+                      textAlign: "center" as const,
+                    }}>
+                      <div style={{ fontSize: "12px", color: "#9ca3af", letterSpacing: "0.05em", textTransform: "uppercase" as const }}>
+                        Your Total Investment
+                      </div>
+                      <div style={{ fontSize: "48px", fontWeight: 800, color: "#ffffff", margin: "8px 0" }}>
+                        {formatCurrency(totalCostRaw)}
+                      </div>
+                      <div style={{ fontSize: "14px", color: "#9ca3af", marginBottom: "16px" }}>
+                        Complete turnkey installation
+                      </div>
+
+                      {/* Cost breakdown */}
+                      <table style={{ width: "100%", marginTop: "16px", borderTop: "1px solid rgba(255,255,255,0.1)", paddingTop: "16px" }}>
+                        <tr>
+                          <td style={{ fontSize: "14px", color: "#9ca3af", padding: "8px 0", textAlign: "left" as const }}>
+                            System ({totalPanels} panels × 435W)
+                          </td>
+                          <td style={{ fontSize: "14px", color: "#ffffff", fontWeight: 600, textAlign: "right" as const }}>
+                            {formatCurrency(systemCostRaw)}
+                          </td>
+                        </tr>
+                        {trenchingCostRaw > 0 && (
+                          <tr>
+                            <td style={{ fontSize: "14px", color: "#9ca3af", padding: "8px 0", textAlign: "left" as const }}>
+                              Trenching ({trenchingDistance} ft)
+                            </td>
+                            <td style={{ fontSize: "14px", color: "#ffffff", fontWeight: 600, textAlign: "right" as const }}>
+                              {formatCurrency(trenchingCostRaw)}
+                            </td>
+                          </tr>
+                        )}
+                      </table>
+
+                      {/* Cost per year */}
+                      <div style={{
+                        marginTop: "20px",
+                        padding: "16px",
+                        backgroundColor: "rgba(255,255,255,0.05)",
+                        borderRadius: "8px"
+                      }}>
+                        <div style={{ fontSize: "24px", fontWeight: 700, color: "#22c55e" }}>
+                          {formatCurrency(costPerYear)}/year
+                        </div>
+                        <div style={{ fontSize: "13px", color: "#9ca3af", marginTop: "4px" }}>
+                          Cost per year of ownership (over 25 years)
+                        </div>
+                      </div>
+
+                      {/* Ownership statement */}
+                      <div style={{
+                        marginTop: "16px",
+                        fontSize: "14px",
+                        color: "#ffffff",
+                        fontWeight: 500
+                      }}>
+                        You own this system outright — no leases, no monthly payments to a solar company.
+                      </div>
+                    </div>
                   </td>
                 </tr>
 
                 {/* Why Ground Mount */}
                 <tr>
                   <td style={{ padding: "0 24px 24px" }}>
-                    <div style={{
-                      backgroundColor: "#fffbeb",
-                      border: "1px solid #fde68a",
-                      borderRadius: "8px",
-                      padding: "16px",
-                    }}>
-                      <div style={{ fontSize: "14px", fontWeight: 700, color: "#92400e", marginBottom: "12px" }}>
-                        Why Texas Homeowners Choose Ground Mounts
-                      </div>
-                      <table style={{ width: "100%" }}>
-                        <tr>
-                          <td style={{ fontSize: "13px", color: "#78350f", padding: "4px 0", verticalAlign: "top" }}>
-                            <span style={{ color: "#16a34a", marginRight: "8px" }}>✓</span>
-                            <strong>Perfect angle</strong> — optimized for Texas sun, not your roof pitch
-                          </td>
-                        </tr>
-                        <tr>
-                          <td style={{ fontSize: "13px", color: "#78350f", padding: "4px 0", verticalAlign: "top" }}>
-                            <span style={{ color: "#16a34a", marginRight: "8px" }}>✓</span>
-                            <strong>No roof damage</strong> — zero penetrations, keeps warranty intact
-                          </td>
-                        </tr>
-                        <tr>
-                          <td style={{ fontSize: "13px", color: "#78350f", padding: "4px 0", verticalAlign: "top" }}>
-                            <span style={{ color: "#16a34a", marginRight: "8px" }}>✓</span>
-                            <strong>Easy maintenance</strong> — accessible for cleaning and repairs
-                          </td>
-                        </tr>
-                        <tr>
-                          <td style={{ fontSize: "13px", color: "#78350f", padding: "4px 0", verticalAlign: "top" }}>
-                            <span style={{ color: "#16a34a", marginRight: "8px" }}>✓</span>
-                            <strong>Expandable</strong> — add more panels when you need them
-                          </td>
-                        </tr>
-                      </table>
+                    <div style={{ fontSize: "14px", fontWeight: 700, marginBottom: "16px", color: "#111827" }}>
+                      Why Ground Mount?
                     </div>
+                    <table style={{ width: "100%" }}>
+                      <tr>
+                        <td style={{ fontSize: "14px", color: "#374151", padding: "8px 0", verticalAlign: "top" }}>
+                          <span style={{ color: "#16a34a", marginRight: "10px", fontWeight: 700 }}>✓</span>
+                          <strong>No roof penetrations or damage</strong>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style={{ fontSize: "14px", color: "#374151", padding: "8px 0", verticalAlign: "top" }}>
+                          <span style={{ color: "#16a34a", marginRight: "10px", fontWeight: 700 }}>✓</span>
+                          <strong>Optimal positioning</strong> for maximum production
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style={{ fontSize: "14px", color: "#374151", padding: "8px 0", verticalAlign: "top" }}>
+                          <span style={{ color: "#16a34a", marginRight: "10px", fontWeight: 700 }}>✓</span>
+                          <strong>Easier maintenance</strong> and cleaning
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style={{ fontSize: "14px", color: "#374151", padding: "8px 0", verticalAlign: "top" }}>
+                          <span style={{ color: "#16a34a", marginRight: "10px", fontWeight: 700 }}>✓</span>
+                          <strong>Keeps your roof warranty intact</strong>
+                        </td>
+                      </tr>
+                    </table>
                   </td>
                 </tr>
 
-                {/* Social Proof */}
+                {/* Independence Benefits */}
                 <tr>
-                  <td style={{ padding: "0 24px 16px", textAlign: "center" as const }}>
-                    <div style={{ fontSize: "13px", color: "#6b7280" }}>
-                      <strong style={{ color: "#111827" }}>500+ Texas homeowners</strong> have used our design tool
-                      <br />
-                      <span style={{ fontSize: "12px" }}>Local team • {installationTimeline} typical install</span>
+                  <td style={{ padding: "0 24px 24px" }}>
+                    <div style={{
+                      backgroundColor: "#ecfdf5",
+                      border: "1px solid #a7f3d0",
+                      borderRadius: "12px",
+                      padding: "20px",
+                    }}>
+                      <div style={{ fontSize: "14px", fontWeight: 700, color: "#065f46", marginBottom: "16px" }}>
+                        What Energy Independence Means for You
+                      </div>
+                      <table style={{ width: "100%" }}>
+                        <tr>
+                          <td style={{ fontSize: "14px", color: "#065f46", padding: "6px 0", verticalAlign: "top" }}>
+                            <span style={{ marginRight: "10px" }}>⚡</span>
+                            Lock in your energy costs — no more rate hikes
+                          </td>
+                        </tr>
+                        <tr>
+                          <td style={{ fontSize: "14px", color: "#065f46", padding: "6px 0", verticalAlign: "top" }}>
+                            <span style={{ marginRight: "10px" }}>🏠</span>
+                            Power you own outright, on your property
+                          </td>
+                        </tr>
+                        <tr>
+                          <td style={{ fontSize: "14px", color: "#065f46", padding: "6px 0", verticalAlign: "top" }}>
+                            <span style={{ marginRight: "10px" }}>📈</span>
+                            25+ year asset that increases property value
+                          </td>
+                        </tr>
+                        <tr>
+                          <td style={{ fontSize: "14px", color: "#065f46", padding: "6px 0", verticalAlign: "top" }}>
+                            <span style={{ marginRight: "10px" }}>🌵</span>
+                            Built for Texas weather and rural properties
+                          </td>
+                        </tr>
+                      </table>
                     </div>
                   </td>
                 </tr>
@@ -323,13 +398,32 @@ export default function EmailTemplate({
                 <tr>
                   <td style={styles.ctaWrap}>
                     <a href={calendlyUrl} style={styles.cta}>
-                      Schedule Your Free Consultation
+                      Schedule Your Site Visit
                     </a>
                     <a href={`tel:${supportPhone.replace(/[^\d]/g, '')}`} style={styles.ctaSecondary}>
-                      Or call us: {supportPhone}
+                      Or call: {supportPhone}
                     </a>
-                    <div style={{ marginTop: "16px", fontSize: "13px", color: "#6b7280", textAlign: "center" as const }}>
-                      <strong>Ready to move forward?</strong> Reply to this email or call — we&apos;ll walk you through the next steps.
+                    <div style={{ marginTop: "16px", fontSize: "14px", color: "#374151", textAlign: "center" as const }}>
+                      <strong>Ready to move forward?</strong> We&apos;ll visit your property, confirm the design, and handle everything from permits to installation.
+                    </div>
+                  </td>
+                </tr>
+
+                {/* Soft Qualifier */}
+                <tr>
+                  <td style={{ padding: "0 24px 24px" }}>
+                    <div style={{
+                      backgroundColor: "#f9fafb",
+                      borderRadius: "8px",
+                      padding: "16px",
+                      fontSize: "13px",
+                      color: "#6b7280",
+                      textAlign: "center" as const,
+                      lineHeight: "20px",
+                    }}>
+                      <strong style={{ color: "#374151" }}>Looking for $0-down financing or a lease option?</strong>
+                      <br />
+                      We work with partners who offer those programs — just reply and we&apos;ll connect you.
                     </div>
                   </td>
                 </tr>
@@ -341,17 +435,17 @@ export default function EmailTemplate({
                       <tr>
                         <td>
                           <div style={{ fontSize: "12px", color: "#6b7280", lineHeight: "18px" }}>
-                            Quote generated {date}
+                            Quote generated {date} • Typical install: {installationTimeline}
                           </div>
                           <div style={{ fontSize: "11px", color: "#9ca3af", marginTop: "4px" }}>
-                            This estimate is valid for 30 days. Final pricing may vary based on site inspection.
+                            This estimate is valid for 30 days. Final pricing confirmed after site visit.
                           </div>
                         </td>
                       </tr>
                       <tr>
                         <td style={{ paddingTop: "16px" }}>
                           <div style={{ fontSize: "11px", color: "#9ca3af" }}>
-                            © 2024 {brandName} •{" "}
+                            © 2025 {brandName} •{" "}
                             <a href={`mailto:${supportEmail}`} style={{ color: "#6b7280" }}>{supportEmail}</a>
                             {" "}•{" "}
                             <a href={`tel:${supportPhone.replace(/[^\d]/g, '')}`} style={{ color: "#6b7280" }}>{supportPhone}</a>

@@ -1,4 +1,8 @@
 import * as React from "react";
+import { getBrand } from "@/config/getBrand";
+
+// Get default brand values for email
+const defaultBrand = getBrand();
 
 // ===== Types =====
 type LatLng = { lat: number; lng: number } | string;
@@ -106,11 +110,11 @@ const styles = {
 };
 
 export default function EmailTemplate({
-  brandName = "Ground Mount Solutions",
-  supportEmail = "info@groundmounts.com",
-  supportPhone = "(469) 809-7099",
+  brandName = defaultBrand.name,
+  supportEmail = defaultBrand.email,
+  supportPhone = defaultBrand.phone,
   previewText,
-  calendlyUrl = "https://calendly.com/groundmounts/consultation",
+  calendlyUrl = defaultBrand.calendlyUrl,
 
   // Quote data
   // client is kept for future personalization but currently unused

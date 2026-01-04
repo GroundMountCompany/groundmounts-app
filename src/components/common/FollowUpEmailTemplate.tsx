@@ -13,6 +13,10 @@ import {
   Row,
   Column,
 } from '@react-email/components';
+import { getBrand } from "@/config/getBrand";
+
+// Get default brand values for email
+const defaultBrand = getBrand();
 
 interface FollowUpEmailTemplateProps {
   client: string;
@@ -27,6 +31,8 @@ interface FollowUpEmailTemplateProps {
   totalCost?: string;
   date?: string;
   calendlyUrl?: string;
+  brandName?: string;
+  supportEmail?: string;
 }
 
 interface BodyStyle {
@@ -49,7 +55,9 @@ export default function FollowUpEmailTemplate({
   coordinates,
   totalCost,
   date,
-  calendlyUrl,
+  calendlyUrl = defaultBrand.calendlyUrl,
+  brandName = defaultBrand.name,
+  supportEmail = defaultBrand.email,
 }: FollowUpEmailTemplateProps): React.JSX.Element {
   const body: BodyStyle = {
     fontFamily: "'Manrope', 'Helvetica', 'Arial', sans-serif",
@@ -189,12 +197,12 @@ export default function FollowUpEmailTemplate({
             </Row>
             <Hr className='!border-white opacity-[0.12] my-0' />
             <Section className='text-center text-[12px] leading-[18px] font-normal text-white pt-[33px] pb-[40px] px-[20px]'>
-              <div className='mb-2 w-[90%] mx-auto'>Questions or concerns? Get in touch with us at <Link href="mailto:info@groundmounts.com" className='text-white font-extrabold'>info@groundmounts.com.</Link></div>
+              <div className='mb-2 w-[90%] mx-auto'>Questions or concerns? Get in touch with us at <Link href={`mailto:${supportEmail}`} className='text-white font-extrabold'>{supportEmail}</Link></div>
               <div className='mb-6 w-[90%] mx-auto'>Never miss a beat! Follow us on <Link href="https://www.youtube.com/channel/UCfvcBjN1jER6Wer4vPAjvhA" className='text-white font-extrabold'>Youtube</Link> and <Link href="https://www.facebook.com/profile.php?id=61572574884731" className='text-white font-extrabold'>Facebook</Link></div>
             </Section>
             <Hr className='!border-white opacity-[0.12] my-0' />
             <Section className='text-center py-[20px]'>
-              <div className='text-[10px] leading-[15px] text-left font-normal text-white inline-block opacity-[0.5]'>Copyright © 2024 The Ground Mount Company</div>
+              <div className='text-[10px] leading-[15px] text-left font-normal text-white inline-block opacity-[0.5]'>Copyright © 2025 {brandName}</div>
             </Section>
           </Container>
           <Container>

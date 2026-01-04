@@ -1,5 +1,6 @@
 import React from "react";
 import { useQuoteContext } from "@/contexts/quoteContext";
+import { useBrand } from "@/contexts/BrandContext";
 import { updateSheet } from "@/lib/utils";
 import { useState, useEffect, useMemo } from "react";
 import { enqueueOrSend } from "@/lib/leadQueue";
@@ -15,6 +16,7 @@ const loadingMessages = [
 ];
 
 function Step3Form({}: Step3FormProps) {
+  const brand = useBrand();
   const [currentPhase, setCurrentPhase] = useState<'loading' | 'form' | 'success'>('loading');
   const [currentMessageIndex, setCurrentMessageIndex] = useState(0);
   const [showMessage, setShowMessage] = useState(true);
@@ -181,12 +183,12 @@ function Step3Form({}: Step3FormProps) {
           </p>
 
           <a
-            href="https://www.groundmounts.com"
+            href={`https://www.${brand.domain}`}
             target="_blank"
             rel="noopener noreferrer"
             className="inline-block w-full bg-white text-green-700 font-bold py-4 px-6 rounded-xl transition-transform hover:scale-[1.02] active:scale-[0.98]"
           >
-            Visit GroundMounts.com
+            Visit {brand.domain}
           </a>
           <p className="text-white/70 text-sm mt-4">
             Questions? Reply to the email anytime.
@@ -317,19 +319,20 @@ function Step3Form({}: Step3FormProps) {
               )}
 
               {/* Trust Signals */}
-              <div className="mt-4 flex items-center justify-center gap-4 text-xs text-neutral-500">
-                <span>Free detailed quote</span>
-                <span className="w-1 h-1 rounded-full bg-neutral-300"></span>
-                <span>No obligation</span>
-                <span className="w-1 h-1 rounded-full bg-neutral-300"></span>
-                <span>Local Texas installer</span>
+              <div className="mt-4 flex items-center justify-center gap-4 text-xs text-neutral-500 flex-wrap">
+                {brand.trustBadges.slice(0, 3).map((badge, index) => (
+                  <React.Fragment key={badge}>
+                    <span>{badge}</span>
+                    {index < 2 && <span className="w-1 h-1 rounded-full bg-neutral-300"></span>}
+                  </React.Fragment>
+                ))}
               </div>
             </form>
 
             {/* Social Proof Bar */}
             <div className="bg-neutral-50 border-t border-neutral-100 px-5 py-3 sm:px-6">
               <p className="text-center text-xs text-neutral-600">
-                Serving Texas homeowners since 2020
+                {brand.socialProofText}
               </p>
             </div>
           </div>

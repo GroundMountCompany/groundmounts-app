@@ -1,7 +1,7 @@
 'use client';
 
 import { useDebounce } from '@/lib/hooks';
-import { searchAddress, reverseGeocode } from '@/lib/mapbox';
+import { searchAddress } from '@/lib/mapbox';
 import { cn, updateSheet } from '@/lib/utils';
 import { GeocodingFeature } from '@/types';
 import { useEffect, useRef, useState, FormEvent, ChangeEvent, JSX } from 'react';
@@ -27,7 +27,7 @@ function deriveStateFromFeature(f: MapboxFeature): { stateCode?: string; stateNa
 }
 
 export const AddressInput = (): JSX.Element => {
-  const { setAddress, setCoordinates, setIsAutoLocationError, shouldContinueButtonDisabled, setCurrentStepIndex, leadId } = useQuoteContext();
+  const { setAddress, setCoordinates, shouldContinueButtonDisabled, setCurrentStepIndex, leadId } = useQuoteContext();
   const [suggestions, setSuggestions] = useState<GeocodingFeature[]>([]);
   const [localAddress, setLocalAddress] = useState<string>('');
   const [isLoading, setIsLoading] = useState<boolean>(false);
@@ -92,40 +92,6 @@ export const AddressInput = (): JSX.Element => {
   }, []);
 
   useEffect(() => {
-    const detectLocation = async (): Promise<void> => {
-      if (navigator.geolocation) {
-        navigator.geolocation.getCurrentPosition(async (position: GeolocationPosition) => {
-          const { latitude, longitude } = position.coords;
-          const coordinates: [number, number] = [longitude, latitude];
-
-          try {
-            const address = await reverseGeocode(coordinates);
-            setLocalAddress(address);
-            setAddress(address);
-            setCoordinates({
-              latitude,
-              longitude,
-            });
-            setShowSuggestions(false);
-            setSuggestions([]);
-            console.log('Detect Location Success:Address:', address, ' | Coordinates:', coordinates);
-            setIsAutoLocationError(false);
-            // Capture lead early when address is detected
-            await captureEarlyLead(address);
-            // Fire DesignStart once per session
-            try { fireDesignStartOnce(); } catch {}
-          } catch (error) {
-            console.warn('Error fetching address from coordinates:', error);
-            setIsAutoLocationError(true)
-          }
-        }, (error: GeolocationPositionError) => {
-          console.warn('Error getting location:', error);
-          setIsAutoLocationError(true)
-        });
-      } else {
-        console.warn('Geolocation is not supported by this browser.');
-      }
-    };
     const searchZipcode = async (): Promise<void> => {
       try {
         setLocalAddress(searchParams.get('zipcode') || '');
@@ -148,19 +114,15 @@ export const AddressInput = (): JSX.Element => {
         try { fireDesignStartOnce(); } catch {}
       } catch (error) {
         console.warn('Error fetching address from zipcode:', error);
-        setIsAutoLocationError(true)
       }
     };
-    if (!searchParams.get('zipcode')) {
-      detectLocation();
-    } else {
+    if (searchParams.get('zipcode')) {
       searchZipcode();
     }
   }, []);
 
   const handleSuggestionClick = async (suggestion: GeocodingFeature): Promise<void> => {
     setShowSuggestions(false);
-    setIsAutoLocationError(false);
     setAddress(suggestion.place_name);
     setLocalAddress(suggestion.place_name);
     setCoordinates({
@@ -206,16 +168,13 @@ export const AddressInput = (): JSX.Element => {
                 try { fireDesignStartOnce(); } catch {}
               }}
               className="h-12 w-full rounded-xl border border-neutral-300 bg-white px-4 text-base outline-none ring-0 transition focus:border-neutral-400 focus:ring-2 focus:ring-neutral-200 placeholder:text-neutral-500"
-              placeholder="Find My Location"
+              placeholder="Enter your address"
               autoComplete="off"
             />
             {isLoading && (
               <div className="absolute right-3 top-1/2 -translate-y-1/2">
                 <div className="animate-spin rounded-full h-4 w-4 border-2 border-primary-200 border-t-transparent"></div>
               </div>
-            )}
-            {!isLoading && (
-              <img src="/images/icons/detect-location.png" alt="location" className="w-4 h-4 absolute right-3 top-1/2 -translate-y-1/2" />
             )}
             {showSuggestions && suggestions.length > 0 && (
               <div

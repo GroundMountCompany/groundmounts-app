@@ -31,7 +31,7 @@ interface MapDrawToolProps {
 }
 
 export const MapDrawTool = ({ mode = "default", onPlace }: MapDrawToolProps = {}) => {
-  const { coordinates, currentStepIndex, isAutoLocationError, shouldDrawPanels, setMapZoomPercentage, address, setCoordinates } = useQuoteContext();
+  const { coordinates, currentStepIndex, shouldDrawPanels, setMapZoomPercentage, address, setCoordinates } = useQuoteContext();
   
   // All hooks must be called before any conditional returns
   const mapContainer = useRef<HTMLDivElement | null>(null);
@@ -45,15 +45,15 @@ export const MapDrawTool = ({ mode = "default", onPlace }: MapDrawToolProps = {}
   const cleanupRef = useRef(false);
   const meterMarkerRef = useRef<mapboxgl.Marker | null>(null);
 
-  // Track when coordinates are set from AddressInput or geolocation
+  // Track when coordinates are set from AddressInput
   useEffect(() => {
-    // Only set valid coordinates when we have an address or successful geolocation
-    if (coordinates.longitude !== 0 && coordinates.latitude !== 0 && !isAutoLocationError && address.length > 0) {
+    // Only set valid coordinates when we have an address
+    if (coordinates.longitude !== 0 && coordinates.latitude !== 0 && address.length > 0) {
       setHasValidCoordinates(true);
     } else {
       setHasValidCoordinates(false);
     }
-  }, [coordinates, isAutoLocationError, address]);
+  }, [coordinates, address]);
 
   // Initialize map only once
   useEffect(() => {
@@ -383,14 +383,6 @@ export const MapDrawTool = ({ mode = "default", onPlace }: MapDrawToolProps = {}
             }>
               <AddressInput />
             </Suspense>
-          </div>
-        )}
-
-
-        {isAutoLocationError && (
-          <div className="absolute w-[214px] lg:w-auto top-4 lg:top-8 left-[11px] lg:left-[50%] lg:transform lg:-translate-x-1/2 shadow-lg rounded-[12px] lg:rounded-full p-[9.87px] filter backdrop-blur-md bg-white/70 text-xs z-30 flex flex-col lg:flex-row lg:items-center gap-2 text-[#111111]">
-            <img src="/images/icons/warning.png" alt="warning" className="w-4 h-4" />
-            Locating your address was too tricky! Please type and select your address.
           </div>
         )}
 

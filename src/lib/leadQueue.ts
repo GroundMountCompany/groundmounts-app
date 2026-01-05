@@ -10,6 +10,7 @@ type Payload = {
   email?: string;
   phone?: string;
   address?: string;
+  source?: string;       // brand name for Airtable Source field
   quote?: unknown;
   ts: number;
   honeypot?: string;     // spam prevention

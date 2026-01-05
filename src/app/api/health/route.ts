@@ -7,8 +7,7 @@ export async function GET() {
     const env = {
       hasResend: !!process.env.RESEND_API_KEY,
       hasMapbox: !!process.env.NEXT_PUBLIC_MAPBOX_TOKEN,
-      hasSheetsId: !!process.env.NEXT_PUBLIC_SPREADSHEET_ID,
-      hasGoogleAuth: !!process.env.GOOGLE_CLIENT_EMAIL && !!process.env.GOOGLE_PRIVATE_KEY,
+      hasAirtable: !!process.env.AIRTABLE_API_KEY && !!process.env.AIRTABLE_BASE_ID,
     };
     return NextResponse.json({ ok: true, env });
   } catch (e: unknown) {

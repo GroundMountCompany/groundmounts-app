@@ -2,7 +2,7 @@
 
 import { useDebounce } from '@/lib/hooks';
 import { searchAddress } from '@/lib/mapbox';
-import { cn, updateSheet } from '@/lib/utils';
+import { cn } from '@/lib/utils';
 import { GeocodingFeature } from '@/types';
 import { useEffect, useRef, useState, FormEvent, ChangeEvent, JSX } from 'react';
 import { useQuoteContext } from '@/contexts/quoteContext';
@@ -142,9 +142,9 @@ export const AddressInput = (): JSX.Element => {
     try { fireDesignStartOnce(); } catch {}
   };
 
-  const handleSubmit = async (e: FormEvent): Promise<void> => {
+  const handleSubmit = (e: FormEvent): void => {
     e.preventDefault();
-    await updateSheet("E", localAddress)
+    // Address will be sent to Airtable when lead is captured in Step3Form
     setCurrentStepIndex(1);
   };
 

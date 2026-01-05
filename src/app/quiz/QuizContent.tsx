@@ -4,8 +4,6 @@ import { useState, useEffect } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
 import { v4 as uuidv4 } from 'uuid';
-import { TAB_NAME } from '@/constants/quote';
-import { updateSheet } from '@/lib/utils';
 
 interface QuizData {
   userId: string;
@@ -86,7 +84,6 @@ export default function QuizContent() {
 
   const questions = [
     {
-      column: "B",
       title: "What matters most to you about going solar?",
       options: [
         "Saving money on electricity bills",
@@ -98,7 +95,6 @@ export default function QuizContent() {
       field: 'solarMotivation'
     },
     {
-      column: "C",
       title: "What would make this solar project a success for you?",
       options: [
         "Maximum energy savings",
@@ -110,7 +106,6 @@ export default function QuizContent() {
       field: 'successCriteria'
     },
     {
-      column: "D",
       title: "Whose decision is this?",
       options: [
         "Individual decision",
@@ -123,90 +118,16 @@ export default function QuizContent() {
     }
   ];
 
-  const handleQuizAnswer = async (column: string, value: string) => {
-    try {
-      const cb = () => {
-        if (currentStep < questions.length - 1) {
-          setCurrentStep(prev => prev + 1);
-        } else {
-          router.push('/quote');
-        }
-      }
-      await updateSheet(column, value, cb)
+  const handleQuizAnswer = (value: string) => {
+    // Update local quiz data
+    const field = questions[currentStep].field;
+    setQuizData(prev => ({ ...prev, [field]: value }));
 
-    } catch (error) {
-      console.error('Error updating sheet with leadId:', error);
-    }
-  };
-
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const handleOptionSelect = async (field: string, value: string) => {
-    const updatedQuizData = {
-      ...quizData,
-      [field]: value
-    };
-    setQuizData(updatedQuizData);
-
+    // Move to next question or redirect
     if (currentStep < questions.length - 1) {
       setCurrentStep(prev => prev + 1);
     } else {
-      // This is the last question, submit data
-      setIsSubmitting(true);
-      const timestamp = new Date().toISOString();
-    const sessionId = `SESSION_${timestamp.replace(/[^0-9]/g, '')}`;
-      const rowsData = [
-        // Row for Question 1
-        [
-          updatedQuizData.userId, // Unique user ID
-          sessionId,   // Unique session ID
-          timestamp,
-          updatedQuizData.state,
-          "What matters most to you about going solar?",
-          updatedQuizData.solarMotivation
-        ],
-        // Row for Question 2
-        [
-          updatedQuizData.userId,
-          sessionId,
-          timestamp,
-          updatedQuizData.state,
-          "What would make this solar project a success for you?",
-          updatedQuizData.successCriteria
-        ],
-        // Row for Question 3
-        [
-          updatedQuizData.userId,
-          sessionId,
-          timestamp,
-          updatedQuizData.state,
-          "Whose decision is this?",
-          updatedQuizData.decisionMaker
-        ]
-      ];
-      
-      try {
-        const response = await fetch('/api/submit', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({tabName: TAB_NAME.QUIZ, data: rowsData}),
-        });
-
-        if (!response.ok) {
-          throw new Error('Failed to submit data');
-        }
-
-        // Clear userId from localStorage after successful submission
-        
-        // Redirect to the next step or thank you page
-        router.push('/quote');
-      } catch (error) {
-        console.error('Error:', error);
-        alert('There was an error submitting your information. Please try again.');
-      } finally {
-        setIsSubmitting(false);
-      }
+      router.push('/quote');
     }
   };
 
@@ -246,8 +167,7 @@ export default function QuizContent() {
               <button
                 key={option}
                 className="w-full p-6 text-left text-lg border-2 rounded-xl hover:border-blue-500 hover:bg-blue-50 transition-all duration-200 ease-in-out"
-                // onClick={() => handleOptionSelect(questions[currentStep].field, option)}
-                onClick={() => handleQuizAnswer(questions[currentStep].column, option)}
+                onClick={() => handleQuizAnswer(option)}
                 disabled={isSubmitting}
               >
                 {option}

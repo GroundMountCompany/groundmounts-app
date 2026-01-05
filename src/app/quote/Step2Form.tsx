@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
-import { cn, updateSheet } from "@/lib/utils";
+import { cn } from "@/lib/utils";
 import * as Slider from "@radix-ui/react-slider";
 import "./sliderStyle.css";
 import Button from "@/components/common/Button";
@@ -35,8 +35,6 @@ function Step2Form({
     setHighestValue,
     electricalMeter,
     electricalMeterPosition,
-    coordinates,
-    quotation,
     ensureMeterFromStorage
   } = useQuoteContext();
   const [showTooltip, setShowTooltip] = useState<boolean>(false);
@@ -76,28 +74,9 @@ function Step2Form({
       setMeterBtn(true)
     }
   }, [electricalMeterPosition])
-  
-  const totalCost = useMemo(() => quotation + (additionalCost || 0), [quotation, additionalCost]);
 
-  const handleContinue = async () => {
-    const vals = [{
-            col: "G", val: String(avgValue),
-          },{
-            col: "H", val: String(highestValue),
-          },{
-            col: "I", val: String(percentage),
-          },{
-            col: "J", val: "Long: " + coordinates.longitude + ", Lat: " + coordinates.latitude,
-          },{
-            col: "K", val: String(totalCost),
-          },{
-            col: "L", val: `Trenching: Distance = ${electricalMeter?.distanceInFeet}ft, Cost = $${additionalCost} ($45/ft)`,
-          },{
-            col: "M", val: "N/A (tax credit expired 2025)",
-          }]
-    for (const val of vals) {
-      await updateSheet(val.col, val.val)
-    }
+  const handleContinue = () => {
+    // Data will be sent to Airtable when lead is captured in Step3Form
     setCurrentStepIndex(4); // Move to Step3Form (lead capture form)
   }
 

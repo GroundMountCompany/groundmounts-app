@@ -1,7 +1,6 @@
 import React from "react";
 import { useQuoteContext } from "@/contexts/quoteContext";
 import { useBrand } from "@/contexts/BrandContext";
-import { updateSheet } from "@/lib/utils";
 import { useState, useEffect, useMemo } from "react";
 import { enqueueOrSend } from "@/lib/leadQueue";
 import { useSearchParams } from 'next/navigation';
@@ -43,6 +42,7 @@ function Step3Form({}: Step3FormProps) {
     leadId,
     startedAt,
     avgValue,
+    highestValue,
   } = useQuoteContext();
 
   // Calculate derived values for display
@@ -102,8 +102,6 @@ function Step3Form({}: Step3FormProps) {
 
       if (res.ok) {
         setStatus("Email sent!");
-        await updateSheet("O", email);
-        await updateSheet("P", phone);
 
         try {
           await enqueueOrSend({
@@ -112,6 +110,7 @@ function Step3Form({}: Step3FormProps) {
             email,
             phone,
             address,
+            source: brand.name,
             quote: {
               quotation,
               totalPanels,
@@ -120,6 +119,9 @@ function Step3Form({}: Step3FormProps) {
               electricalMeter,
               percentage,
               coordinates,
+              avgBill: avgValue,
+              highBill: highestValue,
+              systemSizeKw: parseFloat(systemSizeKw),
             },
             ts: Date.now(),
             honeypot: company,

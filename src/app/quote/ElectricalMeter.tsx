@@ -3,7 +3,6 @@
 import { useQuoteContext } from '@/contexts/quoteContext';
 import { useEffect, useRef, useCallback, useMemo, useState } from 'react';
 import mapboxgl from 'mapbox-gl';
-import { updateSheet } from '@/lib/utils';
 
 interface Props {
   map: mapboxgl.Map | null;
@@ -314,20 +313,8 @@ const ElectricalMeter = ({ map, mapLoaded, mode = "default" }: Props) => {
     console.log("electricalMeterPosition", electricalMeterPosition)
     if (!electricalMeterPosition) return;
 
-    const timeout = setTimeout(() => {
-      const [lng, lat] = electricalMeterPosition;
-
-      // Call async function safely
-      (async () => {
-        try {
-          await updateSheet('F', `Long: ${lng}, Lat: ${lat}`);
-        } catch (err) {
-          console.error('Failed to update sheet:', err);
-        }
-      })();
-    }, 500);
+    // Meter position will be sent to Airtable when lead is captured in Step3Form
     return () => {
-      clearTimeout(timeout)
       if (map && map.loaded()) {
         try {
           map.off('click', handleMapInteraction);

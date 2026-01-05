@@ -13,8 +13,16 @@ export async function POST(request: NextRequest) {
     }
 
     const message = await getMessage(messageId);
+
+    if (!message) {
+      return NextResponse.json(
+        { error: 'Gmail API is not configured' },
+        { status: 503 }
+      );
+    }
+
     const headers = message.payload?.headers;
-    
+
     if (!headers) {
       return NextResponse.json(
         { error: 'No headers found in message' },

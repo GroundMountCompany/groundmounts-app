@@ -1,18 +1,33 @@
 import { NextRequest, NextResponse } from "next/server";
-import { findLeadById, ensureLeadIndexed, writeLeadToSheet } from "@/lib/sheets";
+import { createLead, parseAddress, LeadFields } from "@/lib/airtable";
 import { getClientIp, rateLimitOk, isBotHoneypot, minTimeOk } from "@/lib/guard";
 
-interface Lead {
+interface LeadPayload {
   id: string;
   state: string;
   email?: string;
   phone?: string;
   address?: string;
-  quote?: unknown;
+  name?: string;
+  source?: string;
+  quote?: {
+    quotation?: number;
+    totalPanels?: number;
+    additionalCost?: number;
+    electricalMeter?: {
+      distanceInFeet?: number;
+    };
+    percentage?: number;
+    avgBill?: number;
+    highBill?: number;
+    systemSizeKw?: number;
+  };
   ts: number;
+  honeypot?: string;
+  ttc_ms?: number;
 }
 
-function validateLead(data: unknown): Lead {
+function validateLead(data: unknown): LeadPayload {
   const obj = data as Record<string, unknown>;
   if (!obj.id || typeof obj.id !== 'string' || obj.id.length < 8) {
     throw new Error('Invalid lead ID');
@@ -23,22 +38,26 @@ function validateLead(data: unknown): Lead {
   if (typeof obj.ts !== 'number') {
     throw new Error('Invalid timestamp');
   }
-  
+
   return {
     id: obj.id,
     state: obj.state,
     email: (obj.email as string) || "",
     phone: (obj.phone as string) || "",
     address: (obj.address as string) || "",
-    quote: obj.quote,
+    name: (obj.name as string) || "",
+    source: (obj.source as string) || "",
+    quote: obj.quote as LeadPayload['quote'],
     ts: obj.ts,
+    honeypot: obj.honeypot as string,
+    ttc_ms: obj.ttc_ms as number,
   };
 }
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    
+
     // Apply guards before processing
     const ip = getClientIp(req);
     if (!rateLimitOk(ip)) {
@@ -55,16 +74,39 @@ export async function POST(req: NextRequest) {
 
     const lead = validateLead(body);
 
-    const dup = await findLeadById(lead.id);
-    if (dup) {
-      return NextResponse.json({ ok: true, dedup: true });
-    }
+    // Parse address components
+    const addressParts = lead.address ? parseAddress(lead.address) : {};
 
-    const { rowRef } = await writeLeadToSheet(lead);
-    await ensureLeadIndexed(lead.id, rowRef);
+    // Build Airtable fields
+    const fields: LeadFields = {
+      Name: lead.name || undefined,
+      Email: lead.email || undefined,
+      Phone: lead.phone || undefined,
+      Address: lead.address || undefined,
+      City: addressParts.city,
+      State: addressParts.state || lead.state,
+      Zip: addressParts.zip,
+      Panels: lead.quote?.totalPanels,
+      'System Size kW': lead.quote?.systemSizeKw,
+      'Monthly Bill Avg': lead.quote?.avgBill,
+      'Monthly Bill High': lead.quote?.highBill,
+      'Offset Percentage': lead.quote?.percentage,
+      'Trenching Distance ft': lead.quote?.electricalMeter?.distanceInFeet,
+      'Trenching Cost': lead.quote?.additionalCost,
+      'Total Investment': lead.quote?.quotation ? (lead.quote.quotation + (lead.quote.additionalCost || 0)) : undefined,
+      Source: lead.source || undefined,
+      Status: 'New',
+    };
 
-    console.log("[LEAD_CAPTURED]", lead.id, lead.state, lead.address || "no_address", "row:", rowRef);
-    return NextResponse.json({ ok: true, rowRef });
+    // Remove undefined fields
+    const cleanFields = Object.fromEntries(
+      Object.entries(fields).filter(([, v]) => v !== undefined && v !== '')
+    ) as LeadFields;
+
+    const result = await createLead(cleanFields);
+
+    console.log("[LEAD_CAPTURED]", lead.id, lead.email || "no_email", "airtable_id:", result.id);
+    return NextResponse.json({ ok: true, airtableId: result.id });
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e);
     console.error("[LEADS_ROUTE_ERROR]", msg);

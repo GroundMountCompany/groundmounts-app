@@ -22,9 +22,6 @@ export type BrandConfig = {
   // Social proof
   socialProofText: string;
 
-  // Lead destination
-  googleSheetId: string;
-
   // Meta
   metaTitle: string;
   metaDescription: string;
@@ -45,7 +42,6 @@ export const brands: Record<string, BrandConfig> = {
     subheadline: "Skip the roof. Own your power.",
     trustBadges: ["Licensed Electrician", "25-Year Warranty", "100+ Installs", "No Roof Damage"],
     socialProofText: "Serving Texas homeowners since 2020",
-    googleSheetId: "existing-sheet-id",
     metaTitle: "Ground Mount Solar Design Tool | The Ground Mount Company",
     metaDescription: "Design your custom ground mount solar system in minutes. Get an instant quote for professional installation in Texas.",
   },
@@ -64,7 +60,6 @@ export const brands: Record<string, BrandConfig> = {
     subheadline: "Professional ground mount installation across DFW and Houston",
     trustBadges: ["Texas-Based", "25-Year Warranty", "500+ Projects", "Free Site Visit"],
     socialProofText: "Texas's trusted ground mount specialists",
-    googleSheetId: "existing-sheet-id",
     metaTitle: "Texas Ground Mount Solar | Professional Installation",
     metaDescription: "Professional ground mount solar installation across Texas. Design your system and get an instant quote.",
   },
@@ -83,7 +78,6 @@ export const brands: Record<string, BrandConfig> = {
     subheadline: "Ground mount solar for Texas properties with space",
     trustBadges: ["No Roof Damage", "Optimal Sun Angle", "25-Year Warranty", "Texas Local"],
     socialProofText: "Helping Texas landowners go solar",
-    googleSheetId: "existing-sheet-id",
     metaTitle: "Backyard Solar Texas | Ground Mount Solar for Land Owners",
     metaDescription: "Have land? Skip the roof and install ground mount solar. Design your system for your Texas property.",
   },
@@ -102,7 +96,6 @@ export const brands: Record<string, BrandConfig> = {
     subheadline: "Free tool to plan your ground mount solar installation",
     trustBadges: ["Free Design Tool", "Instant Quote", "No Obligation", "Expert Support"],
     socialProofText: "Trusted by thousands of homeowners",
-    googleSheetId: "existing-sheet-id",
     metaTitle: "Ground Mount Solar Guide | Free Design Tool",
     metaDescription: "Free ground mount solar design tool. Plan your installation and get expert guidance.",
   },

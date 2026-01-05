@@ -19,6 +19,7 @@ function Step3Form({}: Step3FormProps) {
   const [currentPhase, setCurrentPhase] = useState<'loading' | 'form' | 'success'>('loading');
   const [currentMessageIndex, setCurrentMessageIndex] = useState(0);
   const [showMessage, setShowMessage] = useState(true);
+  const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -107,10 +108,11 @@ function Step3Form({}: Step3FormProps) {
           await enqueueOrSend({
             id: leadId,
             state: selectedState,
+            name,
             email,
             phone,
             address,
-            source: brand.name,
+            source: brand.domain,
             quote: {
               quotation,
               totalPanels,
@@ -127,7 +129,7 @@ function Step3Form({}: Step3FormProps) {
             honeypot: company,
             ttc_ms: Date.now() - startedAt,
           });
-          console.log("[FINAL_LEAD_CAPTURED]", leadId, email);
+          console.log("[FINAL_LEAD_CAPTURED]", leadId, email, name);
         } catch (error) {
           console.error("[FINAL_LEAD_CAPTURE_ERROR]", error);
         }
@@ -257,7 +259,25 @@ function Step3Form({}: Step3FormProps) {
                 onChange={(e) => setCompany(e.target.value)}
               />
 
-              {/* Email Input - Primary */}
+              {/* Name Input */}
+              <div className="mb-4">
+                <label htmlFor="name" className="block text-sm font-semibold text-neutral-800 mb-2">
+                  Your name
+                </label>
+                <input
+                  id="name"
+                  type="text"
+                  autoComplete="name"
+                  required
+                  autoFocus
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  className="h-14 w-full rounded-xl border-2 border-neutral-200 bg-neutral-50 px-4 text-base outline-none transition-all focus:border-neutral-900 focus:bg-white focus:ring-0"
+                  placeholder="John Smith"
+                />
+              </div>
+
+              {/* Email Input */}
               <div className="mb-4">
                 <label htmlFor="email" className="block text-sm font-semibold text-neutral-800 mb-2">
                   Where should we send it?
@@ -268,7 +288,6 @@ function Step3Form({}: Step3FormProps) {
                   inputMode="email"
                   autoComplete="email"
                   required
-                  autoFocus
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   className="h-14 w-full rounded-xl border-2 border-neutral-200 bg-neutral-50 px-4 text-base outline-none transition-all focus:border-neutral-900 focus:bg-white focus:ring-0"

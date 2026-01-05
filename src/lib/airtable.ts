@@ -17,6 +17,7 @@ export interface LeadFields {
   'Offset Percentage'?: number;
   'Trenching Distance ft'?: number;
   'Trenching Cost'?: number;
+  'Equipment Cost'?: number;
   'Total Investment'?: number;
   Source?: string;
   Status?: string;

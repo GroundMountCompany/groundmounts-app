@@ -7,10 +7,11 @@ const MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours - drop old items
 type Payload = {
   id: string;            // lead_id (UUID)
   state: string;         // "TX" etc.
+  name?: string;
   email?: string;
   phone?: string;
   address?: string;
-  source?: string;       // brand name for Airtable Source field
+  source?: string;       // brand domain for Airtable Source field
   quote?: unknown;
   ts: number;
   honeypot?: string;     // spam prevention

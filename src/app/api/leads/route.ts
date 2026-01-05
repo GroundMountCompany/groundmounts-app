@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createLead, parseAddress, LeadFields } from "@/lib/airtable";
 import { getClientIp, rateLimitOk, isBotHoneypot, minTimeOk } from "@/lib/guard";
+import { getResendOrThrow } from "@/lib/resendSafe";
+
+const NOTIFICATION_EMAIL = "bert@groundmounts.com";
+const AIRTABLE_BASE_ID = process.env.AIRTABLE_BASE_ID;
 
 interface LeadPayload {
   id: string;
@@ -120,6 +124,90 @@ export async function POST(req: NextRequest) {
     const result = await createLead(cleanFields);
 
     console.log("[LEAD_CAPTURED]", lead.id, lead.email || "no_email", "airtable_id:", result.id);
+
+    // Send notification email (don't fail request if email fails)
+    try {
+      const resend = getResendOrThrow();
+      const airtableUrl = `https://airtable.com/${AIRTABLE_BASE_ID}/tblLeads/${result.id}`;
+      const cityDisplay = addressParts.city || 'Unknown City';
+      const stateDisplay = addressParts.state || lead.state || 'TX';
+
+      await resend.emails.send({
+        from: 'Ground Mounts <leads@groundmounts.com>',
+        to: NOTIFICATION_EMAIL,
+        subject: `New Solar Lead: ${lead.name || 'Unknown'} - ${cityDisplay}, ${stateDisplay}`,
+        html: `
+          <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto;">
+            <h2 style="color: #16a34a; margin-bottom: 24px;">New Lead Received</h2>
+
+            <table style="width: 100%; border-collapse: collapse;">
+              <tr>
+                <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5; color: #666; width: 140px;">Name</td>
+                <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5; font-weight: 600;">${lead.name || 'Not provided'}</td>
+              </tr>
+              <tr>
+                <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5; color: #666;">Email</td>
+                <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5;"><a href="mailto:${lead.email}" style="color: #2563eb;">${lead.email || 'Not provided'}</a></td>
+              </tr>
+              <tr>
+                <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5; color: #666;">Phone</td>
+                <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5;"><a href="tel:${lead.phone}" style="color: #2563eb;">${lead.phone || 'Not provided'}</a></td>
+              </tr>
+              <tr>
+                <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5; color: #666;">Address</td>
+                <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5;">${lead.address || 'Not provided'}</td>
+              </tr>
+              <tr>
+                <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5; color: #666;">System Size</td>
+                <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5;">${lead.quote?.systemSizeKw ? `${lead.quote.systemSizeKw} kW` : 'N/A'}</td>
+              </tr>
+              <tr>
+                <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5; color: #666;">Panels</td>
+                <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5;">${lead.quote?.totalPanels || 'N/A'}</td>
+              </tr>
+              <tr>
+                <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5; color: #666;">Monthly Bill (Avg)</td>
+                <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5;">${lead.quote?.avgBill ? `$${lead.quote.avgBill}` : 'N/A'}</td>
+              </tr>
+              <tr>
+                <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5; color: #666;">Trenching Distance</td>
+                <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5;">${lead.quote?.electricalMeter?.distanceInFeet ? `${lead.quote.electricalMeter.distanceInFeet} ft` : 'N/A'}</td>
+              </tr>
+              <tr>
+                <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5; color: #666;">Equipment Cost</td>
+                <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5;">${lead.quote?.quotation ? `$${lead.quote.quotation.toLocaleString()}` : 'N/A'}</td>
+              </tr>
+              <tr>
+                <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5; color: #666;">Trenching Cost</td>
+                <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5;">${lead.quote?.additionalCost ? `$${lead.quote.additionalCost.toLocaleString()}` : 'N/A'}</td>
+              </tr>
+              <tr>
+                <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5; color: #666; font-weight: 600;">Total Investment</td>
+                <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5; font-weight: 600; color: #16a34a;">${lead.quote?.quotation ? `$${(lead.quote.quotation + (lead.quote.additionalCost || 0)).toLocaleString()}` : 'N/A'}</td>
+              </tr>
+              <tr>
+                <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5; color: #666;">Source</td>
+                <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5;">${lead.source || 'Direct'}</td>
+              </tr>
+            </table>
+
+            <div style="margin-top: 24px;">
+              <a href="${airtableUrl}" style="display: inline-block; background: #16a34a; color: white; padding: 12px 24px; text-decoration: none; border-radius: 8px; font-weight: 600;">View in Airtable</a>
+            </div>
+
+            <p style="margin-top: 24px; color: #999; font-size: 12px;">
+              Lead ID: ${lead.id}<br>
+              Received: ${new Date().toLocaleString('en-US', { timeZone: 'America/Chicago' })} CT
+            </p>
+          </div>
+        `,
+      });
+      console.log("[LEAD_EMAIL_SENT]", NOTIFICATION_EMAIL);
+    } catch (emailError) {
+      console.error("[LEAD_EMAIL_ERROR]", emailError instanceof Error ? emailError.message : emailError);
+      // Don't throw - lead was still captured successfully
+    }
+
     return NextResponse.json({ ok: true, airtableId: result.id });
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e);

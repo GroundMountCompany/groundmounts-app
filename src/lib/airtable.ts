@@ -24,28 +24,40 @@ export interface LeadFields {
 
 export async function createLead(fields: LeadFields) {
   if (!AIRTABLE_API_KEY || !AIRTABLE_BASE_ID) {
+    console.error('[AIRTABLE_CONFIG_ERROR] Missing:', {
+      hasApiKey: !!AIRTABLE_API_KEY,
+      hasBaseId: !!AIRTABLE_BASE_ID,
+    });
     throw new Error('Airtable configuration missing');
   }
 
-  const response = await fetch(
-    `https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${encodeURIComponent(AIRTABLE_TABLE_NAME)}`,
-    {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${AIRTABLE_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ fields }),
-    }
-  );
+  const url = `https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${encodeURIComponent(AIRTABLE_TABLE_NAME)}`;
+  const payload = { fields };
+
+  console.log('[AIRTABLE_REQUEST] URL:', url);
+  console.log('[AIRTABLE_REQUEST] Payload:', JSON.stringify(payload, null, 2));
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${AIRTABLE_API_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  });
 
   if (!response.ok) {
     const errorText = await response.text();
-    console.error('[AIRTABLE_ERROR]', response.status, errorText);
-    throw new Error(`Airtable error: ${response.statusText}`);
+    console.error('[AIRTABLE_ERROR] Status:', response.status);
+    console.error('[AIRTABLE_ERROR] StatusText:', response.statusText);
+    console.error('[AIRTABLE_ERROR] Response:', errorText);
+    console.error('[AIRTABLE_ERROR] Payload sent:', JSON.stringify(payload, null, 2));
+    throw new Error(`Airtable error: ${response.status} - ${errorText}`);
   }
 
-  return response.json();
+  const result = await response.json();
+  console.log('[AIRTABLE_SUCCESS] Record created:', result.id);
+  return result;
 }
 
 // State name to abbreviation mapping

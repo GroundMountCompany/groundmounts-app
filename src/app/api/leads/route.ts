@@ -58,24 +58,32 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
 
+    // Log incoming request
+    console.log("[LEADS_INCOMING]", JSON.stringify(body, null, 2));
+
     // Apply guards before processing
     const ip = getClientIp(req);
     if (!rateLimitOk(ip)) {
+      console.log("[LEADS_BLOCKED] Rate limited:", ip);
       return NextResponse.json({ ok: false, error: "rate_limited" }, { status: 429 });
     }
 
     if (isBotHoneypot((body as Record<string, unknown>).honeypot as string)) {
+      console.log("[LEADS_BLOCKED] Bot honeypot triggered");
       return NextResponse.json({ ok: true, ignored: true }); // pretend success, do nothing
     }
 
     if ((body as Record<string, unknown>).ttc_ms !== undefined && !minTimeOk((body as Record<string, unknown>).ttc_ms as number)) {
+      console.log("[LEADS_BLOCKED] Too fast:", (body as Record<string, unknown>).ttc_ms);
       return NextResponse.json({ ok: false, error: "too_fast" }, { status: 400 });
     }
 
     const lead = validateLead(body);
+    console.log("[LEADS_VALIDATED] Lead ID:", lead.id, "Email:", lead.email, "Source:", lead.source);
 
     // Parse address components
     const addressParts = lead.address ? parseAddress(lead.address) : {};
+    console.log("[LEADS_ADDRESS_PARSED]", JSON.stringify(addressParts));
 
     // Build Airtable fields
     const fields: LeadFields = {
@@ -103,13 +111,18 @@ export async function POST(req: NextRequest) {
       Object.entries(fields).filter(([, v]) => v !== undefined && v !== '')
     ) as LeadFields;
 
+    // Log Airtable payload
+    console.log("[LEADS_AIRTABLE_PAYLOAD]", JSON.stringify(cleanFields, null, 2));
+
     const result = await createLead(cleanFields);
 
     console.log("[LEAD_CAPTURED]", lead.id, lead.email || "no_email", "airtable_id:", result.id);
     return NextResponse.json({ ok: true, airtableId: result.id });
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e);
+    const stack = e instanceof Error ? e.stack : undefined;
     console.error("[LEADS_ROUTE_ERROR]", msg);
+    if (stack) console.error("[LEADS_ROUTE_STACK]", stack);
     return NextResponse.json({ ok: false, error: msg || "bad_request" }, { status: 400 });
   }
 }

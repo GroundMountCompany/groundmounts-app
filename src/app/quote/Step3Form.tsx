@@ -262,7 +262,7 @@ function Step3Form({}: Step3FormProps) {
               {/* Name Input */}
               <div className="mb-4">
                 <label htmlFor="name" className="block text-sm font-semibold text-neutral-800 mb-2">
-                  Your name
+                  Your name <span className="text-red-500">*</span>
                 </label>
                 <input
                   id="name"
@@ -280,7 +280,7 @@ function Step3Form({}: Step3FormProps) {
               {/* Email Input */}
               <div className="mb-4">
                 <label htmlFor="email" className="block text-sm font-semibold text-neutral-800 mb-2">
-                  Where should we send it?
+                  Email address <span className="text-red-500">*</span>
                 </label>
                 <input
                   id="email"
@@ -295,16 +295,17 @@ function Step3Form({}: Step3FormProps) {
                 />
               </div>
 
-              {/* Phone Input - Secondary */}
+              {/* Phone Input */}
               <div className="mb-5">
                 <label htmlFor="phone" className="block text-sm font-semibold text-neutral-800 mb-2">
-                  Phone <span className="font-normal text-neutral-400">(for questions only)</span>
+                  Phone number <span className="text-red-500">*</span>
                 </label>
                 <input
                   id="phone"
                   type="tel"
                   inputMode="tel"
                   autoComplete="tel"
+                  required
                   pattern="[0-9\-()+ ]*"
                   value={phone}
                   onChange={(e) => setPhone(e.target.value)}
@@ -316,7 +317,7 @@ function Step3Form({}: Step3FormProps) {
               {/* CTA Button */}
               <button
                 type="submit"
-                disabled={isSubmitting || !email}
+                disabled={isSubmitting || !email || !phone || !name}
                 className="w-full h-14 rounded-xl bg-green-600 text-white text-base font-bold transition-all hover:bg-green-700 active:scale-[0.98] disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-2"
               >
                 {isSubmitting ? (

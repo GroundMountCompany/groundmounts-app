@@ -4,6 +4,7 @@ import { Feature, LineString } from 'geojson';
 import * as turf from '@turf/turf';
 import { v4 as uuid } from 'uuid';
 import MapboxDraw from '@mapbox/mapbox-gl-draw';
+import mapboxgl from 'mapbox-gl';
 
 // Storage key for persisting quote state
 const STORAGE_KEY = "gmq:v2";
@@ -76,6 +77,8 @@ export interface QuoteContextValues {
   electricalMeterPosition: PanelorMeterCoordinates | null;
   lineFeatureIdRef: React.MutableRefObject<string | null>;
   drawRef: React.MutableRefObject<MapboxDraw | null>;
+  mapRef: React.MutableRefObject<mapboxgl.Map | null>;
+  mapScreenshot: string | null;
   setIsAutoLocationError: (value: boolean) => void;
   setCurrentStepIndex: (value: number) => void;
   setAddress: (value: string) => void;
@@ -95,6 +98,7 @@ export interface QuoteContextValues {
   createOrUpdateLine: (meterCoords: PanelorMeterCoordinates, panelCoords: PanelorMeterCoordinates, draw: MapboxDraw) => void;
   updateDistanceAndCost: (meterCoords: [number, number], panelCoords: [number, number]) => void;
   ensureMeterFromStorage: () => void;
+  setMapScreenshot: (value: string | null) => void;
 }
 
 interface QuoteContextProviderProps {
@@ -148,6 +152,8 @@ export const QuoteContextProvider = ({ children }: QuoteContextProviderProps): J
   const [electricalMeterPosition, setElectricalMeterPosition] = useState<PanelorMeterCoordinates | null>(null);
   const lineFeatureIdRef = useRef<string | null>(null);
   const drawRef = useRef<MapboxDraw | null>(null);
+  const mapRef = useRef<mapboxgl.Map | null>(null);
+  const [mapScreenshot, setMapScreenshot] = useState<string | null>(null);
 
   const isAddressEmpty: boolean = address.length === 0;
   const isCoordinatesZero: boolean = coordinates.latitude === 0 && coordinates.longitude === 0;
@@ -371,6 +377,7 @@ export const QuoteContextProvider = ({ children }: QuoteContextProviderProps): J
     }
   }, [electricalMeterPosition]);
   const stableSetIsAutoLocationError = useCallback(setIsAutoLocationError, []);
+  const stableSetMapScreenshot = useCallback(setMapScreenshot, []);
 
   const values: QuoteContextValues = React.useMemo(() => ({
     hydrated,
@@ -397,7 +404,10 @@ export const QuoteContextProvider = ({ children }: QuoteContextProviderProps): J
     electricalMeterPosition,
     lineFeatureIdRef,
     drawRef,
+    mapRef,
+    mapScreenshot,
     setIsAutoLocationError: stableSetIsAutoLocationError,
+    setMapScreenshot: stableSetMapScreenshot,
     setCurrentStepIndex: stableSetCurrentStepIndex,
     setAddress: stableSetAddress,
     setCoordinates: stableSetCoordinates,
@@ -441,7 +451,10 @@ export const QuoteContextProvider = ({ children }: QuoteContextProviderProps): J
     electricalMeterPosition,
     lineFeatureIdRef,
     drawRef,
+    mapRef,
+    mapScreenshot,
     stableSetIsAutoLocationError,
+    stableSetMapScreenshot,
     stableSetCurrentStepIndex,
     stableSetAddress,
     stableSetCoordinates,

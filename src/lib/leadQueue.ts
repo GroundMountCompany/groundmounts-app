@@ -16,6 +16,7 @@ type Payload = {
   ts: number;
   honeypot?: string;     // spam prevention
   ttc_ms?: number;       // time to complete (milliseconds)
+  mapScreenshot?: string; // base64 PNG of map with panel placement
   _retries?: number;     // internal retry count
 };
 

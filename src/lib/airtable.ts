@@ -21,6 +21,7 @@ export interface LeadFields {
   'Total Investment'?: number;
   Source?: string;
   Status?: string;
+  'Map Screenshot'?: Array<{ url: string }>;
 }
 
 export async function createLead(fields: LeadFields) {

@@ -44,6 +44,7 @@ function Step3Form({}: Step3FormProps) {
     startedAt,
     avgValue,
     highestValue,
+    mapScreenshot,
   } = useQuoteContext();
 
   // Calculate derived values for display
@@ -128,6 +129,7 @@ function Step3Form({}: Step3FormProps) {
             ts: Date.now(),
             honeypot: company,
             ttc_ms: Date.now() - startedAt,
+            mapScreenshot: mapScreenshot || undefined,
           });
           console.log("[FINAL_LEAD_CAPTURED]", leadId, email, name);
         } catch (error) {

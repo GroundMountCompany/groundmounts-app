@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createLead, parseAddress, LeadFields } from "@/lib/airtable";
 import { getClientIp, rateLimitOk, isBotHoneypot, minTimeOk } from "@/lib/guard";
 import { getResendOrThrow } from "@/lib/resendSafe";
+import { put } from "@vercel/blob";
 
 const NOTIFICATION_EMAIL = "bert@groundmounts.com";
 const AIRTABLE_BASE_ID = process.env.AIRTABLE_BASE_ID;
@@ -29,6 +30,7 @@ interface LeadPayload {
   ts: number;
   honeypot?: string;
   ttc_ms?: number;
+  mapScreenshot?: string;
 }
 
 function validateLead(data: unknown): LeadPayload {
@@ -55,6 +57,7 @@ function validateLead(data: unknown): LeadPayload {
     ts: obj.ts,
     honeypot: obj.honeypot as string,
     ttc_ms: obj.ttc_ms as number,
+    mapScreenshot: obj.mapScreenshot as string | undefined,
   };
 }
 
@@ -85,6 +88,27 @@ export async function POST(req: NextRequest) {
     const lead = validateLead(body);
     console.log("[LEADS_VALIDATED] Lead ID:", lead.id, "Email:", lead.email, "Source:", lead.source);
 
+    // Upload map screenshot to Vercel Blob if provided
+    let mapScreenshotUrl: string | undefined;
+    if (lead.mapScreenshot && lead.mapScreenshot.startsWith('data:image/png;base64,')) {
+      try {
+        // Convert base64 to buffer
+        const base64Data = lead.mapScreenshot.replace(/^data:image\/png;base64,/, '');
+        const buffer = Buffer.from(base64Data, 'base64');
+
+        // Upload to Vercel Blob
+        const blob = await put(`map-screenshots/${lead.id}.png`, buffer, {
+          access: 'public',
+          contentType: 'image/png',
+        });
+        mapScreenshotUrl = blob.url;
+        console.log("[MAP_SCREENSHOT_UPLOADED]", mapScreenshotUrl, "size:", Math.round(buffer.length / 1024), "KB");
+      } catch (uploadError) {
+        console.error("[MAP_SCREENSHOT_UPLOAD_ERROR]", uploadError instanceof Error ? uploadError.message : uploadError);
+        // Continue without screenshot - don't fail the lead capture
+      }
+    }
+
     // Parse address components
     const addressParts = lead.address ? parseAddress(lead.address) : {};
     console.log("[LEADS_ADDRESS_PARSED]", JSON.stringify(addressParts));
@@ -111,6 +135,7 @@ export async function POST(req: NextRequest) {
       'Total Investment': lead.quote?.quotation ? (lead.quote.quotation + (lead.quote.additionalCost || 0)) : undefined,
       Source: lead.source || undefined,
       Status: 'New',
+      'Map Screenshot': mapScreenshotUrl ? [{ url: mapScreenshotUrl }] : undefined,
     };
 
     // Remove undefined fields
@@ -190,6 +215,13 @@ export async function POST(req: NextRequest) {
                 <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5;">${lead.source || 'Direct'}</td>
               </tr>
             </table>
+
+            ${mapScreenshotUrl ? `
+            <div style="margin-top: 24px;">
+              <h3 style="color: #374151; margin-bottom: 12px; font-size: 14px;">Panel Placement Map</h3>
+              <img src="${mapScreenshotUrl}" alt="Panel placement map" style="max-width: 100%; border-radius: 8px; border: 1px solid #e5e5e5;" />
+            </div>
+            ` : ''}
 
             <div style="margin-top: 24px;">
               <a href="${airtableUrl}" style="display: inline-block; background: #16a34a; color: white; padding: 12px 24px; text-decoration: none; border-radius: 8px; font-weight: 600;">View in Airtable</a>

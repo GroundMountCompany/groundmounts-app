@@ -11,9 +11,8 @@ if (process.env.NEXT_PUBLIC_MAPBOX_TOKEN) {
 }
 
 export default function CalculatorMap() {
-  const { coordinates, electricalMeterPosition } = useQuoteContext();
+  const { coordinates, electricalMeterPosition, mapRef } = useQuoteContext();
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const mapRef = useRef<mapboxgl.Map | null>(null);
   const [mapLoaded, setMapLoaded] = useState(false);
 
   const center = useMemo<[number, number]>(() => {
@@ -45,6 +44,7 @@ export default function CalculatorMap() {
       pitch: 0,
       attributionControl: false,
       cooperativeGestures: true,
+      preserveDrawingBuffer: true, // Required for screenshot capture
     });
 
     mapRef.current.addControl(new mapboxgl.NavigationControl({ visualizePitch: true }), 'bottom-right');

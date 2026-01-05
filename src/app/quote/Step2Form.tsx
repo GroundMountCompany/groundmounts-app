@@ -35,7 +35,9 @@ function Step2Form({
     setHighestValue,
     electricalMeter,
     electricalMeterPosition,
-    ensureMeterFromStorage
+    ensureMeterFromStorage,
+    mapRef,
+    setMapScreenshot,
   } = useQuoteContext();
   const [showTooltip, setShowTooltip] = useState<boolean>(false);
   const [meterBtn, setMeterBtn] = useState<boolean>(false);
@@ -76,6 +78,26 @@ function Step2Form({
   }, [electricalMeterPosition])
 
   const handleContinue = () => {
+    // Capture map screenshot before transitioning (synchronous)
+    if (mapRef.current) {
+      try {
+        const canvas = mapRef.current.getCanvas();
+        if (canvas) {
+          // preserveDrawingBuffer must be true on map init for this to work reliably
+          // If it's blank, Mapbox may need preserveDrawingBuffer: true in Map options
+          const dataUrl = canvas.toDataURL('image/png');
+          if (dataUrl && dataUrl.length > 100) { // Valid data URL check
+            setMapScreenshot(dataUrl);
+            console.log('[MAP_SCREENSHOT] Captured, size:', Math.round(dataUrl.length / 1024), 'KB');
+          } else {
+            console.warn('[MAP_SCREENSHOT] Canvas appears blank');
+          }
+        }
+      } catch (e) {
+        console.warn('[MAP_SCREENSHOT] Error:', e);
+      }
+    }
+
     // Data will be sent to Airtable when lead is captured in Step3Form
     setCurrentStepIndex(4); // Move to Step3Form (lead capture form)
   }

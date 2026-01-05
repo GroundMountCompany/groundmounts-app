@@ -78,6 +78,7 @@ export interface QuoteContextValues {
   lineFeatureIdRef: React.MutableRefObject<string | null>;
   drawRef: React.MutableRefObject<MapboxDraw | null>;
   mapRef: React.MutableRefObject<mapboxgl.Map | null>;
+  mapContainerRef: React.MutableRefObject<HTMLDivElement | null>;
   mapScreenshot: string | null;
   setIsAutoLocationError: (value: boolean) => void;
   setCurrentStepIndex: (value: number) => void;
@@ -153,6 +154,7 @@ export const QuoteContextProvider = ({ children }: QuoteContextProviderProps): J
   const lineFeatureIdRef = useRef<string | null>(null);
   const drawRef = useRef<MapboxDraw | null>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
+  const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const [mapScreenshot, setMapScreenshot] = useState<string | null>(null);
 
   const isAddressEmpty: boolean = address.length === 0;
@@ -405,6 +407,7 @@ export const QuoteContextProvider = ({ children }: QuoteContextProviderProps): J
     lineFeatureIdRef,
     drawRef,
     mapRef,
+    mapContainerRef,
     mapScreenshot,
     setIsAutoLocationError: stableSetIsAutoLocationError,
     setMapScreenshot: stableSetMapScreenshot,
@@ -452,6 +455,7 @@ export const QuoteContextProvider = ({ children }: QuoteContextProviderProps): J
     lineFeatureIdRef,
     drawRef,
     mapRef,
+    mapContainerRef,
     mapScreenshot,
     stableSetIsAutoLocationError,
     stableSetMapScreenshot,

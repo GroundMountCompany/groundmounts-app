@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import mapboxgl from 'mapbox-gl';
 import { useQuoteContext } from '@/contexts/quoteContext';
 import MapboxSolarPanelInner from './MapboxSolarPanelInner';
@@ -11,8 +11,7 @@ if (process.env.NEXT_PUBLIC_MAPBOX_TOKEN) {
 }
 
 export default function CalculatorMap() {
-  const { coordinates, electricalMeterPosition, mapRef } = useQuoteContext();
-  const containerRef = useRef<HTMLDivElement | null>(null);
+  const { coordinates, electricalMeterPosition, mapRef, mapContainerRef } = useQuoteContext();
   const [mapLoaded, setMapLoaded] = useState(false);
 
   const center = useMemo<[number, number]>(() => {
@@ -29,7 +28,7 @@ export default function CalculatorMap() {
   }, [coordinates.longitude, coordinates.latitude, electricalMeterPosition]);
 
   useEffect(() => {
-    if (!containerRef.current || mapRef.current) return;
+    if (!mapContainerRef.current || mapRef.current) return;
     if (!mapboxgl.accessToken) {
       // Avoid hard crash; still render form
       console.warn('[CalculatorMap] Missing NEXT_PUBLIC_MAPBOX_TOKEN');
@@ -37,7 +36,7 @@ export default function CalculatorMap() {
     }
 
     mapRef.current = new mapboxgl.Map({
-      container: containerRef.current,
+      container: mapContainerRef.current,
       style: 'mapbox://styles/mapbox/satellite-streets-v12',
       center,
       zoom: 18, // Calculator view default
@@ -99,7 +98,7 @@ export default function CalculatorMap() {
   return (
     <div className="w-full">
       <div
-        ref={containerRef}
+        ref={mapContainerRef}
         className="w-full rounded-xl overflow-hidden h-[min(60vh,420px)] md:h-[70vh] md:min-h-[500px] md:max-h-[700px]"
       />
       {/* Panels & distance logic render on top of the same map */}

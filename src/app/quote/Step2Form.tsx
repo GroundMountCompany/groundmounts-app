@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState, useCallback } from "react";
+import html2canvas from "html2canvas";
 import { cn } from "@/lib/utils";
 import * as Slider from "@radix-ui/react-slider";
 import "./sliderStyle.css";
@@ -36,7 +37,7 @@ function Step2Form({
     electricalMeter,
     electricalMeterPosition,
     ensureMeterFromStorage,
-    mapRef,
+    mapContainerRef,
     setMapScreenshot,
   } = useQuoteContext();
   const [showTooltip, setShowTooltip] = useState<boolean>(false);
@@ -77,30 +78,33 @@ function Step2Form({
     }
   }, [electricalMeterPosition])
 
-  const handleContinue = () => {
-    // Capture map screenshot before transitioning (synchronous)
-    if (mapRef.current) {
+  const handleContinue = useCallback(async () => {
+    // Capture map screenshot before transitioning using html2canvas
+    // This captures DOM elements (like panel markers) that canvas.toDataURL() misses
+    if (mapContainerRef.current) {
       try {
-        const canvas = mapRef.current.getCanvas();
-        if (canvas) {
-          // preserveDrawingBuffer must be true on map init for this to work reliably
-          // If it's blank, Mapbox may need preserveDrawingBuffer: true in Map options
-          const dataUrl = canvas.toDataURL('image/png');
-          if (dataUrl && dataUrl.length > 100) { // Valid data URL check
-            setMapScreenshot(dataUrl);
-            console.log('[MAP_SCREENSHOT] Captured, size:', Math.round(dataUrl.length / 1024), 'KB');
-          } else {
-            console.warn('[MAP_SCREENSHOT] Canvas appears blank');
-          }
+        const canvas = await html2canvas(mapContainerRef.current, {
+          useCORS: true,
+          allowTaint: true,
+          backgroundColor: null,
+          scale: 1, // Keep size reasonable
+          logging: false,
+        });
+        const dataUrl = canvas.toDataURL('image/png');
+        if (dataUrl && dataUrl.length > 100) {
+          setMapScreenshot(dataUrl);
+          console.log('[MAP_SCREENSHOT] Captured with html2canvas, size:', Math.round(dataUrl.length / 1024), 'KB');
+        } else {
+          console.warn('[MAP_SCREENSHOT] Canvas appears blank');
         }
       } catch (e) {
-        console.warn('[MAP_SCREENSHOT] Error:', e);
+        console.warn('[MAP_SCREENSHOT] html2canvas error:', e);
       }
     }
 
     // Data will be sent to Airtable when lead is captured in Step3Form
     setCurrentStepIndex(4); // Move to Step3Form (lead capture form)
-  }
+  }, [mapContainerRef, setMapScreenshot, setCurrentStepIndex]);
 
   // Restore meter position from storage on mount if missing
   useEffect(() => {

@@ -7,27 +7,10 @@ import { GeocodingFeature } from '@/types';
 import { useEffect, useRef, useState, FormEvent, ChangeEvent, JSX } from 'react';
 import { useQuoteContext } from '@/contexts/quoteContext';
 import { useSearchParams } from 'next/navigation';
-import { enqueueOrSend } from '@/lib/leadQueue';
 import { fireDesignStartOnce } from '@/lib/fb';
 
-// Sample: 1600 Amphitheatre Parkway, Mountain View, CA
-
-type MapboxFeature = {
-  place_type?: string[];
-  context?: Array<{ id?: string; short_code?: string; text?: string }>;
-};
-
-function deriveStateFromFeature(f: MapboxFeature): { stateCode?: string; stateName?: string } {
-  const ctx = Array.isArray(f?.context) ? f.context : [];
-  const region = ctx.find(c => c.id?.startsWith("region"));
-  const short = region?.short_code; // e.g., "US-TX"
-  const stateCode = typeof short === "string" ? short.split("-")[1] : undefined;
-  const stateName = region?.text;
-  return { stateCode, stateName };
-}
-
 export const AddressInput = (): JSX.Element => {
-  const { setAddress, setCoordinates, shouldContinueButtonDisabled, setCurrentStepIndex, leadId } = useQuoteContext();
+  const { setAddress, setCoordinates, shouldContinueButtonDisabled, setCurrentStepIndex } = useQuoteContext();
   const [suggestions, setSuggestions] = useState<GeocodingFeature[]>([]);
   const [localAddress, setLocalAddress] = useState<string>('');
   const [isLoading, setIsLoading] = useState<boolean>(false);
@@ -36,28 +19,6 @@ export const AddressInput = (): JSX.Element => {
   const suggestionsRef = useRef<HTMLDivElement>(null);
   const searchParams = useSearchParams();
   const inputAddressRef = useRef<HTMLInputElement>(null);
-  const [derivedState, setDerivedState] = useState<string>('');
-  
-  // Get state from URL params (e.g., /quote?state=Texas) or use derived state
-  const selectedState = searchParams.get('state') || derivedState || 'TX';
-
-  // Early lead capture function
-  const captureEarlyLead = async (address: string, state?: string) => {
-    const stateToUse = state || selectedState;
-    try {
-      await enqueueOrSend({
-        id: leadId,
-        state: stateToUse,
-        email: "",
-        phone: "",
-        address: address,
-        ts: Date.now(),
-      });
-      console.log("[EARLY_LEAD_CAPTURED]", leadId, stateToUse, address);
-    } catch (error) {
-      console.error("[EARLY_LEAD_CAPTURE_ERROR]", error);
-    }
-  };
 
   useEffect(() => {
     const fetchSuggestions = async (): Promise<void> => {
@@ -104,12 +65,6 @@ export const AddressInput = (): JSX.Element => {
         latitude: results[0].center[1],
         longitude: results[0].center[0],
         });
-        // Derive state from geocoded result
-        const { stateCode, stateName } = deriveStateFromFeature(results[0] as MapboxFeature);
-        const derivedStateValue = stateCode || stateName || 'TX';
-        setDerivedState(derivedStateValue);
-        // Capture lead early when address is set from zipcode
-        await captureEarlyLead(results[0].place_name, derivedStateValue);
         // Fire DesignStart once per session
         try { fireDesignStartOnce(); } catch {}
       } catch (error) {
@@ -121,7 +76,7 @@ export const AddressInput = (): JSX.Element => {
     }
   }, []);
 
-  const handleSuggestionClick = async (suggestion: GeocodingFeature): Promise<void> => {
+  const handleSuggestionClick = (suggestion: GeocodingFeature): void => {
     setShowSuggestions(false);
     setAddress(suggestion.place_name);
     setLocalAddress(suggestion.place_name);
@@ -131,13 +86,6 @@ export const AddressInput = (): JSX.Element => {
     });
     inputAddressRef.current?.blur();
     
-    // Derive state from selected suggestion
-    const { stateCode, stateName } = deriveStateFromFeature(suggestion as MapboxFeature);
-    const derivedStateValue = stateCode || stateName || 'TX';
-    setDerivedState(derivedStateValue);
-    
-    // Capture lead early when address suggestion is selected
-    await captureEarlyLead(suggestion.place_name, derivedStateValue);
     // Fire DesignStart once per session
     try { fireDesignStartOnce(); } catch {}
   };

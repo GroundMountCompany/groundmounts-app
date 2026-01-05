@@ -48,23 +48,68 @@ export async function createLead(fields: LeadFields) {
   return response.json();
 }
 
+// State name to abbreviation mapping
+const STATE_ABBREVIATIONS: Record<string, string> = {
+  'alabama': 'AL', 'alaska': 'AK', 'arizona': 'AZ', 'arkansas': 'AR', 'california': 'CA',
+  'colorado': 'CO', 'connecticut': 'CT', 'delaware': 'DE', 'florida': 'FL', 'georgia': 'GA',
+  'hawaii': 'HI', 'idaho': 'ID', 'illinois': 'IL', 'indiana': 'IN', 'iowa': 'IA',
+  'kansas': 'KS', 'kentucky': 'KY', 'louisiana': 'LA', 'maine': 'ME', 'maryland': 'MD',
+  'massachusetts': 'MA', 'michigan': 'MI', 'minnesota': 'MN', 'mississippi': 'MS', 'missouri': 'MO',
+  'montana': 'MT', 'nebraska': 'NE', 'nevada': 'NV', 'new hampshire': 'NH', 'new jersey': 'NJ',
+  'new mexico': 'NM', 'new york': 'NY', 'north carolina': 'NC', 'north dakota': 'ND', 'ohio': 'OH',
+  'oklahoma': 'OK', 'oregon': 'OR', 'pennsylvania': 'PA', 'rhode island': 'RI', 'south carolina': 'SC',
+  'south dakota': 'SD', 'tennessee': 'TN', 'texas': 'TX', 'utah': 'UT', 'vermont': 'VT',
+  'virginia': 'VA', 'washington': 'WA', 'west virginia': 'WV', 'wisconsin': 'WI', 'wyoming': 'WY',
+};
+
 // Helper to parse address into components
 export function parseAddress(fullAddress: string): { city?: string; state?: string; zip?: string } {
-  // Expected format: "123 Main St, City, TX 75001" or similar
-  const parts = fullAddress.split(',').map(p => p.trim());
+  // Expected formats:
+  // "123 Main St, Fort Worth, TX 76131"
+  // "123 Main St, Fort Worth, Texas 76131"
+  // "123 Main St, Fort Worth, Texas 76131, United States"
+  // "123 Main St, Fort Worth, Texas 76131, USA"
+
+  let parts = fullAddress.split(',').map(p => p.trim());
 
   if (parts.length < 2) {
     return {};
   }
 
-  // Last part usually has state and zip: "TX 75001"
-  const lastPart = parts[parts.length - 1];
-  const stateZipMatch = lastPart.match(/([A-Z]{2})\s*(\d{5}(-\d{4})?)?/);
+  // Remove country if present (last part)
+  const lastPart = parts[parts.length - 1].toLowerCase();
+  if (lastPart === 'usa' || lastPart === 'united states' || lastPart === 'us') {
+    parts = parts.slice(0, -1);
+  }
 
-  const state = stateZipMatch?.[1];
-  const zip = stateZipMatch?.[2];
+  if (parts.length < 2) {
+    return {};
+  }
 
-  // City is typically the second-to-last part
+  // State/zip part is now the last part: "TX 76131" or "Texas 76131"
+  const stateZipPart = parts[parts.length - 1];
+
+  // Try to match abbreviated state (2 uppercase letters) with optional zip
+  const abbrevMatch = stateZipPart.match(/^([A-Z]{2})\s*(\d{5}(-\d{4})?)?$/);
+
+  let state: string | undefined;
+  let zip: string | undefined;
+
+  if (abbrevMatch) {
+    state = abbrevMatch[1];
+    zip = abbrevMatch[2];
+  } else {
+    // Try to match spelled-out state name with zip
+    // e.g., "Texas 76131" or just "Texas"
+    const spelledMatch = stateZipPart.match(/^([A-Za-z\s]+?)\s*(\d{5}(-\d{4})?)?$/);
+    if (spelledMatch) {
+      const stateName = spelledMatch[1].trim().toLowerCase();
+      state = STATE_ABBREVIATIONS[stateName];
+      zip = spelledMatch[2];
+    }
+  }
+
+  // City is the second-to-last part
   const city = parts.length >= 2 ? parts[parts.length - 2] : undefined;
 
   return { city, state, zip };

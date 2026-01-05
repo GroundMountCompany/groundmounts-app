@@ -19,7 +19,6 @@ export default function QuizContent() {
   const state = searchParams.get('state') || '';
 
   const [currentStep, setCurrentStep] = useState(0);
-  const [isSubmitting, setIsSubmitting] = useState(false);
   const [quizData, setQuizData] = useState<QuizData>(() => {
     // Initialize with a new or existing userId
     let userId = '';
@@ -168,7 +167,6 @@ export default function QuizContent() {
                 key={option}
                 className="w-full p-6 text-left text-lg border-2 rounded-xl hover:border-blue-500 hover:bg-blue-50 transition-all duration-200 ease-in-out"
                 onClick={() => handleQuizAnswer(option)}
-                disabled={isSubmitting}
               >
                 {option}
               </button>

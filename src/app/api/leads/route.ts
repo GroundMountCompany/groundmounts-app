@@ -86,6 +86,8 @@ export async function POST(req: NextRequest) {
     console.log("[LEADS_ADDRESS_PARSED]", JSON.stringify(addressParts));
 
     // Build Airtable fields
+    // Note: Source and Status are Single Select fields in Airtable
+    // They only accept values that exist in the dropdown options
     const fields: LeadFields = {
       Name: lead.name || undefined,
       Email: lead.email || undefined,
@@ -102,8 +104,8 @@ export async function POST(req: NextRequest) {
       'Trenching Distance ft': lead.quote?.electricalMeter?.distanceInFeet,
       'Trenching Cost': lead.quote?.additionalCost,
       'Total Investment': lead.quote?.quotation ? (lead.quote.quotation + (lead.quote.additionalCost || 0)) : undefined,
-      Source: lead.source || undefined,
-      Status: 'New',
+      // Source: lead.source || undefined,  // Disabled - Single Select field needs exact match
+      // Status: 'New',  // Disabled - Single Select field needs exact match
     };
 
     // Remove undefined fields

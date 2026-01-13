@@ -29,6 +29,7 @@ function Step3Form({}: Step3FormProps) {
   const [company, setCompany] = useState(""); // Honeypot field
   const searchParams = useSearchParams();
   const selectedState = searchParams.get('state') || 'TX';
+  const source = searchParams.get('source') || brand.domain;
 
   const {
     address,
@@ -113,7 +114,7 @@ function Step3Form({}: Step3FormProps) {
             email,
             phone,
             address,
-            source: brand.domain,
+            source: source,
             quote: {
               quotation,
               totalPanels,
@@ -189,12 +190,12 @@ function Step3Form({}: Step3FormProps) {
           </p>
 
           <a
-            href={`https://www.${brand.domain}`}
+            href={`https://www.${source}`}
             target="_blank"
             rel="noopener noreferrer"
             className="inline-block w-full bg-white text-green-700 font-bold py-4 px-6 rounded-xl transition-transform hover:scale-[1.02] active:scale-[0.98]"
           >
-            Visit {brand.domain}
+            Visit {source}
           </a>
           <p className="text-white/70 text-sm mt-4">
             Questions? Reply to the email anytime.

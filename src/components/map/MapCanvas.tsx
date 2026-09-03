@@ -13,6 +13,7 @@ import {
   LAYER,
   installCompassIcon,
   currentHandlePosition,
+  POINT_HIT_RADIUS_PX,
   fitDesign,
   arrayOutOfView,
 } from './layers';
@@ -163,11 +164,12 @@ export default function MapStage({ mode }: { mode: MapMode }) {
         }
       };
 
+      // The padded layers, not the drawn markers: a 16px dot is not a target.
       if (modeRef.current === 'address') {
-        return hits(LAYER.pin) ? 'pin' : null;
+        return hits(LAYER.pinHit) ? 'pin' : null;
       }
       if (modeRef.current === 'place-meter') {
-        return hits(LAYER.meter) ? 'meter' : null;
+        return hits(LAYER.meterHit) ? 'meter' : null;
       }
       if (modeRef.current !== 'design') return null;
 
@@ -260,7 +262,14 @@ export default function MapStage({ mode }: { mode: MapMode }) {
     const onPointerUp = (e: PointerEvent) => {
       const g = grab.current;
       if (!g || e.pointerId !== g.pointerId) return;
+      const kind = g.kind;
       releaseGrab();
+
+      // Only the array's own moves change the ground under it or need the view
+      // re-framed. Dragging the pin or the meter used to trigger a slope lookup
+      // for an array that had not moved, and a re-fit on a step with no array.
+      if (kind !== 'array' && kind !== 'rotate') return;
+
       scheduleSlope();
 
       // If the array has been dragged half out of the window, bring it back
@@ -374,6 +383,51 @@ export default function MapStage({ mode }: { mode: MapMode }) {
         },
         renderedHulls: () => map.queryRenderedFeatures({ layers: [LAYER.hullFill] }).length,
         renderedHitPads: () => map.queryRenderedFeatures({ layers: [LAYER.hitPad] }).length,
+        /**
+         * Screen size of each map hit target, for the touch-target audit.
+         * Mapbox layers are not DOM nodes, so they cannot be walked with
+         * querySelectorAll; this projects their geometry instead.
+         */
+        hitTargetSizes: () => {
+          const out: Record<string, number> = {};
+          const circle = (layer: string, radiusPx: number) => {
+            try {
+              if (map.queryRenderedFeatures({ layers: [layer] }).length) {
+                out[layer] = radiusPx * 2;
+              }
+            } catch {
+              /* layer not installed */
+            }
+          };
+          circle(LAYER.pinHit, POINT_HIT_RADIUS_PX);
+          circle(LAYER.meterHit, POINT_HIT_RADIUS_PX);
+
+          try {
+            const pads = map.queryRenderedFeatures({ layers: [LAYER.hitPad] });
+            if (pads.length && pads[0].geometry.type === 'Polygon') {
+              const ring = pads[0].geometry.coordinates[0] as Array<[number, number]>;
+              const pts = ring.map((c) => map.project(c));
+              const xs = pts.map((p) => p.x);
+              const ys = pts.map((p) => p.y);
+              out[LAYER.hitPad] = Math.min(
+                Math.max(...xs) - Math.min(...xs),
+                Math.max(...ys) - Math.min(...ys)
+              );
+            }
+          } catch {
+            /* no array yet */
+          }
+
+          try {
+            if (map.queryRenderedFeatures({ layers: [LAYER.handle] }).length) {
+              // 88px icon drawn at icon-size 0.5.
+              out[LAYER.handle] = 44;
+            }
+          } catch {
+            /* no handle yet */
+          }
+          return out;
+        },
         /** Where the compass grip currently sits, in lng/lat. */
         handleLngLat: (): LngLat | null => {
           const st = useQuoteStore.getState();
@@ -446,8 +500,8 @@ export default function MapStage({ mode }: { mode: MapMode }) {
           return {
             handle: count(LAYER.handle),
             hull: count(LAYER.hitPad),
-            pin: count(LAYER.pin),
-            meter: count(LAYER.meter),
+            pin: count(LAYER.pinHit),
+            meter: count(LAYER.meterHit),
           };
         },
       };
@@ -609,9 +663,15 @@ const fitRef: { current: (() => void) | null } = { current: null };
 /** Lets the shell re-arm framing when the design step is entered again. */
 const framedResetRef: { current: (() => void) | null } = { current: null };
 
-/** Re-arm the one-shot framing so the next design entry frames again. */
+/**
+ * Re-arm the one-shot framing and fit right away.
+ *
+ * Re-arming alone left the camera wherever the customer had wandered until the
+ * map happened to go idle again — which, on a settled map, is never.
+ */
 export function rearmDesignFraming() {
   framedResetRef.current?.();
+  fitRef.current?.();
 }
 
 /** Re-frame the array and meter. Safe to call when no map exists. */

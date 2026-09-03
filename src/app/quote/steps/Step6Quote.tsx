@@ -56,44 +56,55 @@ export default function Step6Quote() {
     );
 
     try {
-      const emailRes = await fetch('/api/sendEmail', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          leadId: payload.id,
-          email,
-          address: payload.address,
-          quotation: payload.quote.quotation,
-          totalPanels: payload.quote.totalPanels,
-          additionalCost: payload.quote.additionalCost,
-          trenchFeet: payload.quote.trenchFeet,
-          percentage: payload.quote.percentage,
-          avgBill: payload.quote.avgBill,
-          honeypot: company,
-          ttc_ms: payload.ttc_ms,
-        }),
-      });
+      const store = useQuoteStore.getState();
 
-      // A 429 or a 500 is not a success. Without this check the funnel cleared
-      // the customer's design and showed the thank-you screen while the lead
-      // went nowhere.
-      if (!emailRes.ok) {
-        setError(UI.submitFailed);
-        return;
+      // Lead first. It is the thing the business cannot recover if it is lost;
+      // the email is a courtesy that can be retried. Both are keyed on leadId so
+      // a retry after a partial failure skips whatever already went through.
+      if (store.leadFiled !== payload.id) {
+        const result = await enqueueOrSend(payload);
+        if (!result.ok) {
+          setError(UI.submitFailed);
+          return;
+        }
+        store.setLeadFiled(payload.id);
       }
 
-      const result = await enqueueOrSend(payload);
-      if (!result.ok) {
-        // Queued leads are retried in the background, but nothing is confirmed
-        // yet, so the design stays put and they can try again.
-        setError(UI.submitFailed);
-        return;
+      if (useQuoteStore.getState().emailSent !== payload.id) {
+        const emailRes = await fetch('/api/sendEmail', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            leadId: payload.id,
+            email,
+            address: payload.address,
+            quotation: payload.quote.quotation,
+            totalPanels: payload.quote.totalPanels,
+            additionalCost: payload.quote.additionalCost,
+            trenchFeet: payload.quote.trenchFeet,
+            percentage: payload.quote.percentage,
+            avgBill: payload.quote.avgBill,
+            honeypot: company,
+            ttc_ms: payload.ttc_ms,
+          }),
+        });
+
+        if (!emailRes.ok) {
+          // The lead is safe. Say so plainly, and retry only the email.
+          setError(UI.emailFailedAfterSave);
+          return;
+        }
+        useQuoteStore.getState().setEmailSent(payload.id);
       }
 
       clearPersistedQuote();
       setDone(true);
     } catch {
-      setError(UI.submitFailed);
+      setError(
+        useQuoteStore.getState().leadFiled === payload.id
+          ? UI.emailFailedAfterSave
+          : UI.submitFailed
+      );
     } finally {
       setSubmitting(false);
     }
@@ -134,7 +145,7 @@ export default function Step6Quote() {
 
       <div data-testid="price-blur" className="relative overflow-hidden rounded-xl border border-neutral-200 p-6">
         <p className="select-none text-center text-[28px] font-bold text-neutral-900 blur-md">
-          $00,000 – $00,000
+          {UI.pricePlaceholder}
         </p>
         <div className="absolute inset-0 flex items-center justify-center">
           <span className="text-[17px] font-semibold text-neutral-800">{UI.priceHidden}</span>

@@ -1,5 +1,6 @@
 "use client";
 import React from "react";
+import { UI } from '@/config/copy';
 
 type Props = { children: React.ReactNode };
 type State = { hasError: boolean };
@@ -20,7 +21,7 @@ export default class ErrorBoundary extends React.Component<Props, State> {
     if (this.state.hasError) {
       return (
         <div className="p-4 text-sm">
-          Something went wrong. Please refresh and try again.
+          {UI.errorBoundary}
         </div>
       );
     }

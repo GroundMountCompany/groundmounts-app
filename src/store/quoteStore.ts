@@ -71,6 +71,13 @@ interface QuoteState {
    * rather than checking mapRef once and giving up.
    */
   mapReady: boolean;
+  /**
+   * The leadId whose Airtable write succeeded, and whose customer email was
+   * sent. Persisted so a retry after a partial failure does not file the lead
+   * twice or re-send an email that already went.
+   */
+  leadFiled: string | null;
+  emailSent: string | null;
 }
 
 interface QuoteActions {
@@ -103,6 +110,8 @@ interface QuoteActions {
   setRatePerKwh: (v: number) => void;
   setPanelAdjust: (v: number) => void;
   setMapReady: (v: boolean) => void;
+  setLeadFiled: (leadId: string | null) => void;
+  setEmailSent: (leadId: string | null) => void;
 }
 
 export type QuoteStore = QuoteState & QuoteActions;
@@ -137,6 +146,8 @@ const initialState: QuoteState = {
   ratePerKwh: 0,
   panelAdjust: 0,
   mapReady: false,
+  leadFiled: null,
+  emailSent: null,
 };
 
 /** Straight-line meter→array distance in whole feet. */
@@ -222,6 +233,8 @@ export const useQuoteStore = create<QuoteStore>()(
       setRatePerKwh: (ratePerKwh) => set({ ratePerKwh }),
       setPanelAdjust: (panelAdjust) => set({ panelAdjust }),
       setMapReady: (mapReady) => set({ mapReady }),
+      setLeadFiled: (leadFiled) => set({ leadFiled }),
+      setEmailSent: (emailSent) => set({ emailSent }),
 
       resetQuote: () => {
         set({ ...initialState, hydrated: true, leadId: uuid(), startedAt: Date.now() });
@@ -261,6 +274,8 @@ export const useQuoteStore = create<QuoteStore>()(
         slopeTier: state.slopeTier,
         ratePerKwh: state.ratePerKwh,
         panelAdjust: state.panelAdjust,
+        leadFiled: state.leadFiled,
+        emailSent: state.emailSent,
         // Downscaled JPEG, so it is small enough to persist. Without this a
         // refresh on the contact form dropped the screenshot silently.
         mapScreenshot: state.mapScreenshot,

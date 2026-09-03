@@ -183,11 +183,17 @@ export const UI = {
   phonePlaceholder: '(555) 555-5555',
   submitting: 'Sending',
   submitFailed: 'Did not go through. Try again.',
+  emailFailedAfterSave: 'Your design is saved. The email did not send — try again.',
 
   // Shell
   sheetLabel: 'Controls',
   sheetHandleLabel: 'Resize controls',
   progressLabel: 'Progress',
+  progressNotYet: ' (not yet)',
+  rotateHandle: 'Turn',
+  /** Placeholder digits behind the blur. Not a real number. */
+  pricePlaceholder: '$00,000 – $00,000',
+  errorBoundary: 'Something went wrong. Refresh and try again.',
   addressPlaceholder: 'Enter your address',
 } as const;
 

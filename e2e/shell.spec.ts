@@ -1,4 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
+import './gmTest';
 
 /**
  * The Phase 4 shell: a full-bleed map that the page never scrolls under, a
@@ -191,65 +192,202 @@ test('the primary button is on screen at every snap point', async ({ page }, tes
   }
 });
 
-test('every interactive control is at least 44px', async ({ page }, testInfo) => {
+test('every interactive control is at least 44px, on every step', async ({
+  page,
+}, testInfo) => {
   test.skip(!testInfo.project.name.startsWith('mobile'), 'phone layout');
-  await openFunnel(page);
 
-  // Walk the real rendered layout at 390x844. jsdom cannot do this — it has no
-  // layout engine, so getBoundingClientRect is all zeros there.
-  const undersized = await page.evaluate(() => {
-    const MIN = 44;
-    const out: string[] = [];
-    const nodes = document.querySelectorAll<HTMLElement>(
-      'button, a, input, select, textarea, [role="button"]'
-    );
-    for (const el of nodes) {
-      const style = getComputedStyle(el);
-      if (style.display === 'none' || style.visibility === 'hidden') continue;
-      const r = el.getBoundingClientRect();
-      if (r.width === 0 || r.height === 0) continue; // offscreen or honeypot
-      if (r.height < MIN || r.width < MIN) {
-        const id = el.getAttribute('data-testid') ?? el.id ?? el.tagName.toLowerCase();
-        out.push(`${id}: ${Math.round(r.width)}x${Math.round(r.height)}`);
-      }
-    }
-    return out;
+  // Seeded per step and reloaded, rather than driven through the map: the
+  // WebKit phone project has no WebGL, so there is no map instance to talk to.
+  const seed = (step: number) => ({
+    state: {
+      currentStepIndex: step,
+      address: '123 Main St, Fort Worth, TX 76131',
+      coordinates: { latitude: 32.7555, longitude: -97.3208 },
+      electricalMeterPosition: [-97.3208, 32.7556],
+      arrayCenter: [-97.3208, 32.7553],
+      avgValue: 240,
+      percentage: 100,
+      totalPanels: 31,
+      trenchFeet: 42,
+      leadId: 'touch-target-test',
+      startedAt: Date.now() - 600_000,
+    },
+    version: 1,
   });
 
-  expect(undersized, `controls under 44px:\n${undersized.join('\n')}`).toEqual([]);
+  await mockGeocoding(page);
+
+  /** Walk the real rendered layout. jsdom has no layout engine, so this cannot
+   *  be a vitest unit test — every rect there is zero. */
+  const auditDom = () =>
+    page.evaluate(() => {
+      const MIN = 44;
+      const out: string[] = [];
+      const nodes = document.querySelectorAll<HTMLElement>(
+        'button, a, input, select, textarea, [role="button"], [role="slider"]'
+      );
+      for (const el of nodes) {
+        // Mapbox's own attribution and logo are vendor chrome we are required
+        // to display at their size; they are not controls we ask anyone to hit.
+        if (el.closest('.mapboxgl-ctrl')) continue;
+        const style = getComputedStyle(el);
+        if (style.display === 'none' || style.visibility === 'hidden') continue;
+        const r = el.getBoundingClientRect();
+        if (r.width === 0 || r.height === 0) continue; // offscreen or honeypot
+        if (r.height < MIN || r.width < MIN) {
+          const id = el.getAttribute('data-testid') ?? el.id ?? el.tagName.toLowerCase();
+          out.push(`${id}: ${Math.round(r.width)}x${Math.round(r.height)}`);
+        }
+      }
+      return out;
+    });
+
+  const offences: string[] = [];
+
+  for (let step = 0; step <= 5; step++) {
+    await page.addInitScript(
+      (payload) => window.localStorage.setItem('gmq:v3', JSON.stringify(payload)),
+      seed(step)
+    );
+    await page.goto('/quote');
+    await waitForHydration(page);
+
+    // Open the sheet fully so the step's own controls are laid out, not clipped.
+    await page.getByTestId('sheet-handle').click();
+    await page.getByTestId('sheet-handle').click();
+    await page.waitForTimeout(400);
+
+    for (const offence of await auditDom()) offences.push(`step ${step} — ${offence}`);
+  }
+
+  expect(offences, `controls under 44px:\n${offences.join('\n')}`).toEqual([]);
 });
 
-test('a server error keeps the design and does not claim success', async ({ page }) => {
-  // Seed straight into the contact step with a design already made.
+test('map hit targets are at least 44px on screen', async ({ page }, testInfo) => {
+  test.skip(!testInfo.project.name.startsWith('mobile'), 'phone layout');
+
+  // Mapbox layers are not DOM nodes, so the DOM walk above cannot see them.
+  // Their padded geometry is projected to screen pixels instead.
   await page.addInitScript(() => {
     if (window.localStorage.getItem('gmq:v3')) return;
     window.localStorage.setItem(
       'gmq:v3',
       JSON.stringify({
         state: {
-          currentStepIndex: 5,
+          currentStepIndex: 0,
           address: '123 Main St, Fort Worth, TX 76131',
           coordinates: { latitude: 32.7555, longitude: -97.3208 },
           electricalMeterPosition: [-97.3208, 32.7556],
-          arrayCenter: [-97.3208, 32.7553],
-          avgValue: 240,
-          percentage: 100,
-          totalPanels: 31,
-          trenchFeet: 42,
-          leadId: 'error-path-test',
-          startedAt: Date.now() - 600_000,
+          leadId: 'map-hit-test',
         },
         version: 1,
       })
     );
   });
 
-  let leadCalled = false;
-  await page.route('**/api/sendEmail', (route) =>
-    route.fulfill({ status: 500, contentType: 'application/json', body: '{"error":"boom"}' })
+  await mockGeocoding(page);
+  await page.goto('/quote');
+  await waitForHydration(page);
+
+  const ready = await page
+    .waitForFunction(() => window.__gmTest?.state().mapReady === true, null, { timeout: 20_000 })
+    .then(() => true)
+    .catch(() => false);
+  test.skip(!ready, 'map did not load (no usable Mapbox token in this run)');
+
+  await page.waitForTimeout(1200);
+  const sizes = await page.evaluate(() => window.__gmTest.hitTargetSizes());
+
+  expect(Object.keys(sizes).length, 'no map hit targets rendered').toBeGreaterThan(0);
+  for (const [layer, size] of Object.entries(sizes) as Array<[string, number]>) {
+    expect(size, `${layer} hit target is ${Math.round(size)}px`).toBeGreaterThanOrEqual(44);
+  }
+});
+
+/** Seed the contact step with a finished design. */
+function contactStepSeed(leadId: string) {
+  return {
+    state: {
+      currentStepIndex: 5,
+      address: '123 Main St, Fort Worth, TX 76131',
+      coordinates: { latitude: 32.7555, longitude: -97.3208 },
+      electricalMeterPosition: [-97.3208, 32.7556],
+      arrayCenter: [-97.3208, 32.7553],
+      avgValue: 240,
+      percentage: 100,
+      totalPanels: 31,
+      trenchFeet: 42,
+      leadId,
+      startedAt: Date.now() - 600_000,
+    },
+    version: 1,
+  };
+}
+
+async function fillAndSubmit(page: Page) {
+  await page.locator('#name').fill('Bert Ortiz');
+  await page.locator('#email').fill('bert@example.com');
+  await page.locator('#phone').fill('(469) 555-0100');
+  await page.getByTestId('submit-lead').click();
+}
+
+test('a failed email retries only the email, never re-filing the lead', async ({ page }) => {
+  await page.addInitScript(
+    (payload) => window.localStorage.setItem('gmq:v3', JSON.stringify(payload)),
+    contactStepSeed('retry-email-test')
   );
+
+  let leadCalls = 0;
+  let emailCalls = 0;
   await page.route('**/api/leads', (route) => {
-    leadCalled = true;
+    leadCalls++;
+    return route.fulfill({ status: 200, contentType: 'application/json', body: '{"ok":true}' });
+  });
+  await page.route('**/api/sendEmail', (route) => {
+    emailCalls++;
+    // Fail the first attempt, accept the second.
+    return route.fulfill({
+      status: emailCalls === 1 ? 500 : 200,
+      contentType: 'application/json',
+      body: emailCalls === 1 ? '{"error":"boom"}' : '{"ok":true}',
+    });
+  });
+
+  await mockGeocoding(page);
+  await page.goto('/quote');
+  await waitForHydration(page);
+
+  await fillAndSubmit(page);
+
+  // The lead is safe; only the email failed, and the wording says so.
+  await expect(
+    page.getByText('Your design is saved. The email did not send — try again.')
+  ).toBeVisible();
+  await expect(page.getByTestId('success-screen')).toHaveCount(0);
+
+  await page.getByTestId('submit-lead').click();
+  await expect(page.getByTestId('success-screen')).toBeVisible({ timeout: 15_000 });
+
+  // Exactly one lead write, two email attempts.
+  expect(leadCalls, 'the lead was filed more than once').toBe(1);
+  expect(emailCalls, 'the email was not retried').toBe(2);
+});
+
+test('a failed lead write sends no email at all', async ({ page }) => {
+  await page.addInitScript(
+    (payload) => window.localStorage.setItem('gmq:v3', JSON.stringify(payload)),
+    contactStepSeed('retry-lead-test')
+  );
+
+  let leadCalls = 0;
+  let emailCalls = 0;
+  await page.route('**/api/leads', (route) => {
+    leadCalls++;
+    return route.fulfill({ status: 500, contentType: 'application/json', body: '{"ok":false}' });
+  });
+  await page.route('**/api/sendEmail', (route) => {
+    emailCalls++;
     return route.fulfill({ status: 200, contentType: 'application/json', body: '{"ok":true}' });
   });
 
@@ -257,21 +395,14 @@ test('a server error keeps the design and does not claim success', async ({ page
   await page.goto('/quote');
   await waitForHydration(page);
 
-  await page.locator('#name').fill('Bert Ortiz');
-  await page.locator('#email').fill('bert@example.com');
-  await page.locator('#phone').fill('(469) 555-0100');
-  await page.getByTestId('submit-lead').click();
-
-  // A plain message, and the form is still there to try again with.
+  await fillAndSubmit(page);
   await expect(page.getByText('Did not go through. Try again.')).toBeVisible();
+
+  await page.getByTestId('submit-lead').click();
+  await expect(page.getByText('Did not go through. Try again.')).toBeVisible();
+
+  // Never promise a customer an email about a lead that was never filed.
+  expect(leadCalls, 'the lead should have been retried').toBe(2);
+  expect(emailCalls, 'an email was sent despite the lead failing').toBe(0);
   await expect(page.getByTestId('success-screen')).toHaveCount(0);
-  await expect(page.getByTestId('submit-lead')).toBeEnabled();
-
-  // The design survives: nothing was cleared on a failed send.
-  const persisted = await page.evaluate(() => window.localStorage.getItem('gmq:v3'));
-  expect(persisted, 'persisted state was cleared on a failed submit').toContain('error-path-test');
-  expect(persisted).toContain('"trenchFeet":42');
-
-  // And we never pretended to file the lead after the email failed.
-  expect(leadCalled, 'lead was sent even though the email failed').toBe(false);
 });

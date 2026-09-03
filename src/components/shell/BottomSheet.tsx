@@ -46,6 +46,7 @@ function heightFor(snap: Snap, viewport: number, peekPx: number): number {
  */
 export default function BottomSheet({ snap, onSnapChange, peek, children }: Props) {
   const [viewport, setViewport] = useState(0);
+  const [isPhone, setIsPhone] = useState(false);
   const [peekPx, setPeekPx] = useState(MIN_PEEK_PX);
   const headRef = useRef<HTMLDivElement>(null);
   const [dragPx, setDragPx] = useState<number | null>(null);
@@ -54,10 +55,20 @@ export default function BottomSheet({ snap, onSnapChange, peek, children }: Prop
   const dragged = useRef(false);
 
   useEffect(() => {
-    const measure = () => setViewport(window.innerHeight);
+    // The sheet only exists below md; above it the same component is a panel
+    // filling its column, and an inline snap height would fight that.
+    const query = window.matchMedia('(max-width: 767px)');
+    const measure = () => {
+      setViewport(window.innerHeight);
+      setIsPhone(query.matches);
+    };
     measure();
     window.addEventListener('resize', measure);
-    return () => window.removeEventListener('resize', measure);
+    query.addEventListener('change', measure);
+    return () => {
+      window.removeEventListener('resize', measure);
+      query.removeEventListener('change', measure);
+    };
   }, []);
 
   // Measure the handle plus the always-visible peek row. Whatever the copy or
@@ -150,10 +161,14 @@ export default function BottomSheet({ snap, onSnapChange, peek, children }: Prop
       data-snap={snap}
       aria-label={UI.sheetLabel}
       className="fixed inset-x-0 bottom-0 z-40 flex flex-col rounded-t-2xl border-t border-neutral-200 bg-white shadow-[0_-8px_24px_rgba(0,0,0,0.12)] md:static md:h-full md:rounded-none md:border-0 md:shadow-none"
-      style={{
-        height: viewport ? height : undefined,
-        transition: dragPx === null ? 'height 220ms ease' : 'none',
-      }}
+      style={
+        isPhone
+          ? {
+              height: viewport ? height : undefined,
+              transition: dragPx === null ? 'height 220ms ease' : 'none',
+            }
+          : undefined
+      }
     >
       <div ref={headRef} className="shrink-0">
       {/* Grab handle. The only thing that resizes the sheet. */}

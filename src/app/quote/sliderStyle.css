@@ -28,15 +28,30 @@
 }
 
 .SliderThumb {
+	/* 48px so a thumb can land on it. Customers are 50+ and on phones; the
+	   visual size is unchanged, the touch area is not. */
 	display: block;
-	width: 32px;
-	height: 24px;
-	background-color: #002868;
-	border-radius: 6.23px;
+	width: 48px;
+	height: 48px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	background-color: transparent;
   position: relative;
 }
+.SliderThumb::after {
+  /* The visible pill, centred inside the larger touch target. */
+  content: "";
+  position: absolute;
+  width: 32px;
+  height: 24px;
+  background-color: #002868;
+  border-radius: 6.23px;
+}
+
 .SliderThumb::before {
   content: "<>";
+  z-index: 1;
   position: absolute;
   top: 50%;
   left: 50%;

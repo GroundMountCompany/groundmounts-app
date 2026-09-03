@@ -9,6 +9,7 @@ import {
 import { buildTrench, distanceMeters } from '@/lib/geo/trench';
 import { metersToFeet } from '@/lib/geo/units';
 import { RACKING } from '@/config/pricing';
+import { UI } from '@/config/copy';
 import type { LngLat } from '@/lib/geo/units';
 
 export { rotateHandlePosition };
@@ -115,6 +116,8 @@ export const LAYER = {
   handle: 'gm-handle-circle',
   meter: 'gm-meter-circle',
   pin: 'gm-address-pin',
+  pinHit: 'gm-address-pin-hit',
+  meterHit: 'gm-meter-hit',
 } as const;
 
 const EMPTY: FeatureCollection = { type: 'FeatureCollection', features: [] };
@@ -201,6 +204,21 @@ export function installLayers(map: mapboxgl.Map) {
     },
   });
 
+  // Transparent, thumb-sized hit targets. Drawn first so the visible markers
+  // sit on top of them.
+  map.addLayer({
+    id: LAYER.meterHit,
+    type: 'circle',
+    source: SRC.meter,
+    paint: { 'circle-radius': POINT_HIT_RADIUS_PX, 'circle-opacity': 0 },
+  });
+  map.addLayer({
+    id: LAYER.pinHit,
+    type: 'circle',
+    source: SRC.pin,
+    paint: { 'circle-radius': POINT_HIT_RADIUS_PX, 'circle-opacity': 0 },
+  });
+
   // Address pin. Big enough to grab with a thumb, since dragging it is the
   // whole point of step 1.
   map.addLayer({
@@ -246,7 +264,7 @@ export function installLayers(map: mapboxgl.Map) {
       // true north. The compass must stay fixed; rotating it with the array
       // would point N somewhere north isn't.
       'icon-rotation-alignment': 'viewport',
-      'text-field': 'Turn',
+      'text-field': UI.rotateHandle,
       'text-offset': [0, 1.9],
       'text-size': 13,
       'text-allow-overlap': true,
@@ -261,6 +279,15 @@ export function installLayers(map: mapboxgl.Map) {
 }
 
 export const COMPASS_ICON = 'gm-compass';
+
+/**
+ * Invisible touch padding around the point markers, in screen pixels.
+ *
+ * The drawn pin is 26px across and the meter 16px. Neither is a target a
+ * fingertip can land on reliably, so both get a transparent circle behind them
+ * sized for a thumb.
+ */
+export const POINT_HIT_RADIUS_PX = 26;
 
 /** Halo behind the trench distance label. See the note on the layer's paint. */
 export const TRENCH_LABEL_HALO = '#7e22ce';

@@ -29,51 +29,8 @@ test.skip(
 const RURAL: [number, number] = [-97.9425, 32.1183];
 const METER: [number, number] = [-97.9425, 32.1186];
 
-type Pt = [number, number];
-
-interface GmTest {
-  state: () => {
-    arrayCenter: Pt | null;
-    azimuth: number;
-    trenchFeet: number;
-    totalPanels: number;
-    mapReady: boolean;
-    currentStepIndex: number;
-    mapScreenshot: string | null;
-    setCurrentStepIndex: (v: number) => void;
-    setTotalPanels: (v: number) => void;
-    setArrayCenter: (v: Pt | null) => void;
-    coordinates: { latitude: number; longitude: number };
-    electricalMeterPosition: Pt | null;
-    setElectricalMeterPosition: (v: Pt | null) => void;
-  };
-  mapCenter: () => Pt;
-  mapZoom: () => number;
-  project: (ll: Pt) => Pt;
-  renderedHulls: () => number;
-  renderedHandles: () => number;
-  canvasRect: () => { left: number; top: number; width: number; height: number };
-  hitAt: (pt: Pt) => { handle: number; hull: number; pin: number; meter: number };
-  handleLngLat: () => Pt | null;
-  bearingFromCenter: (ll: Pt) => number | null;
-  unproject: (pt: Pt) => Pt;
-  setZoom: (z: number) => void;
-  viewArrayAt: (z: number) => void;
-  isMoving: () => boolean;
-  lastPointer: () => Pt | null;
-  renderedGeom: () => {
-    handlePx: Pt;
-    hullPx: Pt[];
-  } | null;
-  styleLoaded: () => boolean;
-  capture: () => Promise<{ dataUrl: string | null; reason?: string }>;
-}
-
-declare global {
-  interface Window {
-    __gmTest: GmTest;
-  }
-}
+import type { Pt } from './gmTest';
+import './gmTest';
 
 /** Seed the funnel straight into the design step on a rural parcel. */
 async function openDesignStep(page: Page) {
@@ -701,7 +658,11 @@ test.describe('design step gestures', () => {
     await page.locator('#phone').fill('(469) 555-0100');
     await page.getByTestId('submit-lead').click();
 
+    // Lead first, then the customer email — so both have to be awaited, and in
+    // that order. Polling only the lead used to pass by accident when the email
+    // went first.
     await expect.poll(() => (leadBody ? 'sent' : 'pending'), { timeout: 20_000 }).toBe('sent');
+    await expect.poll(() => (emailBody ? 'sent' : 'pending'), { timeout: 20_000 }).toBe('sent');
 
     const shot = leadBody!.mapScreenshot;
     expect(shot, 'lead payload has no screenshot after reload').toBeTruthy();

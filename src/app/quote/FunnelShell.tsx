@@ -181,7 +181,7 @@ function ProgressRow({ step, onPick }: { step: number; onPick: (n: number) => vo
           key={s.label}
           type="button"
           data-testid={`progress-step-${i}`}
-          aria-label={`${s.label}${i < step ? '' : ' (not yet)'}`}
+          aria-label={`${s.label}${i < step ? '' : UI.progressNotYet}`}
           aria-disabled={i >= step}
           onClick={() => i < step && onPick(i)}
           // The bar stays thin; the tappable box around it does not. A 6px

@@ -1,3 +1,7 @@
+/* Mapbox's own stylesheet. Imported here rather than from the component so
+   the JS bundle can load mapbox-gl lazily without dragging CSS in with it. */
+@import 'mapbox-gl/dist/mapbox-gl.css';
+
 .mapboxgl-ctrl-bottom-right .mapboxgl-ctrl-group {
   flex-direction: column;
   gap: 8px;

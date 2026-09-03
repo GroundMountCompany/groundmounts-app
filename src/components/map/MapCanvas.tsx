@@ -2,8 +2,9 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import mapboxgl from 'mapbox-gl';
-import 'mapbox-gl/dist/mapbox-gl.css';
+import type mapboxgl from 'mapbox-gl';
+// Static CSS import only — it carries no JS, so mapbox-gl itself still loads lazily.
+import '@/app/quote/mapboxStyle.css';
 import { useQuoteStore } from '@/store/quoteStore';
 import { mapRef, mapContainerRef } from '@/store/mapRefs';
 import {
@@ -12,6 +13,8 @@ import {
   LAYER,
   installCompassIcon,
   currentHandlePosition,
+  fitDesign,
+  arrayOutOfView,
 } from './layers';
 
 import { getMapSlot, subscribeMapSlot } from './mapStage';
@@ -23,7 +26,25 @@ import { captureMap } from '@/lib/screenshot';
 import type { ArraySpec } from '@/lib/geo/array';
 import type { LngLat } from '@/lib/geo/units';
 
-mapboxgl.accessToken = process.env.NEXT_PUBLIC_MAPBOX_TOKEN ?? '';
+/** Height of the sheet at its peek snap, plus breathing room. */
+const SHEET_CLEARANCE_PX = 196;
+
+/** Keep the fitted array clear of the bottom sheet on phone layouts. */
+function fitPadding() {
+  const narrow = typeof window !== 'undefined' && window.innerWidth < 768;
+  return { bottomPadding: narrow ? SHEET_CLEARANCE_PX : 56 };
+}
+
+/**
+ * mapbox-gl is ~230 kB gzipped and the address step does not need it to render
+ * the search box, so it is pulled in after first paint rather than being part of
+ * the initial bundle. The CSS comes with it.
+ */
+async function loadMapbox() {
+  const { default: mapboxgl } = await import('mapbox-gl');
+  mapboxgl.accessToken = process.env.NEXT_PUBLIC_MAPBOX_TOKEN ?? '';
+  return mapboxgl;
+}
 
 export type MapMode = 'address' | 'place-meter' | 'design' | 'hidden';
 
@@ -36,6 +57,8 @@ interface Grab {
   /** Where the finger went down, and where the array was at that moment. */
   startLngLat: LngLat;
   startCenter: LngLat;
+  /** Camera position when the grab began; held there until the finger lifts. */
+  cameraCenter: LngLat;
 }
 
 /**
@@ -62,9 +85,23 @@ export default function MapStage({ mode }: { mode: MapMode }) {
   useEffect(() => {
     if (!mounted || !host.current || mapRef.current) return;
 
+    let disposed = false;
+    let cleanup: (() => void) | undefined;
+
+    void loadMapbox().then((mapboxgl) => {
+      if (disposed || !host.current || mapRef.current) return;
+      cleanup = createMap(mapboxgl);
+    });
+
+    return () => {
+      disposed = true;
+      cleanup?.();
+    };
+
+    function createMap(mapboxgl: typeof import('mapbox-gl').default) {
     const { coordinates } = useQuoteStore.getState();
     const map = new mapboxgl.Map({
-      container: host.current,
+      container: host.current!,
       style: 'mapbox://styles/mapbox/satellite-streets-v12',
       center: [coordinates.longitude, coordinates.latitude],
       zoom: 18,
@@ -96,6 +133,7 @@ export default function MapStage({ mode }: { mode: MapMode }) {
         });
       }
       syncFromStore();
+      useQuoteStore.getState().setMapReady(true);
     });
 
     const canvas = map.getCanvas();
@@ -142,11 +180,13 @@ export default function MapStage({ mode }: { mode: MapMode }) {
       if (!arrayCenter) return;
 
       const ll = map.unproject(pt);
+      const cam = map.getCenter();
       grab.current = {
         kind,
         pointerId: e.pointerId,
         startLngLat: [ll.lng, ll.lat],
         startCenter: arrayCenter,
+        cameraCenter: [cam.lng, cam.lat],
       };
       map.dragPan.disable();
     };
@@ -189,7 +229,57 @@ export default function MapStage({ mode }: { mode: MapMode }) {
       if (!g || e.pointerId !== g.pointerId) return;
       releaseGrab();
       scheduleSlope();
+
+      // If the array has been dragged half out of the window, bring it back
+      // rather than leaving the customer to hunt for it.
+      const spec = currentSpec();
+      if (spec && arrayOutOfView(map, spec)) {
+        fitDesign(map, spec, useQuoteStore.getState().electricalMeterPosition, fitPadding());
+      }
     };
+
+    /**
+     * Stop Mapbox seeing a touch that belongs to our geometry.
+     *
+     * Disabling dragPan inside pointerdown is not enough: Mapbox binds its pan
+     * handler to the canvas *container*, and by the time our handler runs the
+     * gesture has already been claimed, so the map slid ~16px under the finger
+     * during an array drag. Capturing on the canvas lets us stop propagation
+     * before the container's listener ever sees it. No preventDefault, which
+     * would cancel the pointer stream we rely on.
+     */
+    const onTouchStartCapture = (e: TouchEvent) => {
+      if (modeRef.current !== 'design') return;
+      if (e.touches.length !== 1) return; // two fingers always belong to the map
+      const t = e.touches[0];
+      const rect = canvas.getBoundingClientRect();
+      const pt: [number, number] = [t.clientX - rect.left, t.clientY - rect.top];
+      if (hitTest(pt)) e.stopPropagation();
+    };
+    canvas.addEventListener('touchstart', onTouchStartCapture, { capture: true });
+
+    /**
+     * Hold the camera still for the duration of an array or compass drag.
+     *
+     * Disabling dragPan and stopping propagation both leave a residual pan of
+     * ~16px, because Mapbox has already claimed the gesture by the time our
+     * handler runs. Rather than keep guessing at its event plumbing, the camera
+     * is simply pinned: whatever tries to move it while a finger is down gets
+     * put back. The map is free again the instant the finger lifts.
+     */
+    let pinning = false;
+    const onMapMove = () => {
+      const g = grab.current;
+      if (!g || pinning) return;
+      const c = map.getCenter();
+      if (Math.abs(c.lng - g.cameraCenter[0]) < 1e-12 && Math.abs(c.lat - g.cameraCenter[1]) < 1e-12) {
+        return;
+      }
+      pinning = true;
+      map.setCenter(g.cameraCenter);
+      pinning = false;
+    };
+    map.on('move', onMapMove);
 
     canvas.addEventListener('pointerdown', onPointerDown);
     canvas.addEventListener('pointermove', onPointerMove);
@@ -209,6 +299,28 @@ export default function MapStage({ mode }: { mode: MapMode }) {
     map.on('zoomend', onZoomEnd);
 
     const unsubscribeStore = useQuoteStore.subscribe(syncFromStore);
+
+    // Frame the design the first time the array exists in design mode.
+    let framed = false;
+    const maybeFit = () => {
+      // Never re-frame while a finger is down: the drag writes to the store on
+      // every frame, and moving the camera underneath the gesture is exactly
+      // the "map fights you" behaviour this whole phase is meant to remove.
+      if (framed || grab.current || modeRef.current !== 'design') return;
+      const spec = currentSpec();
+      if (!spec || !map.isStyleLoaded()) return;
+      framed = true;
+      fitDesign(map, spec, useQuoteStore.getState().electricalMeterPosition, fitPadding());
+    };
+    const unsubscribeFit = useQuoteStore.subscribe(maybeFit);
+    map.on('idle', maybeFit);
+
+    fitRef.current = () => {
+      const spec = currentSpec();
+      if (spec) {
+        fitDesign(map, spec, useQuoteStore.getState().electricalMeterPosition, fitPadding());
+      }
+    };
 
     // Test hook. Interaction tests need the live map's camera and the rendered
     // feature counts, neither of which is observable from the DOM. Dev-only:
@@ -294,18 +406,25 @@ export default function MapStage({ mode }: { mode: MapMode }) {
 
     return () => {
       unsubscribeStore();
+      unsubscribeFit();
+      map.off('idle', maybeFit);
+      fitRef.current = null;
       if (slopeTimer.current) clearTimeout(slopeTimer.current);
+      canvas.removeEventListener('touchstart', onTouchStartCapture, { capture: true });
       canvas.removeEventListener('pointerdown', onPointerDown);
       canvas.removeEventListener('pointermove', onPointerMove);
       canvas.removeEventListener('pointerup', onPointerUp);
       canvas.removeEventListener('pointercancel', onPointerUp);
       map.off('click', onClick);
       map.off('zoomend', onZoomEnd);
+      map.off('move', onMapMove);
       // Only on funnel unmount — never between steps.
       map.remove();
       mapRef.current = null;
       mapContainerRef.current = null;
+      useQuoteStore.getState().setMapReady(false);
     };
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mounted]);
 
@@ -415,6 +534,26 @@ export default function MapStage({ mode }: { mode: MapMode }) {
   );
 }
 
+/** Current array spec from the store, or null when there is nothing to draw. */
+function currentSpec(): ArraySpec | null {
+  const s = useQuoteStore.getState();
+  if (!s.arrayCenter || s.totalPanels <= 0) return null;
+  return {
+    center: s.arrayCenter,
+    azimuth: s.azimuth,
+    panelCount: s.totalPanels,
+    tier: s.panelTier,
+  };
+}
+
+/** Set by the live map; called by the "Find my panels" button. */
+const fitRef: { current: (() => void) | null } = { current: null };
+
+/** Re-frame the array and meter. Safe to call when no map exists. */
+export function fitDesignView() {
+  fitRef.current?.();
+}
+
 /** Redraw from store state and write back the trench length. */
 function syncFromStore() {
   const map = mapRef.current;
@@ -424,9 +563,7 @@ function syncFromStore() {
   if (!map || !map.getLayer(LAYER.hullFill)) return;
 
   const s = useQuoteStore.getState();
-  const spec: ArraySpec | null = s.arrayCenter
-    ? { center: s.arrayCenter, azimuth: s.azimuth, panelCount: s.totalPanels, tier: s.panelTier }
-    : null;
+  const spec = currentSpec();
 
   renderDesign(map, { spec, meter: s.electricalMeterPosition });
 

@@ -2,15 +2,14 @@
 
 import { useDebounce } from '@/lib/hooks';
 import { searchAddress } from '@/lib/mapbox';
-import { cn } from '@/lib/utils';
 import { GeocodingFeature } from '@/types';
-import { useEffect, useRef, useState, FormEvent, ChangeEvent, JSX } from 'react';
+import { useEffect, useRef, useState, ChangeEvent, JSX } from 'react';
 import { useQuoteContext } from '@/contexts/quoteContext';
 import { useSearchParams } from 'next/navigation';
 import { fireDesignStartOnce } from '@/lib/fb';
 
 export const AddressInput = (): JSX.Element => {
-  const { setAddress, setCoordinates, shouldContinueButtonDisabled, setCurrentStepIndex } = useQuoteContext();
+  const { setAddress, setCoordinates } = useQuoteContext();
   const [suggestions, setSuggestions] = useState<GeocodingFeature[]>([]);
   const [localAddress, setLocalAddress] = useState<string>('');
   const [isLoading, setIsLoading] = useState<boolean>(false);
@@ -90,70 +89,51 @@ export const AddressInput = (): JSX.Element => {
     try { fireDesignStartOnce(); } catch {}
   };
 
-  const handleSubmit = (e: FormEvent): void => {
-    e.preventDefault();
-    // Address will be sent to Airtable when lead is captured in Step3Form
-    setCurrentStepIndex(1);
-  };
-
   return (
     <div className="w-full relative">
-      <form onSubmit={handleSubmit} className="space-y-2">
-        <div className="flex flex-row gap-2">
-          <div className="relative flex-1">
-            <input
-              type="text"
-              id="address"
-              ref={inputAddressRef}
-              value={localAddress}
-              onChange={(e: ChangeEvent<HTMLInputElement>) => {
-                setShowSuggestions(true);
-                setLocalAddress(e.target.value);
-              }}
-              onFocus={() => {
-                setShowSuggestions(true);
-                // Fire DesignStart on first focus
-                try { fireDesignStartOnce(); } catch {}
-              }}
-              className="h-12 w-full rounded-xl border border-neutral-300 bg-white px-4 text-base outline-none ring-0 transition focus:border-neutral-400 focus:ring-2 focus:ring-neutral-200 placeholder:text-neutral-500"
-              placeholder="Enter your address"
-              autoComplete="off"
-            />
-            {isLoading && (
-              <div className="absolute right-3 top-1/2 -translate-y-1/2">
-                <div className="animate-spin rounded-full h-4 w-4 border-2 border-primary-200 border-t-transparent"></div>
-              </div>
-            )}
-            {showSuggestions && suggestions.length > 0 && (
-              <div
-                ref={suggestionsRef}
-                className="absolute z-10 top-[52px] w-full shadow-lg rounded-lg bg-white border border-neutral-200"
-              >
-                {suggestions.map((suggestion) => (
-                  <button
-                    key={suggestion.id}
-                    type="button"
-                    className="w-full px-4 py-2 text-left transition-all duration-300 hover:bg-gray-100 focus:outline-none focus:bg-gray-100 text-sm text-neutral-700 first:rounded-t-lg last:rounded-b-lg"
-                    onClick={() => handleSuggestionClick(suggestion)}
-                  >
-                    {suggestion.place_name}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-          <button
-            type="submit"
-            className={cn("h-12 px-4 rounded-xl text-sm font-semibold transition-all duration-300 shrink-0", {
-              'bg-gray-400 text-white cursor-not-allowed': shouldContinueButtonDisabled,
-              'bg-black text-white hover:bg-gray-800': !shouldContinueButtonDisabled,
-            })}
-            disabled={shouldContinueButtonDisabled}
-          >
-            Continue
-          </button>
+      <div className="space-y-2">
+        <div className="relative">
+          <input
+            type="text"
+            id="address"
+            ref={inputAddressRef}
+            value={localAddress}
+            onChange={(e: ChangeEvent<HTMLInputElement>) => {
+              setShowSuggestions(true);
+              setLocalAddress(e.target.value);
+            }}
+            onFocus={() => {
+              setShowSuggestions(true);
+              try { fireDesignStartOnce(); } catch {}
+            }}
+            className="h-14 w-full rounded-xl border border-neutral-300 bg-white px-4 text-[17px] outline-none transition focus:border-neutral-500 placeholder:text-neutral-500"
+            placeholder="Enter your address"
+            autoComplete="off"
+          />
+          {isLoading && (
+            <div className="absolute right-4 top-1/2 -translate-y-1/2">
+              <div className="h-4 w-4 animate-spin rounded-full border-2 border-neutral-300 border-t-transparent" />
+            </div>
+          )}
+          {showSuggestions && suggestions.length > 0 && (
+            <div
+              ref={suggestionsRef}
+              className="absolute z-10 top-[60px] w-full overflow-hidden rounded-xl border border-neutral-200 bg-white shadow-lg"
+            >
+              {suggestions.map((suggestion) => (
+                <button
+                  key={suggestion.id}
+                  type="button"
+                  className="min-h-[48px] w-full px-4 py-3 text-left text-[16px] text-neutral-800 transition hover:bg-neutral-100"
+                  onClick={() => handleSuggestionClick(suggestion)}
+                >
+                  {suggestion.place_name}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
-      </form>
+      </div>
     </div>
   );
 };

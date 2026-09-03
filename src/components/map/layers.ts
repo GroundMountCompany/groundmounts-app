@@ -31,6 +31,65 @@ export function handleOffsetFt(map: mapboxgl.Map): number {
   return metersToFeet(meters);
 }
 
+/** Max zoom the design step will fit to. Closer than this reads as a crop. */
+export const DESIGN_MAX_ZOOM = 19;
+
+/**
+ * Frame the array and the meter together.
+ *
+ * The design step used to inherit the address-step camera, which left an
+ * IronRidge table a few pixels deep — a blue sliver, not panels. Fitting to the
+ * design with padding makes the array read as what it is.
+ */
+export function fitDesign(
+  map: mapboxgl.Map,
+  spec: ArraySpec,
+  meter: LngLat | null,
+  opts: { animate?: boolean; bottomPadding?: number } = {}
+) {
+  const { hull } = buildArray(spec);
+  const points: LngLat[] = [...(hull.geometry.coordinates[0] as LngLat[])];
+  if (meter) points.push(meter);
+  points.push(currentHandlePosition(map, spec));
+
+  let west = points[0][0];
+  let east = points[0][0];
+  let south = points[0][1];
+  let north = points[0][1];
+  for (const [lng, lat] of points) {
+    west = Math.min(west, lng);
+    east = Math.max(east, lng);
+    south = Math.min(south, lat);
+    north = Math.max(north, lat);
+  }
+
+  map.fitBounds(
+    [
+      [west, south],
+      [east, north],
+    ],
+    {
+      // The bottom sheet covers the lower part of the map on a phone, so the
+      // array has to be framed above it or it is fitted out of sight.
+      padding: { top: 56, right: 40, bottom: opts.bottomPadding ?? 56, left: 40 },
+      maxZoom: DESIGN_MAX_ZOOM,
+      duration: opts.animate === false ? 0 : 600,
+    }
+  );
+}
+
+/** True when any part of the array has left the viewport. */
+export function arrayOutOfView(map: mapboxgl.Map, spec: ArraySpec): boolean {
+  const { hull } = buildArray(spec);
+  const canvas = map.getCanvas();
+  const w = canvas.clientWidth;
+  const h = canvas.clientHeight;
+  return (hull.geometry.coordinates[0] as LngLat[]).some((c) => {
+    const p = map.project(c);
+    return p.x < 0 || p.y < 0 || p.x > w || p.y > h;
+  });
+}
+
 /** Where the grip currently sits, using the zoom-derived offset. */
 export function currentHandlePosition(map: mapboxgl.Map, spec: ArraySpec): LngLat {
   return rotateHandlePosition(spec, RACKING, handleOffsetFt(map));

@@ -61,6 +61,16 @@ interface QuoteState {
   trenchFeet: number;
   slopePercent: number | null;
   slopeTier: SlopeTier;
+  /** $/kWh from the customer's bill. 0 means "use the Texas default". */
+  ratePerKwh: number;
+  /** Manual panel adjustment on the design step, added to the sized count. */
+  panelAdjust: number;
+  /**
+   * True once the map instance exists and its style has loaded. mapbox-gl is
+   * imported lazily now, so anything that needs the map has to wait for this
+   * rather than checking mapRef once and giving up.
+   */
+  mapReady: boolean;
 }
 
 interface QuoteActions {
@@ -90,6 +100,9 @@ interface QuoteActions {
   setPanelTier: (v: PanelTier) => void;
   setTrenchFeet: (v: number) => void;
   setSlope: (percent: number | null, tier: SlopeTier) => void;
+  setRatePerKwh: (v: number) => void;
+  setPanelAdjust: (v: number) => void;
+  setMapReady: (v: boolean) => void;
 }
 
 export type QuoteStore = QuoteState & QuoteActions;
@@ -121,6 +134,9 @@ const initialState: QuoteState = {
   trenchFeet: 0,
   slopePercent: null,
   slopeTier: 'Unknown',
+  ratePerKwh: 0,
+  panelAdjust: 0,
+  mapReady: false,
 };
 
 /** Straight-line meter→array distance in whole feet. */
@@ -203,6 +219,9 @@ export const useQuoteStore = create<QuoteStore>()(
           additionalCost: Math.max(0, Math.round(trenchFeet) * TRENCHING_COST_PER_FT),
         }),
       setSlope: (slopePercent, slopeTier) => set({ slopePercent, slopeTier }),
+      setRatePerKwh: (ratePerKwh) => set({ ratePerKwh }),
+      setPanelAdjust: (panelAdjust) => set({ panelAdjust }),
+      setMapReady: (mapReady) => set({ mapReady }),
 
       resetQuote: () => {
         set({ ...initialState, hydrated: true, leadId: uuid(), startedAt: Date.now() });
@@ -240,6 +259,8 @@ export const useQuoteStore = create<QuoteStore>()(
         trenchFeet: state.trenchFeet,
         slopePercent: state.slopePercent,
         slopeTier: state.slopeTier,
+        ratePerKwh: state.ratePerKwh,
+        panelAdjust: state.panelAdjust,
         // Downscaled JPEG, so it is small enough to persist. Without this a
         // refresh on the contact form dropped the screenshot silently.
         mapScreenshot: state.mapScreenshot,

@@ -41,20 +41,24 @@ async function mockGeocoding(page: Page) {
 }
 
 /**
- * Whichever Continue control is actually on screen.
+ * The single primary button in the sheet.
  *
- * The funnel renders two: a sticky bottom CTA (phones, `md:hidden`) and the
- * address form's own submit button (desktop). Both are disabled from the same
- * store-derived `shouldContinueButtonDisabled`, so either is a valid read-back
- * signal — but only one is visible per viewport, so the locator has to pick.
+ * Phase 4 replaced the two competing Continue buttons (a sticky mobile CTA and
+ * the address form's own submit) with one, present at every snap point and on
+ * both layouts. Its disabled state is still derived from the store.
  */
-const continueButton = (page: Page) =>
-  page
-    .locator('[data-testid="mobile-continue"]:visible, form button[type="submit"]:visible')
-    .first();
+const continueButton = (page: Page) => page.getByTestId('primary-cta');
+
+/** Wait until the persisted store has rehydrated and inputs are live. */
+async function waitForHydration(page: Page) {
+  await page.waitForSelector('[data-testid="funnel"][data-hydrated="true"]', {
+    timeout: 20_000,
+  });
+}
 
 /** Type an address and choose the mocked suggestion. */
 async function pickAddress(page: Page) {
+  await waitForHydration(page);
   await page.locator('#address').fill('123 Main St');
   const suggestion = page.getByRole('button', { name: SUGGESTION.place_name });
   await expect(suggestion).toBeVisible();
@@ -67,14 +71,16 @@ test('loads the funnel on a phone viewport without uncaught errors', async ({ pa
 
   await mockGeocoding(page);
   await page.goto('/quote');
+  await waitForHydration(page);
 
   await expect(page.locator('#address')).toBeVisible();
   expect(errors, `uncaught page errors: ${errors.join(' | ')}`).toEqual([]);
 });
 
-test('geocode suggestion unlocks Continue and advances to the meter step', async ({ page }) => {
+test('geocode suggestion unlocks Continue and advances a step', async ({ page }) => {
   await mockGeocoding(page);
   await page.goto('/quote');
+  await waitForHydration(page);
 
   // Nothing chosen yet, so the funnel refuses to move on.
   await expect(continueButton(page)).toBeDisabled();
@@ -83,9 +89,7 @@ test('geocode suggestion unlocks Continue and advances to the meter step', async
   await expect(continueButton(page)).toBeEnabled();
 
   await continueButton(page).click();
-  await expect(
-    page.getByRole('heading', { name: 'Find Your Electrical Meter' })
-  ).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Your power use' })).toBeVisible();
 });
 
 test('restores the address from the store after a reload', async ({ page }) => {
@@ -95,6 +99,7 @@ test('restores the address from the store after a reload', async ({ page }) => {
   await expect(continueButton(page)).toBeEnabled();
 
   await page.reload();
+  await waitForHydration(page);
 
   // Continue is enabled only when address and coordinates are both present, so
   // this passing means the store rehydrated them — not that the browser kept a
@@ -108,17 +113,19 @@ test('restores the current step after a reload', async ({ page }) => {
   await pickAddress(page);
   await continueButton(page).click();
 
-  const meterHeading = page.getByRole('heading', { name: 'Find Your Electrical Meter' });
-  await expect(meterHeading).toBeVisible();
+  const nextHeading = page.getByRole('heading', { name: 'Your power use' });
+  await expect(nextHeading).toBeVisible();
 
   await page.reload();
+  await waitForHydration(page);
 
   // The funnel comes back on step 2, not back at the address form.
-  await expect(meterHeading).toBeVisible();
+  await expect(nextHeading).toBeVisible();
 });
 
 test('the root page renders the same funnel as /quote', async ({ page }) => {
   await mockGeocoding(page);
   await page.goto('/');
+  await waitForHydration(page);
   await expect(page.locator('#address')).toBeVisible();
 });

@@ -1,7 +1,8 @@
 "use client";
 
-import React from "react";
-import MapDrawTool from "./MapDrawTool";
+import React, { Suspense } from "react";
+import MapCanvas from "@/components/map/MapCanvas";
+import AddressInput from "./AddressInput";
 
 /**
  * Step1Screen lays out Step 1 (instructions + map) as a single screen
@@ -28,7 +29,15 @@ export default function Step1Screen() {
       {/* Map fills remaining space, never hidden behind CTA */}
       <div className="row-start-2 row-end-3 relative">
         <div className="absolute inset-0 pb-[calc(env(safe-area-inset-bottom)+72px)] md:pb-0">
-          <MapDrawTool />
+          <MapCanvas mode="address" />
+        </div>
+        {/* Search overlays the map rather than pushing it off-screen.
+            AddressInput reads ?zipcode= via useSearchParams, which forces a
+            client bailout, so it needs its own boundary to keep /quote static. */}
+        <div className="absolute inset-x-0 top-0 z-10 px-4 pt-3">
+          <Suspense fallback={<div className="h-12" />}>
+            <AddressInput />
+          </Suspense>
         </div>
       </div>
 

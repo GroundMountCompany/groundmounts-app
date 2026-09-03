@@ -2,12 +2,7 @@
 
 import { useEffect } from 'react';
 import { useQuoteStore } from '@/store/quoteStore';
-import {
-  mapRef,
-  mapContainerRef,
-  drawRef,
-  lineFeatureIdRef,
-} from '@/store/mapRefs';
+import { mapRef, mapContainerRef } from '@/store/mapRefs';
 
 /**
  * Compatibility shim over the Zustand store.
@@ -34,8 +29,6 @@ export function useQuoteContext() {
     // Imperative Mapbox handles (module-level, never re-rendered)
     mapRef,
     mapContainerRef,
-    drawRef,
-    lineFeatureIdRef,
   };
 }
 

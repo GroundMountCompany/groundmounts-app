@@ -3,11 +3,10 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import * as turf from '@turf/turf';
-import type { Feature, LineString } from 'geojson';
-import type MapboxDraw from '@mapbox/mapbox-gl-draw';
 import { v4 as uuid } from 'uuid';
 import { TRENCHING_COST_PER_FT } from '@/lib/solar';
-import { drawRef, lineFeatureIdRef } from './mapRefs';
+import type { PanelTier } from '@/config/pricing';
+import type { SlopeTier } from '@/lib/slope';
 
 export interface Coordinates {
   latitude: number;
@@ -51,6 +50,17 @@ interface QuoteState {
   panelPosition: LngLat | null;
   electricalMeterPosition: LngLat | null;
   mapScreenshot: string | null;
+
+  // --- Phase 2 design engine ---
+  /** Array centre. Distinct from panelPosition, which was the old marker anchor. */
+  arrayCenter: LngLat | null;
+  /** Compass bearing the panels face. 180 = due south. */
+  azimuth: number;
+  panelTier: PanelTier;
+  /** Live trench length in feet, from the array edge to the meter. */
+  trenchFeet: number;
+  slopePercent: number | null;
+  slopeTier: SlopeTier;
 }
 
 interface QuoteActions {
@@ -72,9 +82,14 @@ interface QuoteActions {
   setElectricalMeterPosition: (v: LngLat | null) => void;
   setMapScreenshot: (v: string | null) => void;
   updateDistanceAndCost: (meter: LngLat, panel: LngLat) => void;
-  createOrUpdateLine: (meter: LngLat, panel: LngLat, draw: MapboxDraw) => void;
   ensureMeterFromStorage: () => void;
   resetQuote: () => void;
+
+  setArrayCenter: (v: LngLat | null) => void;
+  setAzimuth: (v: number) => void;
+  setPanelTier: (v: PanelTier) => void;
+  setTrenchFeet: (v: number) => void;
+  setSlope: (percent: number | null, tier: SlopeTier) => void;
 }
 
 export type QuoteStore = QuoteState & QuoteActions;
@@ -100,6 +115,12 @@ const initialState: QuoteState = {
   panelPosition: null,
   electricalMeterPosition: null,
   mapScreenshot: null,
+  arrayCenter: null,
+  azimuth: 180,
+  panelTier: 'standard',
+  trenchFeet: 0,
+  slopePercent: null,
+  slopeTier: 'Unknown',
 };
 
 /** Straight-line meter→array distance in whole feet. */
@@ -109,19 +130,6 @@ export function distanceInFeet(a: LngLat, b: LngLat): number {
   } catch (error) {
     console.error('[QUOTE] distance failed', error);
     return 0;
-  }
-}
-
-function safeDrawDelete(draw: MapboxDraw | null, featureId: string | null): boolean {
-  if (!draw || !featureId) return false;
-  try {
-    if (typeof draw.delete !== 'function' || typeof draw.getAll !== 'function') return false;
-    draw.getAll();
-    draw.delete(featureId);
-    return true;
-  } catch (error) {
-    console.warn('[DRAW] safe delete failed', error);
-    return false;
   }
 }
 
@@ -151,9 +159,6 @@ export const useQuoteStore = create<QuoteStore>()(
         const { electricalMeterPosition } = get();
         if (panelPosition && electricalMeterPosition) {
           get().updateDistanceAndCost(electricalMeterPosition, panelPosition);
-          if (drawRef.current) {
-            get().createOrUpdateLine(electricalMeterPosition, panelPosition, drawRef.current);
-          }
         }
       },
 
@@ -162,9 +167,6 @@ export const useQuoteStore = create<QuoteStore>()(
         const { panelPosition } = get();
         if (panelPosition && electricalMeterPosition) {
           get().updateDistanceAndCost(electricalMeterPosition, panelPosition);
-          if (drawRef.current) {
-            get().createOrUpdateLine(electricalMeterPosition, panelPosition, drawRef.current);
-          }
         }
       },
 
@@ -185,32 +187,24 @@ export const useQuoteStore = create<QuoteStore>()(
         });
       },
 
-      createOrUpdateLine: (meter, panel, draw) => {
-        try {
-          const lineFeature: Feature<LineString> = {
-            type: 'Feature',
-            id: 'meter-to-panel-line',
-            geometry: { type: 'LineString', coordinates: [meter, panel] },
-            properties: {},
-          };
-          if (lineFeatureIdRef.current) {
-            safeDrawDelete(draw, lineFeatureIdRef.current);
-          }
-          const ids = draw.add(lineFeature);
-          lineFeatureIdRef.current = ids[0];
-        } catch (error) {
-          console.error('[QUOTE] line update failed', error);
-        }
-      },
-
       /**
        * No-op kept for call-site compatibility. The meter position is part of the
        * persisted slice now, so it is already restored by the time anything runs.
        */
       ensureMeterFromStorage: () => {},
 
+      setArrayCenter: (arrayCenter) => set({ arrayCenter }),
+      setAzimuth: (azimuth) => set({ azimuth: ((azimuth % 360) + 360) % 360 }),
+      setPanelTier: (panelTier) => set({ panelTier }),
+      /** Trench length and its cost move together; nothing else writes them. */
+      setTrenchFeet: (trenchFeet) =>
+        set({
+          trenchFeet,
+          additionalCost: Math.max(0, Math.round(trenchFeet) * TRENCHING_COST_PER_FT),
+        }),
+      setSlope: (slopePercent, slopeTier) => set({ slopePercent, slopeTier }),
+
       resetQuote: () => {
-        lineFeatureIdRef.current = null;
         set({ ...initialState, hydrated: true, leadId: uuid(), startedAt: Date.now() });
       },
     }),
@@ -236,6 +230,12 @@ export const useQuoteStore = create<QuoteStore>()(
         additionalCost: state.additionalCost,
         panelPosition: state.panelPosition,
         electricalMeterPosition: state.electricalMeterPosition,
+        arrayCenter: state.arrayCenter,
+        azimuth: state.azimuth,
+        panelTier: state.panelTier,
+        trenchFeet: state.trenchFeet,
+        slopePercent: state.slopePercent,
+        slopeTier: state.slopeTier,
         // mapScreenshot is a multi-MB data URL — never persisted.
       }),
       onRehydrateStorage: () => (state, error) => {

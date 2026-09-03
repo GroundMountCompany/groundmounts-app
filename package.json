@@ -15,15 +15,13 @@
     "analyze": "ANALYZE=true next build"
   },
   "dependencies": {
-    "@mapbox/mapbox-gl-draw": "^1.5.0",
     "@radix-ui/react-slider": "^1.2.2",
+    "@turf/boolean-intersects": "^7.4.0",
     "@turf/turf": "^7.2.0",
-    "@types/mapbox__mapbox-gl-draw": "^1.4.8",
     "@types/mapbox-gl": "^3.4.1",
     "@vercel/blob": "^2.0.0",
     "clsx": "^2.1.1",
     "framer-motion": "^11.17.1",
-    "html2canvas": "^1.4.1",
     "lucide-react": "^0.469.0",
     "mapbox-gl": "^3.9.2",
     "next": "^15.1.3",

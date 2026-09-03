@@ -1,8 +1,8 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback } from "react";
 import { useQuoteContext } from "@/contexts/quoteContext";
-import MapDrawTool from "./MapDrawTool";
+import MapCanvas from "@/components/map/MapCanvas";
 
 enum QuoteStep {
   Address = 0,
@@ -12,24 +12,12 @@ enum QuoteStep {
 }
 
 export default function Step2MeterMap() {
-  const { setElectricalMeter, setElectricalMeterPosition, setCurrentStepIndex, electricalMeterPosition } = useQuoteContext();
-  
-  // Check if meter was already placed (from persisted state)
-  const [hasPlaced, setHasPlaced] = useState(() => {
-    return Array.isArray(electricalMeterPosition) && electricalMeterPosition.length === 2;
-  });
+  const { setCurrentStepIndex, electricalMeterPosition } = useQuoteContext();
 
-  const handlePlace = useCallback((lngLat: { lng: number; lat: number }) => {
-    setElectricalMeter({
-      coordinates: {
-        latitude: lngLat.lat,
-        longitude: lngLat.lng
-      },
-      distanceInFeet: 0 // Will be calculated later when panels are placed
-    });
-    setElectricalMeterPosition([lngLat.lng, lngLat.lat]);
-    setHasPlaced(true);
-  }, [setElectricalMeter, setElectricalMeterPosition]);
+  // Derived from the store rather than mirrored in local state, so a restored
+  // meter is recognised on reload instead of the button staying disabled.
+  const hasPlaced =
+    Array.isArray(electricalMeterPosition) && electricalMeterPosition.length === 2;
 
   const goNext = useCallback(() => {
     if (!hasPlaced) return;
@@ -50,11 +38,7 @@ export default function Step2MeterMap() {
 
       {/* Map - full height on mobile, fixed height on desktop */}
       <div className="flex-1 min-h-0 relative md:flex-none md:h-[500px]">
-        <MapDrawTool
-          mode="place-meter"
-          initialZoomPercent={50}
-          onPlace={handlePlace}
-        />
+        <MapCanvas mode="place-meter" />
       </div>
 
       {/* Continue button - always visible at bottom */}

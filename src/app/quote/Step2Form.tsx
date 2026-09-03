@@ -1,7 +1,6 @@
 "use client";
 
 import React, { useEffect, useMemo, useState, useCallback } from "react";
-import html2canvas from "html2canvas";
 import { cn } from "@/lib/utils";
 import * as Slider from "@radix-ui/react-slider";
 import "./sliderStyle.css";
@@ -9,8 +8,14 @@ import Button from "@/components/common/Button";
 import { useQuoteContext } from "@/contexts/quoteContext";
 import Image from "next/image";
 import { estimateMonthlyKWh, kWFromMonthlyKWh, panelsFromkW } from "@/lib/solar";
-import dynamic from 'next/dynamic';
-const CalculatorMap = dynamic(() => import('./CalculatorMap'), { ssr: false });
+import MapCanvas from "@/components/map/MapCanvas";
+import { captureMap } from "@/lib/screenshot";
+import { autoPlaceArray } from "@/lib/geo/place";
+import { footprintFt } from "@/lib/geo/array";
+import { percentOfSouth, TX_FALLBACK_CURVE } from "@/lib/production";
+import { slopeAt } from "@/lib/slope";
+import { useQuoteStore } from "@/store/quoteStore";
+import { mapRef } from "@/store/mapRefs";
 
 interface Step2FormProps {
   showForm: boolean;
@@ -37,8 +42,13 @@ function Step2Form({
     electricalMeter,
     electricalMeterPosition,
     ensureMeterFromStorage,
-    mapContainerRef,
     setMapScreenshot,
+    arrayCenter,
+    azimuth,
+    panelTier,
+    trenchFeet,
+    slopePercent,
+    slopeTier,
   } = useQuoteContext();
   const [showTooltip, setShowTooltip] = useState<boolean>(false);
   const [meterBtn, setMeterBtn] = useState<boolean>(false);
@@ -79,32 +89,73 @@ function Step2Form({
   }, [electricalMeterPosition])
 
   const handleContinue = useCallback(async () => {
-    // Capture map screenshot before transitioning using html2canvas
-    // This captures DOM elements (like panel markers) that canvas.toDataURL() misses
-    if (mapContainerRef.current) {
-      try {
-        const canvas = await html2canvas(mapContainerRef.current, {
-          useCORS: true,
-          allowTaint: true,
-          backgroundColor: null,
-          scale: 1, // Keep size reasonable
-          logging: false,
-        });
-        const dataUrl = canvas.toDataURL('image/png');
-        if (dataUrl && dataUrl.length > 100) {
-          setMapScreenshot(dataUrl);
-          console.log('[MAP_SCREENSHOT] Captured with html2canvas, size:', Math.round(dataUrl.length / 1024), 'KB');
-        } else {
-          console.warn('[MAP_SCREENSHOT] Canvas appears blank');
-        }
-      } catch (e) {
-        console.warn('[MAP_SCREENSHOT] html2canvas error:', e);
-      }
+    // The array, trench and its label are real Mapbox layers now, so the WebGL
+    // canvas already contains everything the owner needs to see. html2canvas is
+    // gone. A blank buffer yields null and the lead submits without an image.
+    const { dataUrl, reason } = await captureMap(mapRef.current);
+    if (dataUrl) {
+      setMapScreenshot(dataUrl);
+      console.log('[MAP_SCREENSHOT] captured', Math.round(dataUrl.length / 1024), 'KB');
+    } else {
+      console.warn('[MAP_SCREENSHOT] skipped:', reason);
     }
 
     // Data will be sent to Airtable when lead is captured in Step3Form
     setCurrentStepIndex(4); // Move to Step3Form (lead capture form)
-  }, [mapContainerRef, setMapScreenshot, setCurrentStepIndex]);
+  }, [setMapScreenshot, setCurrentStepIndex]);
+
+  // Drop the array on entry: south-facing, clear of the meter, off the house
+  // where the basemap knows about one.
+  useEffect(() => {
+    if (!electricalMeterPosition || totalPanels <= 0 || arrayCenter) return;
+
+    const map = mapRef.current;
+    // Building footprints from the basemap give free house detection. Query the
+    // whole viewport rather than a point.
+    const canvas = map?.getCanvas();
+    const obstacles =
+      map?.isStyleLoaded() && canvas
+        ? (map
+            .queryRenderedFeatures(
+              [
+                [0, 0],
+                [canvas.clientWidth, canvas.clientHeight],
+              ],
+              { layers: ['building'] }
+            )
+            .filter((f) => f.geometry?.type === 'Polygon') as never[])
+        : [];
+
+    const { center } = autoPlaceArray({
+      meter: electricalMeterPosition,
+      panelCount: totalPanels,
+      tier: panelTier,
+      azimuth: 180,
+      obstacles,
+    });
+    useQuoteStore.getState().setArrayCenter(center);
+  }, [electricalMeterPosition, totalPanels, panelTier, arrayCenter]);
+
+  // Slope is advisory: it never gates the step, it just fills in when it lands.
+  useEffect(() => {
+    if (!arrayCenter || slopePercent !== null) return;
+    let cancelled = false;
+    slopeAt(mapRef.current, arrayCenter).then((r) => {
+      if (!cancelled) useQuoteStore.getState().setSlope(r.percent, r.tier);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [arrayCenter, slopePercent]);
+
+  const footprint = useMemo(
+    () => footprintFt(totalPanels, panelTier),
+    [totalPanels, panelTier]
+  );
+  const southPct = useMemo(
+    () => percentOfSouth(TX_FALLBACK_CURVE, azimuth),
+    [azimuth]
+  );
 
   // Restore meter position from storage on mount if missing
   useEffect(() => {
@@ -230,9 +281,50 @@ function Step2Form({
       }
 
       {/* Map - render unconditionally */}
-      <div className="mb-6">
-        <CalculatorMap />
+      <div className="mb-3">
+        <div className="relative h-[46svh] min-h-[280px] w-full overflow-hidden rounded-xl border border-neutral-200">
+          <MapCanvas mode="design" />
+        </div>
+        <p className="mt-2 text-xs text-neutral-500">
+          Drag the panels where you want them. Use the round handle to turn them.
+        </p>
       </div>
+
+      {/* Live design readout */}
+      {totalPanels > 0 && (
+        <div className="mb-6 grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <div className="rounded-lg border border-neutral-200 bg-white px-3 py-2">
+            <p className="text-[11px] uppercase tracking-wide text-neutral-500">Array size</p>
+            <p className="text-sm font-semibold text-neutral-900">
+              {Math.round(footprint.widthFt)} x {Math.round(footprint.heightFt)} ft
+            </p>
+          </div>
+          <div className="rounded-lg border border-neutral-200 bg-white px-3 py-2">
+            <p className="text-[11px] uppercase tracking-wide text-neutral-500">Trench</p>
+            <p className="text-sm font-semibold text-neutral-900">{trenchFeet} ft</p>
+          </div>
+          <div className="rounded-lg border border-neutral-200 bg-white px-3 py-2">
+            <p className="text-[11px] uppercase tracking-wide text-neutral-500">Facing</p>
+            <p className="text-sm font-semibold text-neutral-900">
+              {Math.round(azimuth)}&deg; &middot; {southPct}%
+            </p>
+          </div>
+          <div className="rounded-lg border border-neutral-200 bg-white px-3 py-2">
+            <p className="text-[11px] uppercase tracking-wide text-neutral-500">Slope</p>
+            <p className="text-sm font-semibold text-neutral-900">
+              {slopePercent === null ? 'Checking...' : `${slopePercent}% ${slopeTier}`}
+            </p>
+          </div>
+        </div>
+      )}
+
+      {azimuth !== 180 && (
+        <p className="mb-4 text-sm text-neutral-700">
+          South makes the most power in Texas. Facing this way you get about{' '}
+          <span className="font-semibold">{southPct}%</span> of that. Turn it back if
+          your land allows.
+        </p>
+      )}
 
       {/* Trenching distance display - below the map */}
       {showForm && additionalCost > 0 && (

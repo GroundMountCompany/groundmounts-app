@@ -1,4 +1,3 @@
-import type MapboxDraw from '@mapbox/mapbox-gl-draw';
 import type mapboxgl from 'mapbox-gl';
 
 /**
@@ -22,13 +21,9 @@ function box<T>(): MutableBox<T> {
 
 export const mapRef = box<mapboxgl.Map>();
 export const mapContainerRef = box<HTMLDivElement>();
-export const drawRef = box<MapboxDraw>();
-export const lineFeatureIdRef = box<string>();
 
 /** Drop every handle. Called when the funnel resets. */
 export function resetMapRefs(): void {
   mapRef.current = null;
   mapContainerRef.current = null;
-  drawRef.current = null;
-  lineFeatureIdRef.current = null;
 }

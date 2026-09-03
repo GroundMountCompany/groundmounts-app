@@ -7,6 +7,12 @@ import { escapeHtml, escapeOr, headerSafe } from "@/lib/escape";
 
 /** Decoded screenshots above this are rejected rather than uploaded. */
 const MAX_SCREENSHOT_BYTES = 2 * 1024 * 1024;
+/**
+ * Base64 inflates by 4/3, so 2 MB decoded is ~2.8 MB encoded. Checking the
+ * string length first means an oversized payload is rejected without allocating
+ * a buffer for it.
+ */
+const MAX_SCREENSHOT_B64_CHARS = Math.ceil((MAX_SCREENSHOT_BYTES * 4) / 3) + 4;
 /** PNG signature: \x89 P N G \r \n \x1a \n */
 const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
@@ -76,7 +82,7 @@ export async function POST(req: NextRequest) {
 
     // Apply guards before processing
     const ip = getClientIp(req);
-    if (!rateLimitOk(ip)) {
+    if (!rateLimitOk(ip, 'leads')) {
       console.log("[LEADS_BLOCKED] Rate limited");
       return NextResponse.json({ ok: false, error: "rate_limited" }, { status: 429 });
     }
@@ -86,8 +92,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true, ignored: true }); // pretend success, do nothing
     }
 
-    if ((body as Record<string, unknown>).ttc_ms !== undefined && !minTimeOk((body as Record<string, unknown>).ttc_ms as number)) {
-      console.log("[LEADS_BLOCKED] Too fast:", (body as Record<string, unknown>).ttc_ms);
+    // A missing ttc_ms is rejected the same as a too-fast one.
+    if (!minTimeOk((body as Record<string, unknown>).ttc_ms)) {
+      console.log("[LEADS_BLOCKED] Too fast or missing ttc_ms");
       return NextResponse.json({ ok: false, error: "too_fast" }, { status: 400 });
     }
 
@@ -98,8 +105,15 @@ export async function POST(req: NextRequest) {
     let mapScreenshotUrl: string | undefined;
     if (lead.mapScreenshot && lead.mapScreenshot.startsWith('data:image/png;base64,')) {
       try {
-        // Convert base64 to buffer
         const base64Data = lead.mapScreenshot.replace(/^data:image\/png;base64,/, '');
+
+        // Reject on the encoded length first, before allocating the buffer.
+        if (base64Data.length > MAX_SCREENSHOT_B64_CHARS) {
+          throw new Error(
+            `screenshot too large (encoded): ${Math.round(base64Data.length / 1024)}KB`
+          );
+        }
+
         const buffer = Buffer.from(base64Data, 'base64');
 
         // The data: prefix is caller-controlled and proves nothing. Check the

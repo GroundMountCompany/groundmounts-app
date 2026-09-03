@@ -19,7 +19,7 @@ export async function POST(request: NextRequest) {
     // and `ttc_ms`; until now the route simply ignored them.
     // Phase 7 replaces the in-memory limiter with a durable Upstash bucket and
     // adds per-leadId idempotency.
-    if (!rateLimitOk(getClientIp(request))) {
+    if (!rateLimitOk(getClientIp(request), 'sendEmail')) {
       console.log('[SEND_EMAIL_BLOCKED] Rate limited');
       return NextResponse.json({ ok: false, error: 'rate_limited' }, { status: 429 });
     }
@@ -30,8 +30,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: true, ignored: true });
     }
 
-    if (body?.ttc_ms !== undefined && !minTimeOk(body.ttc_ms)) {
-      console.log('[SEND_EMAIL_BLOCKED] Too fast');
+    // A missing ttc_ms is rejected the same as a too-fast one.
+    if (!minTimeOk(body?.ttc_ms)) {
+      console.log('[SEND_EMAIL_BLOCKED] Too fast or missing ttc_ms');
       return NextResponse.json({ ok: false, error: 'too_fast' }, { status: 400 });
     }
 

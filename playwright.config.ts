@@ -30,5 +30,11 @@ export default defineConfig({
     url: BASE_URL,
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
+    env: {
+      // The suite mocks every Mapbox geocode call, so the token only has to be
+      // present, not valid. Hard-coding a dummy keeps a clean checkout green
+      // with no secrets, and stops a real token leaking into test traffic.
+      NEXT_PUBLIC_MAPBOX_TOKEN: 'pk.e2e-dummy-token',
+    },
   },
 });

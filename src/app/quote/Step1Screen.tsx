@@ -1,7 +1,7 @@
 "use client";
 
 import React, { Suspense } from "react";
-import MapCanvas from "@/components/map/MapCanvas";
+import MapSlot from "@/components/map/MapSlot";
 import AddressInput from "./AddressInput";
 
 /**
@@ -29,7 +29,7 @@ export default function Step1Screen() {
       {/* Map fills remaining space, never hidden behind CTA */}
       <div className="row-start-2 row-end-3 relative">
         <div className="absolute inset-0 pb-[calc(env(safe-area-inset-bottom)+72px)] md:pb-0">
-          <MapCanvas mode="address" />
+          <MapSlot className="h-full w-full" />
         </div>
         {/* Search overlays the map rather than pushing it off-screen.
             AddressInput reads ?zipcode= via useSearchParams, which forces a

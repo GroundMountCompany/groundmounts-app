@@ -2,7 +2,7 @@
 
 import { useCallback } from "react";
 import { useQuoteContext } from "@/contexts/quoteContext";
-import MapCanvas from "@/components/map/MapCanvas";
+import MapSlot from "@/components/map/MapSlot";
 
 enum QuoteStep {
   Address = 0,
@@ -38,7 +38,7 @@ export default function Step2MeterMap() {
 
       {/* Map - full height on mobile, fixed height on desktop */}
       <div className="flex-1 min-h-0 relative md:flex-none md:h-[500px]">
-        <MapCanvas mode="place-meter" />
+        <MapSlot className="absolute inset-0" />
       </div>
 
       {/* Continue button - always visible at bottom */}

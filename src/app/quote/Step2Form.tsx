@@ -8,8 +8,8 @@ import Button from "@/components/common/Button";
 import { useQuoteContext } from "@/contexts/quoteContext";
 import Image from "next/image";
 import { estimateMonthlyKWh, kWFromMonthlyKWh, panelsFromkW } from "@/lib/solar";
-import MapCanvas from "@/components/map/MapCanvas";
-import { captureMap } from "@/lib/screenshot";
+import MapSlot from "@/components/map/MapSlot";
+import { captureAndAdvance } from "@/lib/leadPayload";
 import { autoPlaceArray } from "@/lib/geo/place";
 import { footprintFt } from "@/lib/geo/array";
 import { percentOfSouth, TX_FALLBACK_CURVE } from "@/lib/production";
@@ -28,7 +28,6 @@ function Step2Form({
 }: Step2FormProps) {
   const {
     hydrated,
-    setCurrentStepIndex,
     setQuotation,
     setTotalPanels,
     totalPanels,
@@ -39,10 +38,8 @@ function Step2Form({
     setPercentage,
     setAvgValue,
     setHighestValue,
-    electricalMeter,
     electricalMeterPosition,
     ensureMeterFromStorage,
-    setMapScreenshot,
     arrayCenter,
     azimuth,
     panelTier,
@@ -88,33 +85,30 @@ function Step2Form({
     }
   }, [electricalMeterPosition])
 
-  const handleContinue = useCallback(async () => {
-    // The array, trench and its label are real Mapbox layers now, so the WebGL
-    // canvas already contains everything the owner needs to see. html2canvas is
-    // gone. A blank buffer yields null and the lead submits without an image.
-    const { dataUrl, reason } = await captureMap(mapRef.current);
-    if (dataUrl) {
-      setMapScreenshot(dataUrl);
-      console.log('[MAP_SCREENSHOT] captured', Math.round(dataUrl.length / 1024), 'KB');
-    } else {
-      console.warn('[MAP_SCREENSHOT] skipped:', reason);
-    }
+  // The one way out of this step, shared with the mobile sticky CTA so the map
+  // is always captured first.
+  const handleContinue = useCallback(() => captureAndAdvance(4), []);
 
-    // Data will be sent to Airtable when lead is captured in Step3Form
-    setCurrentStepIndex(4); // Move to Step3Form (lead capture form)
-  }, [setMapScreenshot, setCurrentStepIndex]);
-
-  // Drop the array on entry: south-facing, clear of the meter, off the house
-  // where the basemap knows about one.
+  // Drop the array on entry: south-facing, clear of the meter, off the house.
+  //
+  // Gated on map 'idle' because `building` features only exist once tiles have
+  // rendered. Querying too early returns an empty set and the array lands on
+  // the house, so an empty result buys one retry on the next idle before we
+  // accept it as "genuinely no buildings here".
   useEffect(() => {
     if (!electricalMeterPosition || totalPanels <= 0 || arrayCenter) return;
 
     const map = mapRef.current;
-    // Building footprints from the basemap give free house detection. Query the
-    // whole viewport rather than a point.
-    const canvas = map?.getCanvas();
-    const obstacles =
-      map?.isStyleLoaded() && canvas
+    if (!map) return;
+
+    let cancelled = false;
+    let retried = false;
+
+    const place = () => {
+      if (cancelled || useQuoteStore.getState().arrayCenter) return;
+
+      const canvas = map.getCanvas();
+      const obstacles = map.isStyleLoaded()
         ? (map
             .queryRenderedFeatures(
               [
@@ -126,17 +120,30 @@ function Step2Form({
             .filter((f) => f.geometry?.type === 'Polygon') as never[])
         : [];
 
-    const { center } = autoPlaceArray({
-      meter: electricalMeterPosition,
-      panelCount: totalPanels,
-      tier: panelTier,
-      azimuth: 180,
-      obstacles,
-    });
-    useQuoteStore.getState().setArrayCenter(center);
+      if (obstacles.length === 0 && !retried) {
+        retried = true;
+        map.once('idle', place);
+        return;
+      }
+
+      const { center } = autoPlaceArray({
+        meter: electricalMeterPosition,
+        panelCount: totalPanels,
+        tier: panelTier,
+        azimuth: 180,
+        obstacles,
+      });
+      useQuoteStore.getState().setArrayCenter(center);
+    };
+
+    map.once('idle', place);
+    return () => {
+      cancelled = true;
+      map.off('idle', place);
+    };
   }, [electricalMeterPosition, totalPanels, panelTier, arrayCenter]);
 
-  // Slope is advisory: it never gates the step, it just fills in when it lands.
+  // First slope read. Subsequent reads are triggered by dragend inside MapStage.
   useEffect(() => {
     if (!arrayCenter || slopePercent !== null) return;
     let cancelled = false;
@@ -283,7 +290,7 @@ function Step2Form({
       {/* Map - render unconditionally */}
       <div className="mb-3">
         <div className="relative h-[46svh] min-h-[280px] w-full overflow-hidden rounded-xl border border-neutral-200">
-          <MapCanvas mode="design" />
+          <MapSlot className="absolute inset-0" />
         </div>
         <p className="mt-2 text-xs text-neutral-500">
           Drag the panels where you want them. Use the round handle to turn them.
@@ -296,7 +303,7 @@ function Step2Form({
           <div className="rounded-lg border border-neutral-200 bg-white px-3 py-2">
             <p className="text-[11px] uppercase tracking-wide text-neutral-500">Array size</p>
             <p className="text-sm font-semibold text-neutral-900">
-              {Math.round(footprint.widthFt)} x {Math.round(footprint.heightFt)} ft
+              {Math.round(footprint.widthFt)} x {Math.round(footprint.depthFt)} ft
             </p>
           </div>
           <div className="rounded-lg border border-neutral-200 bg-white px-3 py-2">
@@ -333,7 +340,7 @@ function Step2Form({
           <div className="mt-2 py-2 px-4 rounded-lg bg-[#F0F6FF]">
             <div className="flex flex-row justify-between items-center">
               <div className="flex flex-1 grow shrink-0 border-neutral-300 pr-4 h-[37px] items-center">
-                <p className="text-sm leading-[21px] font-medium text-custom-primary">Distance: {electricalMeter?.distanceInFeet} feet</p>
+                <p className="text-sm leading-[21px] font-medium text-custom-primary">Distance: {trenchFeet} feet</p>
               </div>
             </div>
           </div>

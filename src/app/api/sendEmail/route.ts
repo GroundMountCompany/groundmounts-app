@@ -42,14 +42,14 @@ export async function POST(request: NextRequest) {
       quotation,
       totalPanels,
       additionalCost,
-      electricalMeter,
+      trenchFeet,
       percentage
     } = body;
 
     // Calculate values for email
     const systemCostRaw = quotation || 0;
     const trenchingCostRaw = additionalCost || 0;
-    const trenchingDistance = electricalMeter?.distanceInFeet || 0;
+    const trenchingDistance = trenchFeet || 0;
     const totalCostRaw = systemCostRaw + trenchingCostRaw;
     const systemSizeKw = (totalPanels * 435) / 1000;
 

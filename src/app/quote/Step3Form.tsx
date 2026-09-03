@@ -3,7 +3,8 @@ import { useQuoteContext } from "@/contexts/quoteContext";
 import { useBrand } from "@/contexts/BrandContext";
 import { useState, useEffect, useMemo } from "react";
 import { enqueueOrSend } from "@/lib/leadQueue";
-import { clearPersistedQuote } from "@/store/quoteStore";
+import { clearPersistedQuote, useQuoteStore } from "@/store/quoteStore";
+import { buildLeadPayload } from "@/lib/leadPayload";
 import { useSearchParams } from 'next/navigation';
 
 // eslint-disable-next-line @typescript-eslint/no-empty-object-type
@@ -40,13 +41,11 @@ function Step3Form({}: Step3FormProps) {
     paymentMethod,
     quoteId,
     additionalCost,
-    electricalMeter,
+    trenchFeet,
     percentage,
     leadId,
     startedAt,
     avgValue,
-    highestValue,
-    mapScreenshot,
   } = useQuoteContext();
 
   // Calculate derived values for display
@@ -96,7 +95,7 @@ function Step3Form({}: Step3FormProps) {
           paymentMethod,
           quoteId,
           additionalCost,
-          electricalMeter,
+          trenchFeet,
           percentage,
           avgBill: avgValue,
           honeypot: company,
@@ -108,31 +107,20 @@ function Step3Form({}: Step3FormProps) {
         setStatus("Email sent!");
 
         try {
-          await enqueueOrSend({
-            id: leadId,
-            state: selectedState,
-            name,
-            email,
-            phone,
-            address,
-            source: source,
-            quote: {
-              quotation,
-              totalPanels,
-              paymentMethod,
-              additionalCost,
-              electricalMeter,
-              percentage,
-              coordinates,
-              avgBill: avgValue,
-              highBill: highestValue,
-              systemSizeKw: parseFloat(systemSizeKw),
-            },
-            ts: Date.now(),
-            honeypot: company,
-            ttc_ms: Date.now() - startedAt,
-            mapScreenshot: mapScreenshot || undefined,
-          });
+          await enqueueOrSend(
+            buildLeadPayload(
+              useQuoteStore.getState(),
+              {
+                name,
+                email,
+                phone,
+                state: selectedState,
+                source,
+                honeypot: company,
+              },
+              Date.now()
+            )
+          );
           console.log("[FINAL_LEAD_CAPTURED]", leadId);
 
           // The lead is safely away, so the funnel draft can go. Without this a

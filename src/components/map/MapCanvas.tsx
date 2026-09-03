@@ -5,60 +5,67 @@ import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import { useQuoteStore } from '@/store/quoteStore';
 import { mapRef, mapContainerRef } from '@/store/mapRefs';
-import { installLayers, renderDesign, LAYER, rotateHandlePosition } from './layers';
+import { installLayers, renderDesign, LAYER, installCompassIcon } from './layers';
+import { getMapSlot, subscribeMapSlot } from './mapStage';
 import { buildTrench } from '@/lib/geo/trench';
+import { slopeAt } from '@/lib/slope';
 import type { ArraySpec } from '@/lib/geo/array';
 import type { LngLat } from '@/lib/geo/units';
 
 mapboxgl.accessToken = process.env.NEXT_PUBLIC_MAPBOX_TOKEN ?? '';
 
-export type MapMode = 'address' | 'place-meter' | 'design';
+export type MapMode = 'address' | 'place-meter' | 'design' | 'hidden';
 
-interface Props {
-  mode: MapMode;
-  className?: string;
+/** Debounce for the slope lookup after the array settles. */
+const SLOPE_DEBOUNCE_MS = 600;
+
+interface Grab {
+  kind: 'array' | 'rotate';
+  pointerId: number;
+  /** Where the finger went down, and where the array was at that moment. */
+  startLngLat: LngLat;
+  startCenter: LngLat;
 }
 
 /**
- * The one Mapbox instance.
+ * The one Mapbox instance for the whole funnel.
  *
- * v1 created three (MapDrawTool, CalculatorMap, and the marker layer inside
- * MapboxSolarPanelInner), which is why state and gestures fought each other
- * across steps. This one is created once and re-aimed as the funnel advances.
+ * Mounted once above the step router and never removed until the funnel
+ * unmounts, so the camera, layers and WebGL context survive step changes. Steps
+ * render a <MapSlot />; this positions the canvas over it.
  */
-export default function MapCanvas({ mode, className }: Props) {
-  const container = useRef<HTMLDivElement | null>(null);
+export default function MapStage({ mode }: { mode: MapMode }) {
+  const host = useRef<HTMLDivElement | null>(null);
   const modeRef = useRef(mode);
   modeRef.current = mode;
 
-  // Which pointer, if any, currently owns a drag on our geometry.
-  const grab = useRef<{ kind: 'array' | 'rotate'; pointerId: number } | null>(null);
+  const grab = useRef<Grab | null>(null);
+  const slopeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // --- create the map exactly once -----------------------------------------
   useEffect(() => {
-    if (!container.current || mapRef.current) return;
+    if (!host.current || mapRef.current) return;
 
     const { coordinates } = useQuoteStore.getState();
     const map = new mapboxgl.Map({
-      container: container.current,
+      container: host.current,
       style: 'mapbox://styles/mapbox/satellite-streets-v12',
       center: [coordinates.longitude, coordinates.latitude],
       zoom: 18,
       minZoom: 15,
       maxZoom: 21,
-      // Required for canvas.toDataURL() at submit time.
-      preserveDrawingBuffer: true,
+      preserveDrawingBuffer: true, // required for canvas.toDataURL() at submit
       dragRotate: false,
       pitchWithRotate: false,
       attributionControl: false,
     });
 
     mapRef.current = map;
-    mapContainerRef.current = container.current;
+    mapContainerRef.current = host.current;
 
     map.on('load', () => {
+      installCompassIcon(map);
       installLayers(map);
-      // Terrain DEM powers queryTerrainElevation for the slope lookup. Added
-      // as a source only - no exaggeration, so the view stays flat.
       if (!map.getSource('mapbox-dem')) {
         map.addSource('mapbox-dem', {
           type: 'raster-dem',
@@ -70,30 +77,48 @@ export default function MapCanvas({ mode, className }: Props) {
       syncFromStore();
     });
 
-    // --- gesture arbitration -------------------------------------------------
-    // Only a single-pointer press that lands on our own geometry is claimed.
-    // Anything else (two fingers, or a press on bare map) belongs to Mapbox, so
-    // pinch-zoom and panning keep working normally.
     const canvas = map.getCanvas();
 
-    const hitTest = (e: PointerEvent): 'array' | 'rotate' | null => {
+    const pointFor = (e: PointerEvent): [number, number] => {
       const rect = canvas.getBoundingClientRect();
-      const pt: [number, number] = [e.clientX - rect.left, e.clientY - rect.top];
-      const onHandle = map.queryRenderedFeatures(pt, { layers: [LAYER.handle] });
-      if (onHandle.length) return 'rotate';
-      const onArray = map.queryRenderedFeatures(pt, { layers: [LAYER.hullFill] });
-      return onArray.length ? 'array' : null;
+      return [e.clientX - rect.left, e.clientY - rect.top];
+    };
+
+    const hitTest = (pt: [number, number]): Grab['kind'] | null => {
+      if (map.queryRenderedFeatures(pt, { layers: [LAYER.handle] }).length) return 'rotate';
+      if (map.queryRenderedFeatures(pt, { layers: [LAYER.hullFill] }).length) return 'array';
+      return null;
+    };
+
+    const releaseGrab = () => {
+      grab.current = null;
+      map.dragPan.enable();
     };
 
     const onPointerDown = (e: PointerEvent) => {
-      if (modeRef.current !== 'design') return;
-      if (!e.isPrimary) return; // second finger => let Mapbox pinch
-      const kind = hitTest(e);
+      // A second finger always belongs to the map: cancel any drag in progress
+      // and hand the gesture straight back so pinch-zoom is never blocked.
+      if (grab.current && e.pointerId !== grab.current.pointerId) {
+        releaseGrab();
+        return;
+      }
+      if (modeRef.current !== 'design' || !e.isPrimary) return;
+
+      const pt = pointFor(e);
+      const kind = hitTest(pt);
       if (!kind) return;
 
-      grab.current = { kind, pointerId: e.pointerId };
+      const { arrayCenter } = useQuoteStore.getState();
+      if (!arrayCenter) return;
+
+      const ll = map.unproject(pt);
+      grab.current = {
+        kind,
+        pointerId: e.pointerId,
+        startLngLat: [ll.lng, ll.lat],
+        startCenter: arrayCenter,
+      };
       map.dragPan.disable();
-      canvas.setPointerCapture(e.pointerId);
     };
 
     const onPointerMove = (e: PointerEvent) => {
@@ -101,43 +126,39 @@ export default function MapCanvas({ mode, className }: Props) {
       if (!g || e.pointerId !== g.pointerId) return;
       e.preventDefault();
 
-      const rect = canvas.getBoundingClientRect();
-      const lngLat = map.unproject([e.clientX - rect.left, e.clientY - rect.top]);
+      const ll = map.unproject(pointFor(e));
       const store = useQuoteStore.getState();
 
       if (g.kind === 'array') {
-        store.setArrayCenter([lngLat.lng, lngLat.lat]);
+        // Move by the pointer's delta from the grab point, so the array keeps
+        // its offset under the finger instead of snapping its centre there.
+        store.setArrayCenter([
+          g.startCenter[0] + (ll.lng - g.startLngLat[0]),
+          g.startCenter[1] + (ll.lat - g.startLngLat[1]),
+        ]);
       } else {
         const c = store.arrayCenter;
         if (c) {
-          // Bearing from array centre to the grip, which sits on the south edge.
-          const dx = lngLat.lng - c[0];
-          const dy = lngLat.lat - c[1];
-          const bearing = (Math.atan2(dx, dy) * 180) / Math.PI;
+          const bearing = (Math.atan2(ll.lng - c[0], ll.lat - c[1]) * 180) / Math.PI;
+          // The grip rides the south edge, so the array faces the other way.
           store.setAzimuth(bearing + 180);
         }
       }
       syncFromStore();
     };
 
-    const endGrab = (e: PointerEvent) => {
+    const onPointerUp = (e: PointerEvent) => {
       const g = grab.current;
       if (!g || e.pointerId !== g.pointerId) return;
-      grab.current = null;
-      map.dragPan.enable();
-      try {
-        canvas.releasePointerCapture(e.pointerId);
-      } catch {
-        /* capture already gone */
-      }
+      releaseGrab();
+      scheduleSlope();
     };
 
     canvas.addEventListener('pointerdown', onPointerDown);
     canvas.addEventListener('pointermove', onPointerMove);
-    canvas.addEventListener('pointerup', endGrab);
-    canvas.addEventListener('pointercancel', endGrab);
+    canvas.addEventListener('pointerup', onPointerUp);
+    canvas.addEventListener('pointercancel', onPointerUp);
 
-    // Tap to drop the meter.
     const onClick = (e: mapboxgl.MapMouseEvent) => {
       if (modeRef.current !== 'place-meter') return;
       useQuoteStore.getState().setElectricalMeterPosition([e.lngLat.lng, e.lngLat.lat]);
@@ -145,76 +166,119 @@ export default function MapCanvas({ mode, className }: Props) {
     };
     map.on('click', onClick);
 
-    // Keep geometry in step with the store, whatever changed it.
-    const unsubscribe = useQuoteStore.subscribe(syncFromStore);
+    const unsubscribeStore = useQuoteStore.subscribe(syncFromStore);
 
     return () => {
-      unsubscribe();
+      unsubscribeStore();
+      if (slopeTimer.current) clearTimeout(slopeTimer.current);
       canvas.removeEventListener('pointerdown', onPointerDown);
       canvas.removeEventListener('pointermove', onPointerMove);
-      canvas.removeEventListener('pointerup', endGrab);
-      canvas.removeEventListener('pointercancel', endGrab);
+      canvas.removeEventListener('pointerup', onPointerUp);
+      canvas.removeEventListener('pointercancel', onPointerUp);
       map.off('click', onClick);
+      // Only on funnel unmount — never between steps.
       map.remove();
       mapRef.current = null;
       mapContainerRef.current = null;
     };
-    // Created once for the lifetime of the funnel.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Re-aim the camera when the pin moves.
+  /** Re-run the slope lookup once the array has settled. */
+  function scheduleSlope() {
+    if (slopeTimer.current) clearTimeout(slopeTimer.current);
+    slopeTimer.current = setTimeout(async () => {
+      const { arrayCenter, setSlope } = useQuoteStore.getState();
+      if (!arrayCenter) return;
+      const r = await slopeAt(mapRef.current, arrayCenter);
+      setSlope(r.percent, r.tier);
+    }, SLOPE_DEBOUNCE_MS);
+  }
+
+  // --- keep the canvas over the active slot --------------------------------
   useEffect(() => {
-    const unsub = useQuoteStore.subscribe((s, prev) => {
-      const map = mapRef.current;
-      if (!map) return;
-      if (
-        s.coordinates.latitude !== prev.coordinates.latitude ||
-        s.coordinates.longitude !== prev.coordinates.longitude
-      ) {
-        map.easeTo({
-          center: [s.coordinates.longitude, s.coordinates.latitude],
-          zoom: Math.max(map.getZoom(), 18),
-          duration: 600,
-        });
+    let frame = 0;
+    let last = '';
+
+    const place = () => {
+      const el = host.current;
+      const slot = getMapSlot();
+      if (el) {
+        if (!slot || modeRef.current === 'hidden') {
+          el.style.visibility = 'hidden';
+          el.style.pointerEvents = 'none';
+        } else {
+          const r = slot.getBoundingClientRect();
+          const key = `${r.top}|${r.left}|${r.width}|${r.height}`;
+          el.style.visibility = 'visible';
+          el.style.pointerEvents = 'auto';
+          if (key !== last) {
+            last = key;
+            el.style.transform = `translate(${r.left}px, ${r.top}px)`;
+            el.style.width = `${r.width}px`;
+            el.style.height = `${r.height}px`;
+            mapRef.current?.resize();
+          }
+        }
       }
+      frame = requestAnimationFrame(place);
+    };
+
+    frame = requestAnimationFrame(place);
+    const unsubscribe = subscribeMapSlot(() => {
+      last = '';
     });
-    return unsub;
+    return () => {
+      cancelAnimationFrame(frame);
+      unsubscribe();
+    };
   }, []);
+
+  // Re-aim the camera when the address pin moves.
+  useEffect(
+    () =>
+      useQuoteStore.subscribe((s, prev) => {
+        const map = mapRef.current;
+        if (!map) return;
+        if (
+          s.coordinates.latitude !== prev.coordinates.latitude ||
+          s.coordinates.longitude !== prev.coordinates.longitude
+        ) {
+          map.easeTo({
+            center: [s.coordinates.longitude, s.coordinates.latitude],
+            zoom: Math.max(map.getZoom(), 18),
+            duration: 600,
+          });
+        }
+      }),
+    []
+  );
 
   return (
     <div
-      ref={container}
+      ref={host}
       data-testid="map-canvas"
-      className={className ?? 'absolute inset-0'}
-      // The map owns its gestures; never let the page scroll underneath it.
-      style={{ touchAction: 'none' }}
+      className="fixed left-0 top-0 z-0 overflow-hidden rounded-xl"
+      // The map owns its gestures; the page never scrolls underneath it.
+      style={{ touchAction: 'none', visibility: 'hidden' }}
     />
   );
 }
 
-/** Redraw array/trench/meter from current store state and write back trench feet. */
+/** Redraw from store state and write back the trench length. */
 function syncFromStore() {
   const map = mapRef.current;
   if (!map || !map.isStyleLoaded()) return;
 
   const s = useQuoteStore.getState();
   const spec: ArraySpec | null = s.arrayCenter
-    ? {
-        center: s.arrayCenter,
-        azimuth: s.azimuth,
-        panelCount: s.totalPanels,
-        tier: s.panelTier,
-      }
+    ? { center: s.arrayCenter, azimuth: s.azimuth, panelCount: s.totalPanels, tier: s.panelTier }
     : null;
-  const meter: LngLat | null = s.electricalMeterPosition;
 
-  renderDesign(map, { spec, meter });
+  renderDesign(map, { spec, meter: s.electricalMeterPosition });
 
-  if (spec && meter && spec.panelCount > 0) {
-    const feet = buildTrench(spec, meter).feet;
+  if (spec && s.electricalMeterPosition && spec.panelCount > 0) {
+    const feet = buildTrench(spec, s.electricalMeterPosition).feet;
     if (feet !== s.trenchFeet) s.setTrenchFeet(feet);
   }
 }
-
-export { rotateHandlePosition };

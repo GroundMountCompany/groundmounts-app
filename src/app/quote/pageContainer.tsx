@@ -8,6 +8,9 @@ import Step3Form from './Step3Form';
 import Step1Screen from './Step1Screen';
 import Step2MeterIntro from './Step2MeterIntro';
 import Step2MeterMap from './Step2MeterMap';
+import MapStage, { type MapMode } from '@/components/map/MapCanvas';
+import { captureAndAdvance } from '@/lib/leadPayload';
+
 enum QuoteStep {
   Address = 0,
   MeterIntro = 1,
@@ -27,11 +30,25 @@ export const PageContainer = (): JSX.Element => {
     return shouldContinueButtonDisabled;
   })();
 
+  // Which face the shared map shows for this step. 'hidden' keeps the instance
+  // alive but off-screen; the map is never unmounted mid-funnel.
+  const mapMode: MapMode =
+    currentStep === QuoteStep.Address
+      ? 'address'
+      : currentStep === QuoteStep.MeterMap
+        ? 'place-meter'
+        : currentStep === QuoteStep.EnergyCalcs
+          ? 'design'
+          : 'hidden';
+
   const handleContinue = () => {
     if (currentStep === QuoteStep.Address) setCurrentStepIndex(QuoteStep.MeterIntro);
     else if (currentStep === QuoteStep.MeterIntro) setCurrentStepIndex(QuoteStep.MeterMap);
     else if (currentStep === QuoteStep.MeterMap) setCurrentStepIndex(QuoteStep.EnergyCalcs);
-    else if (currentStep === QuoteStep.EnergyCalcs) setCurrentStepIndex(4); // Step 5 (final form)
+    // Leaving the design step ALWAYS goes through the capture path, whichever
+    // button was tapped. This sticky CTA used to bypass it, so phone leads
+    // arrived with no screenshot.
+    else if (currentStep === QuoteStep.EnergyCalcs) void captureAndAdvance(4);
     else setCurrentStepIndex(currentStepIndex + 1);
   };
 
@@ -39,7 +56,8 @@ export const PageContainer = (): JSX.Element => {
     setCurrentStepIndex(index);
   };
 
-  // Render dedicated mobile-optimized layouts for specific steps
+  // Every branch renders below renderStep(); the shared map wraps them all.
+  const renderStep = (): JSX.Element => {
   if (currentStep === QuoteStep.Address) {
     return (
       <>
@@ -158,4 +176,14 @@ export const PageContainer = (): JSX.Element => {
       </div>
     </>
   )
+  };
+
+  return (
+    <>
+      {/* One map for the whole funnel, created above the step router so it is
+          never torn down and rebuilt between steps. */}
+      <MapStage mode={mapMode} />
+      {renderStep()}
+    </>
+  );
 }

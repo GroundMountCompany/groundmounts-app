@@ -106,19 +106,86 @@ export function installLayers(map: mapboxgl.Map) {
     },
   });
 
+  // Rotate grip: a compass with a red north needle and the word "Turn" under
+  // it. A plain circle reads as decoration; this has to say "grab me" to a
+  // 60-year-old on a phone with no instructions.
   map.addLayer({
     id: LAYER.handle,
-    type: 'circle',
+    type: 'symbol',
     source: SRC.handle,
+    layout: {
+      'icon-image': COMPASS_ICON,
+      'icon-size': 0.5,
+      'icon-allow-overlap': true,
+      'icon-rotate': ['get', 'azimuth'],
+      'icon-rotation-alignment': 'map',
+      'text-field': 'Turn',
+      'text-offset': [0, 1.9],
+      'text-size': 13,
+      'text-allow-overlap': true,
+      'text-font': ['DIN Offc Pro Medium', 'Arial Unicode MS Bold'],
+    },
     paint: {
-      // 44px touch target, per the mobile-first rule.
-      'circle-radius': 22,
-      'circle-color': '#ffffff',
-      'circle-opacity': 0.9,
-      'circle-stroke-color': '#1d4ed8',
-      'circle-stroke-width': 3,
+      'text-color': '#ffffff',
+      'text-halo-color': '#1e3a8a',
+      'text-halo-width': 2,
     },
   });
+}
+
+export const COMPASS_ICON = 'gm-compass';
+
+/**
+ * Draw the compass once and register it with the map.
+ *
+ * Rendered at 2x (88px for a 44px target) so it stays crisp on retina phones.
+ * North is a red needle so the rotation has an obvious reference point.
+ */
+export function installCompassIcon(map: mapboxgl.Map) {
+  if (map.hasImage(COMPASS_ICON)) return;
+
+  const size = 88;
+  const c = document.createElement('canvas');
+  c.width = size;
+  c.height = size;
+  const ctx = c.getContext('2d');
+  if (!ctx) return;
+
+  const mid = size / 2;
+
+  ctx.beginPath();
+  ctx.arc(mid, mid, mid - 5, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(255,255,255,0.95)';
+  ctx.fill();
+  ctx.lineWidth = 5;
+  ctx.strokeStyle = '#1d4ed8';
+  ctx.stroke();
+
+  // North needle.
+  ctx.beginPath();
+  ctx.moveTo(mid, 14);
+  ctx.lineTo(mid - 11, mid + 4);
+  ctx.lineTo(mid + 11, mid + 4);
+  ctx.closePath();
+  ctx.fillStyle = '#dc2626';
+  ctx.fill();
+
+  // South tail.
+  ctx.beginPath();
+  ctx.moveTo(mid, size - 20);
+  ctx.lineTo(mid - 9, mid + 6);
+  ctx.lineTo(mid + 9, mid + 6);
+  ctx.closePath();
+  ctx.fillStyle = '#94a3b8';
+  ctx.fill();
+
+  ctx.fillStyle = '#0f172a';
+  ctx.font = 'bold 17px system-ui, -apple-system, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('N', mid, size - 6);
+
+  const { data } = ctx.getImageData(0, 0, size, size);
+  map.addImage(COMPASS_ICON, { width: size, height: size, data: new Uint8Array(data) });
 }
 
 export interface RenderInput {
@@ -154,7 +221,8 @@ export function renderDesign(map: mapboxgl.Map, { spec, meter }: RenderInput): R
     ensureSource(map, SRC.handle, {
       type: 'Feature',
       geometry: { type: 'Point', coordinates: handleAt },
-      properties: {},
+      // The compass needle turns with the array so N always points north.
+      properties: { azimuth: 180 - spec.azimuth },
     });
 
     if (meter) {
@@ -180,7 +248,7 @@ export function renderDesign(map: mapboxgl.Map, { spec, meter }: RenderInput): R
 /** The rotate grip, held off the array's south edge. */
 export function rotateHandlePosition(spec: ArraySpec): LngLat {
   const fp = footprintFt(spec.panelCount, spec.tier);
-  const south = -(feetToMeters(fp.heightFt) / 2 + feetToMeters(18));
+  const south = -(feetToMeters(fp.depthFt) / 2 + feetToMeters(18));
   const [e, n] = rotateEastNorth(0, south, spec.azimuth - 180);
   return offsetMeters(spec.center, e, n);
 }

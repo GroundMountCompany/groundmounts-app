@@ -30,7 +30,7 @@ describe('auto-placement', () => {
     const fp = footprintFt(base.panelCount, base.tier);
     const clearanceFt = metersToFeet(distanceMeters(center, METER));
 
-    expect(clearanceFt).toBeGreaterThan(Math.max(fp.widthFt, fp.heightFt) / 2);
+    expect(clearanceFt).toBeGreaterThan(Math.max(fp.widthFt, fp.depthFt) / 2);
     expect(trenchFeet(center, METER)).toBeGreaterThan(0);
   });
 

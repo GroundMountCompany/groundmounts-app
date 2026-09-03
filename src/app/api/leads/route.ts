@@ -34,9 +34,12 @@ interface LeadPayload {
     quotation?: number;
     totalPanels?: number;
     additionalCost?: number;
-    electricalMeter?: {
-      distanceInFeet?: number;
-    };
+    /** Trench run in feet, straight from the map. */
+    trenchFeet?: number;
+    azimuth?: number;
+    panelTier?: string;
+    slopePercent?: number | null;
+    slopeTier?: string;
     percentage?: number;
     avgBill?: number;
     highBill?: number;
@@ -160,7 +163,7 @@ export async function POST(req: NextRequest) {
       'Monthly Bill Avg': lead.quote?.avgBill,
       'Monthly Bill High': lead.quote?.highBill,
       'Offset Percentage': lead.quote?.percentage,
-      'Trenching Distance ft': lead.quote?.electricalMeter?.distanceInFeet,
+      'Trenching Distance ft': lead.quote?.trenchFeet,
       'Trenching Cost': lead.quote?.additionalCost,
       'Equipment Cost': lead.quote?.quotation,
       'Total Investment': lead.quote?.quotation ? (lead.quote.quotation + (lead.quote.additionalCost || 0)) : undefined,
@@ -191,7 +194,7 @@ export async function POST(req: NextRequest) {
       const kw = lead.quote?.systemSizeKw;
       const panels = lead.quote?.totalPanels;
       const avgBill = lead.quote?.avgBill;
-      const trenchFt = lead.quote?.electricalMeter?.distanceInFeet;
+      const trenchFt = lead.quote?.trenchFeet;
       const equipment = lead.quote?.quotation;
       const trenchCost = lead.quote?.additionalCost;
       const total = equipment ? equipment + (trenchCost || 0) : undefined;

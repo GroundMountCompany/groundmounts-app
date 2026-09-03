@@ -39,21 +39,47 @@ export const PANELS: Record<PanelTier, PanelProduct> = {
   },
 };
 
+export type RackingPreset = 'ironridge' | 'gft';
+
 export interface RackingConfig {
-  /** Panels are mounted in landscape rows; this is the gap between rows. */
-  rowGapFt: number;
-  /** Gap between panels within a row (rail clamp spacing). */
-  panelGapFt: number;
-  /** Default panels per row before starting a new row. */
-  panelsPerRow: number;
+  name: string;
+  /**
+   * How each panel sits on the rails. Landscape puts the panel's long edge
+   * across the table; portrait stands it on the short edge.
+   */
+  orientation: 'landscape' | 'portrait';
+  /** Panels stacked up the slope. One continuous table — there are no row gaps. */
+  panelsHigh: number;
+  /** Clamp gap between adjacent panels, both directions. */
+  panelGapIn: number;
+  /**
+   * Tilt off horizontal. Only affects the *ground footprint*: a tilted panel
+   * covers less ground than its slant length.
+   * PLACEHOLDER - owner to confirm the real tilt for each racking type.
+   */
+  tiltDeg: number;
 }
 
-export const RACKING: RackingConfig = {
-  // PLACEHOLDER - owner to confirm real row spacing for their racking.
-  rowGapFt: 4,
-  panelGapFt: 0.08,
-  panelsPerRow: 10,
+export const RACKING_PRESETS: Record<RackingPreset, RackingConfig> = {
+  ironridge: {
+    name: 'IronRidge',
+    orientation: 'landscape',
+    panelsHigh: 4,
+    panelGapIn: 0.25,
+    tiltDeg: 25,
+  },
+  gft: {
+    name: 'Unirac GFT / Sinclair',
+    orientation: 'portrait',
+    panelsHigh: 2,
+    panelGapIn: 0.25,
+    tiltDeg: 25,
+  },
 };
+
+export const DEFAULT_RACKING: RackingPreset = 'ironridge';
+
+export const RACKING: RackingConfig = RACKING_PRESETS[DEFAULT_RACKING];
 
 /** Feet per inch, so panel dimensions convert in one place. */
 export const INCHES_PER_FOOT = 12;

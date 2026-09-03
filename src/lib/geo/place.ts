@@ -37,8 +37,10 @@ export interface PlacementResult {
 export function autoPlaceArray(input: PlacementInput): PlacementResult {
   const { meter, panelCount, tier, azimuth, obstacles = [] } = input;
   const fp = footprintFt(panelCount, tier);
-  // Enough room that the array body never sits on the meter.
-  const minRadiusFt = METER_CLEARANCE_FT + Math.max(fp.widthFt, fp.heightFt) / 2;
+  // Enough room that the array body never sits on the meter. Half the diagonal,
+  // so the clearance holds whichever way the table is turned.
+  const minRadiusFt =
+    METER_CLEARANCE_FT + Math.hypot(fp.widthFt, fp.depthFt) / 2;
 
   let best: { center: LngLat; score: number; hits: boolean } | null = null;
 

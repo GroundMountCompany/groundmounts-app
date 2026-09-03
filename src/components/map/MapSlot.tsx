@@ -15,5 +15,14 @@ export default function MapSlot({ className }: { className?: string }) {
     return () => setMapSlot(null);
   }, []);
 
-  return <div ref={ref} data-testid="map-slot" className={className} />;
+  // Purely a placeholder: it must never intercept touches meant for the map
+  // canvas that is positioned over it.
+  return (
+    <div
+      ref={ref}
+      data-testid="map-slot"
+      className={className}
+      style={{ pointerEvents: 'none' }}
+    />
+  );
 }

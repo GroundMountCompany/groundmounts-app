@@ -180,6 +180,52 @@ export function buildArray(spec: ArraySpec, racking: RackingConfig = RACKING): B
 }
 
 /**
+ * Padding around the array used purely for touch hit-testing.
+ *
+ * An IronRidge table is ~13.6 ft deep, which at zoom 18 is about 8px on screen.
+ * Nobody can reliably land a fingertip on that, so the grabbable region is
+ * inflated well beyond the drawn footprint.
+ */
+export const ARRAY_HIT_PAD_FT = 25;
+
+/** The array footprint inflated by ARRAY_HIT_PAD_FT, for drag hit-testing. */
+export function buildArrayHitArea(
+  spec: ArraySpec,
+  racking: RackingConfig = RACKING
+): Feature<Polygon> {
+  const layout = footprintFt(spec.panelCount, spec.tier, racking);
+  return rectPolygon(
+    spec.center,
+    0,
+    0,
+    feetToMeters(layout.widthFt + 2 * ARRAY_HIT_PAD_FT),
+    feetToMeters(layout.depthFt + 2 * ARRAY_HIT_PAD_FT),
+    spec.azimuth,
+    { kind: 'array-hit' }
+  );
+}
+
+/** How far the rotate grip sits beyond the array's south edge. */
+export const ROTATE_HANDLE_OFFSET_FT = 18;
+
+/**
+ * The rotate grip, held off the array's south edge.
+ *
+ * Because it rides due south in the array's own frame, its compass bearing from
+ * the centre is exactly the array azimuth — which is what lets the drag handler
+ * set azimuth directly from `turf.bearing(center, pointer)` with no offset.
+ */
+export function rotateHandlePosition(
+  spec: ArraySpec,
+  racking: RackingConfig = RACKING
+): LngLat {
+  const layout = footprintFt(spec.panelCount, spec.tier, racking);
+  const south = -(feetToMeters(layout.depthFt) / 2 + feetToMeters(ROTATE_HANDLE_OFFSET_FT));
+  const [re, rn] = rotateEastNorth(0, south, spec.azimuth - 180);
+  return offsetMeters(spec.center, re, rn);
+}
+
+/**
  * Midpoint of the array's north edge — where conduit leaves the racking.
  * Rotates with the array so the run always starts from the same physical edge.
  */

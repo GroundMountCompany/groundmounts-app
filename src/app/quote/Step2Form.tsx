@@ -11,6 +11,7 @@ import { estimateMonthlyKWh, kWFromMonthlyKWh, panelsFromkW } from "@/lib/solar"
 import MapSlot from "@/components/map/MapSlot";
 import { captureAndAdvance } from "@/lib/leadPayload";
 import { autoPlaceArray } from "@/lib/geo/place";
+import { scheduleAutoPlacement } from "@/lib/geo/placementScheduler";
 import { footprintFt } from "@/lib/geo/array";
 import { percentOfSouth, TX_FALLBACK_CURVE } from "@/lib/production";
 import { slopeAt } from "@/lib/slope";
@@ -101,46 +102,42 @@ function Step2Form({
     const map = mapRef.current;
     if (!map) return;
 
-    let cancelled = false;
-    let retried = false;
-
-    const place = () => {
-      if (cancelled || useQuoteStore.getState().arrayCenter) return;
-
-      const canvas = map.getCanvas();
-      const obstacles = map.isStyleLoaded()
-        ? (map
-            .queryRenderedFeatures(
-              [
-                [0, 0],
-                [canvas.clientWidth, canvas.clientHeight],
-              ],
-              { layers: ['building'] }
-            )
-            .filter((f) => f.geometry?.type === 'Polygon') as never[])
-        : [];
-
-      if (obstacles.length === 0 && !retried) {
-        retried = true;
-        map.once('idle', place);
-        return;
+    return scheduleAutoPlacement(
+      {
+        isIdle: () => map.isStyleLoaded() && !map.isMoving(),
+        onIdle: (fn) => map.on('idle', fn),
+        offIdle: (fn) => map.off('idle', fn),
+        queryObstacles: () => {
+          if (!map.isStyleLoaded()) return [];
+          const canvas = map.getCanvas();
+          try {
+            return map
+              .queryRenderedFeatures(
+                [
+                  [0, 0],
+                  [canvas.clientWidth, canvas.clientHeight],
+                ],
+                { layers: ['building'] }
+              )
+              .filter((f) => f.geometry?.type === 'Polygon') as never[];
+          } catch {
+            // Style has no `building` layer (satellite-only tiles at low zoom).
+            return [];
+          }
+        },
+      },
+      (obstacles) => {
+        if (useQuoteStore.getState().arrayCenter) return;
+        const { center } = autoPlaceArray({
+          meter: electricalMeterPosition,
+          panelCount: totalPanels,
+          tier: panelTier,
+          azimuth: 180,
+          obstacles,
+        });
+        useQuoteStore.getState().setArrayCenter(center);
       }
-
-      const { center } = autoPlaceArray({
-        meter: electricalMeterPosition,
-        panelCount: totalPanels,
-        tier: panelTier,
-        azimuth: 180,
-        obstacles,
-      });
-      useQuoteStore.getState().setArrayCenter(center);
-    };
-
-    map.once('idle', place);
-    return () => {
-      cancelled = true;
-      map.off('idle', place);
-    };
+    );
   }, [electricalMeterPosition, totalPanels, panelTier, arrayCenter]);
 
   // First slope read. Subsequent reads are triggered by dragend inside MapStage.

@@ -52,7 +52,15 @@ export const PageContainer = (): JSX.Element => {
     else setCurrentStepIndex(currentStepIndex + 1);
   };
 
+  /**
+   * Progress segments go backwards only.
+   *
+   * They used to call setCurrentStepIndex with any index, which both let the
+   * user skip ahead past validation and bypassed the design-step capture. A
+   * forward tap now does nothing; forward movement is only ever via Continue.
+   */
   const handleClickStep = (index: number): void => {
+    if (index >= currentStepIndex) return;
     setCurrentStepIndex(index);
   };
 
@@ -100,10 +108,19 @@ export const PageContainer = (): JSX.Element => {
             {/* step progress section */}
             <div className="flex flex-row gap-4 lg:pl-[29px]">
               {Array.from({ length: 5 }, (_, index) => (
-                <div key={index} className={cn("h-[5px] w-[37px] cursor-pointer", {
-                  'bg-custom-primary': index <= currentStepIndex,
-                  'bg-neutral-200': index > currentStepIndex,
-                })}
+                <div
+                  key={index}
+                  role="button"
+                  aria-label={`Step ${index + 1}`}
+                  aria-disabled={index >= currentStepIndex}
+                  data-testid={`progress-step-${index}`}
+                  className={cn("h-[5px] w-[37px]", {
+                    'bg-custom-primary': index <= currentStepIndex,
+                    'bg-neutral-200': index > currentStepIndex,
+                    // Only completed steps are reachable, so only they look tappable.
+                    'cursor-pointer': index < currentStepIndex,
+                    'cursor-default': index >= currentStepIndex,
+                  })}
                   onClick={() => handleClickStep(index)}
                 />
               ))}
@@ -149,10 +166,19 @@ export const PageContainer = (): JSX.Element => {
           {/* step progress section */}
           <div className="flex flex-row gap-4 lg:pl-[40px]">
             {Array.from({ length: 5 }, (_, index) => (
-              <div key={index} className={cn("h-[5px] w-[37px] cursor-pointer", {
-                'bg-custom-primary': index <= currentStepIndex,
-                'bg-neutral-200': index > currentStepIndex,
-              })}
+              <div
+                key={index}
+                role="button"
+                aria-label={`Step ${index + 1}`}
+                aria-disabled={index >= currentStepIndex}
+                data-testid={`progress-step-${index}`}
+                className={cn("h-[5px] w-[37px]", {
+                  'bg-custom-primary': index <= currentStepIndex,
+                  'bg-neutral-200': index > currentStepIndex,
+                  // Only completed steps are reachable, so only they look tappable.
+                  'cursor-pointer': index < currentStepIndex,
+                  'cursor-default': index >= currentStepIndex,
+                })}
                 onClick={() => handleClickStep(index)}
               />
             ))}

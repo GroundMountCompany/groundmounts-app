@@ -1,19 +1,28 @@
 import type mapboxgl from 'mapbox-gl';
 import type { Feature, FeatureCollection, LineString, Polygon } from 'geojson';
-import { buildArray, footprintFt, type ArraySpec } from '@/lib/geo/array';
+import {
+  buildArray,
+  buildArrayHitArea,
+  rotateHandlePosition,
+  type ArraySpec,
+} from '@/lib/geo/array';
 import { buildTrench } from '@/lib/geo/trench';
-import { feetToMeters, offsetMeters, rotateEastNorth, type LngLat } from '@/lib/geo/units';
+import type { LngLat } from '@/lib/geo/units';
+
+export { rotateHandlePosition };
 
 export const SRC = {
   panels: 'gm-array-panels',
   hull: 'gm-array-hull',
   trench: 'gm-trench',
+  hit: 'gm-array-hit',
   handle: 'gm-rotate-handle',
   meter: 'gm-meter',
 } as const;
 
 export const LAYER = {
   hullFill: 'gm-hull-fill',
+  hitPad: 'gm-array-hit-pad',
   hullLine: 'gm-hull-line',
   panelLine: 'gm-panel-line',
   trenchLine: 'gm-trench-line',
@@ -43,11 +52,19 @@ export function installLayers(map: mapboxgl.Map) {
   if (map.getLayer(LAYER.hullFill)) return;
 
   ensureSource(map, SRC.hull, EMPTY);
+  ensureSource(map, SRC.hit, EMPTY);
   ensureSource(map, SRC.panels, EMPTY);
   ensureSource(map, SRC.trench, EMPTY);
   ensureSource(map, SRC.handle, EMPTY);
   ensureSource(map, SRC.meter, EMPTY);
 
+  // Invisible, generously padded drag target. Still queryable at opacity 0.
+  map.addLayer({
+    id: LAYER.hitPad,
+    type: 'fill',
+    source: SRC.hit,
+    paint: { 'fill-color': '#000000', 'fill-opacity': 0 },
+  });
   map.addLayer({
     id: LAYER.hullFill,
     type: 'fill',
@@ -117,10 +134,17 @@ export function installLayers(map: mapboxgl.Map) {
       'icon-image': COMPASS_ICON,
       'icon-size': 0.5,
       'icon-allow-overlap': true,
-      'icon-rotate': ['get', 'azimuth'],
-      'icon-rotation-alignment': 'map',
+      // Push the grip clear of the array in SCREEN space. A ground offset does
+      // not work: an IronRidge table is only ~13.6 ft deep, which at zoom 18 is
+      // about 25px, so a 44px compass anchored a few feet away covered the whole
+      // array and stole every drag from it.
+      'icon-offset': [0, 120],
+      // The map itself never rotates (dragRotate is off), so screen-up is always
+      // true north. The compass must stay fixed; rotating it with the array
+      // would point N somewhere north isn't.
+      'icon-rotation-alignment': 'viewport',
       'text-field': 'Turn',
-      'text-offset': [0, 1.9],
+      'text-offset': [0, 5.4],
       'text-size': 13,
       'text-allow-overlap': true,
       'text-font': ['DIN Offc Pro Medium', 'Arial Unicode MS Bold'],
@@ -139,7 +163,8 @@ export const COMPASS_ICON = 'gm-compass';
  * Draw the compass once and register it with the map.
  *
  * Rendered at 2x (88px for a 44px target) so it stays crisp on retina phones.
- * North is a red needle so the rotation has an obvious reference point.
+ * The red needle points up with "N" at its tip, and the icon is viewport-aligned
+ * so that up really is north.
  */
 export function installCompassIcon(map: mapboxgl.Map) {
   if (map.hasImage(COMPASS_ICON)) return;
@@ -161,28 +186,30 @@ export function installCompassIcon(map: mapboxgl.Map) {
   ctx.strokeStyle = '#1d4ed8';
   ctx.stroke();
 
-  // North needle.
+  // "N" sits at the very top, directly above the needle tip.
+  ctx.fillStyle = '#0f172a';
+  ctx.font = 'bold 18px system-ui, -apple-system, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+  ctx.fillText('N', mid, 9);
+
+  // North needle, tip just under the N.
   ctx.beginPath();
-  ctx.moveTo(mid, 14);
-  ctx.lineTo(mid - 11, mid + 4);
-  ctx.lineTo(mid + 11, mid + 4);
+  ctx.moveTo(mid, 29);
+  ctx.lineTo(mid - 11, mid + 8);
+  ctx.lineTo(mid + 11, mid + 8);
   ctx.closePath();
   ctx.fillStyle = '#dc2626';
   ctx.fill();
 
-  // South tail.
+  // South tail, grey so the red end is unambiguous.
   ctx.beginPath();
-  ctx.moveTo(mid, size - 20);
-  ctx.lineTo(mid - 9, mid + 6);
-  ctx.lineTo(mid + 9, mid + 6);
+  ctx.moveTo(mid, size - 14);
+  ctx.lineTo(mid - 9, mid + 10);
+  ctx.lineTo(mid + 9, mid + 10);
   ctx.closePath();
   ctx.fillStyle = '#94a3b8';
   ctx.fill();
-
-  ctx.fillStyle = '#0f172a';
-  ctx.font = 'bold 17px system-ui, -apple-system, sans-serif';
-  ctx.textAlign = 'center';
-  ctx.fillText('N', mid, size - 6);
 
   const { data } = ctx.getImageData(0, 0, size, size);
   map.addImage(COMPASS_ICON, { width: size, height: size, data: new Uint8Array(data) });
@@ -207,6 +234,7 @@ export function renderDesign(map: mapboxgl.Map, { spec, meter }: RenderInput): R
     ensureSource(map, SRC.panels, EMPTY);
     ensureSource(map, SRC.trench, EMPTY);
     ensureSource(map, SRC.handle, EMPTY);
+    ensureSource(map, SRC.hit, EMPTY);
   }
 
   let trenchFeet: number | null = null;
@@ -215,14 +243,14 @@ export function renderDesign(map: mapboxgl.Map, { spec, meter }: RenderInput): R
   if (spec && spec.panelCount > 0) {
     const built = buildArray(spec);
     ensureSource(map, SRC.hull, built.hull as Feature<Polygon>);
+    ensureSource(map, SRC.hit, buildArrayHitArea(spec) as Feature<Polygon>);
     ensureSource(map, SRC.panels, built.panels);
 
     handleAt = rotateHandlePosition(spec);
     ensureSource(map, SRC.handle, {
       type: 'Feature',
       geometry: { type: 'Point', coordinates: handleAt },
-      // The compass needle turns with the array so N always points north.
-      properties: { azimuth: 180 - spec.azimuth },
+      properties: {},
     });
 
     if (meter) {
@@ -245,10 +273,3 @@ export function renderDesign(map: mapboxgl.Map, { spec, meter }: RenderInput): R
   return { trenchFeet, handleAt };
 }
 
-/** The rotate grip, held off the array's south edge. */
-export function rotateHandlePosition(spec: ArraySpec): LngLat {
-  const fp = footprintFt(spec.panelCount, spec.tier);
-  const south = -(feetToMeters(fp.depthFt) / 2 + feetToMeters(18));
-  const [e, n] = rotateEastNorth(0, south, spec.azimuth - 180);
-  return offsetMeters(spec.center, e, n);
-}

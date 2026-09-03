@@ -1,14 +1,18 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import { useQuoteStore } from '@/store/quoteStore';
 import { mapRef, mapContainerRef } from '@/store/mapRefs';
 import { installLayers, renderDesign, LAYER, installCompassIcon } from './layers';
 import { getMapSlot, subscribeMapSlot } from './mapStage';
+import bearing from '@turf/bearing';
+import { point } from '@turf/helpers';
 import { buildTrench } from '@/lib/geo/trench';
 import { slopeAt } from '@/lib/slope';
+import { captureMap } from '@/lib/screenshot';
 import type { ArraySpec } from '@/lib/geo/array';
 import type { LngLat } from '@/lib/geo/units';
 
@@ -41,10 +45,15 @@ export default function MapStage({ mode }: { mode: MapMode }) {
 
   const grab = useRef<Grab | null>(null);
   const slopeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => setMounted(true), []);
 
   // --- create the map exactly once -----------------------------------------
+  // Depends on `mounted` because the host div lives in a portal that does not
+  // exist on the first effect pass.
   useEffect(() => {
-    if (!host.current || mapRef.current) return;
+    if (!mounted || !host.current || mapRef.current) return;
 
     const { coordinates } = useQuoteStore.getState();
     const map = new mapboxgl.Map({
@@ -64,7 +73,12 @@ export default function MapStage({ mode }: { mode: MapMode }) {
     mapContainerRef.current = host.current;
 
     map.on('load', () => {
-      installCompassIcon(map);
+      // The compass is cosmetic; never let it stop the layers being installed.
+      try {
+        installCompassIcon(map);
+      } catch (error) {
+        console.error('[MAP] compass icon failed', error);
+      }
       installLayers(map);
       if (!map.getSource('mapbox-dem')) {
         map.addSource('mapbox-dem', {
@@ -79,6 +93,13 @@ export default function MapStage({ mode }: { mode: MapMode }) {
 
     const canvas = map.getCanvas();
 
+    // mapbox-gl.css sets `touch-action: pan-x pan-y` on its own canvas
+    // container, which overrides the host's `touch-action: none`. The page then
+    // scrolls underneath a map gesture — the brief forbids that, and it also
+    // shifted the canvas mid-drag so the grab landed several pixels off.
+    map.getCanvasContainer().style.touchAction = 'none';
+    canvas.style.touchAction = 'none';
+
     const pointFor = (e: PointerEvent): [number, number] => {
       const rect = canvas.getBoundingClientRect();
       return [e.clientX - rect.left, e.clientY - rect.top];
@@ -86,7 +107,9 @@ export default function MapStage({ mode }: { mode: MapMode }) {
 
     const hitTest = (pt: [number, number]): Grab['kind'] | null => {
       if (map.queryRenderedFeatures(pt, { layers: [LAYER.handle] }).length) return 'rotate';
-      if (map.queryRenderedFeatures(pt, { layers: [LAYER.hullFill] }).length) return 'array';
+      // The padded hit area, not the drawn hull: the visible table is only a
+      // few pixels deep on screen.
+      if (map.queryRenderedFeatures(pt, { layers: [LAYER.hitPad] }).length) return 'array';
       return null;
     };
 
@@ -139,9 +162,13 @@ export default function MapStage({ mode }: { mode: MapMode }) {
       } else {
         const c = store.arrayCenter;
         if (c) {
-          const bearing = (Math.atan2(ll.lng - c[0], ll.lat - c[1]) * 180) / Math.PI;
-          // The grip rides the south edge, so the array faces the other way.
-          store.setAzimuth(bearing + 180);
+          // Raw lng/lat deltas are not a bearing: a degree of longitude is only
+          // ~0.84 of a degree of latitude at Texas latitudes, which skewed the
+          // angle by about 5 degrees. turf.bearing does it on the sphere.
+          //
+          // No offset is applied: the grip rides due south in the array's own
+          // frame, so its bearing from the centre IS the azimuth.
+          store.setAzimuth(bearing(point(c), point([ll.lng, ll.lat])));
         }
       }
       syncFromStore();
@@ -168,6 +195,35 @@ export default function MapStage({ mode }: { mode: MapMode }) {
 
     const unsubscribeStore = useQuoteStore.subscribe(syncFromStore);
 
+    // Test hook. Interaction tests need the live map's camera and the rendered
+    // feature counts, neither of which is observable from the DOM. Dev-only:
+    // `next build` strips this branch from production output.
+    if (process.env.NODE_ENV !== 'production') {
+      (window as unknown as Record<string, unknown>).__gmTest = {
+        state: () => useQuoteStore.getState(),
+        mapCenter: (): [number, number] => [map.getCenter().lng, map.getCenter().lat],
+        mapZoom: () => map.getZoom(),
+        project: (ll: LngLat) => {
+          const p = map.project(ll);
+          return [p.x, p.y];
+        },
+        renderedHulls: () => map.queryRenderedFeatures({ layers: [LAYER.hullFill] }).length,
+        renderedHitPads: () => map.queryRenderedFeatures({ layers: [LAYER.hitPad] }).length,
+        renderedHandles: () => map.queryRenderedFeatures({ layers: [LAYER.handle] }).length,
+        capture: () => captureMap(map),
+        styleLoaded: () => map.isStyleLoaded(),
+        /** Rect of the actual WebGL canvas — the space project() returns. */
+        canvasRect: () => {
+          const r = map.getCanvas().getBoundingClientRect();
+          return { left: r.left, top: r.top, width: r.width, height: r.height };
+        },
+        hitAt: (pt: [number, number]) => ({
+          handle: map.queryRenderedFeatures(pt, { layers: [LAYER.handle] }).length,
+          hull: map.queryRenderedFeatures(pt, { layers: [LAYER.hitPad] }).length,
+        }),
+      };
+    }
+
     return () => {
       unsubscribeStore();
       if (slopeTimer.current) clearTimeout(slopeTimer.current);
@@ -182,7 +238,7 @@ export default function MapStage({ mode }: { mode: MapMode }) {
       mapContainerRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [mounted]);
 
   /** Re-run the slope lookup once the array has settled. */
   function scheduleSlope() {
@@ -254,21 +310,49 @@ export default function MapStage({ mode }: { mode: MapMode }) {
     []
   );
 
-  return (
+  // Portal to <body>. A `position: fixed` element is positioned against the
+  // nearest ancestor with a transform/filter/contain, not the viewport, and the
+  // funnel has one: the canvas tracked the page scroll instead of the slot and
+  // ended up hundreds of pixels off-screen, unreachable by touch.
+  if (!mounted) return null;
+
+  return createPortal(
     <div
       ref={host}
       data-testid="map-canvas"
-      className="fixed left-0 top-0 z-0 overflow-hidden rounded-xl"
-      // The map owns its gestures; the page never scrolls underneath it.
-      style={{ touchAction: 'none', visibility: 'hidden' }}
-    />
+      // z-10 puts the canvas above the transparent <MapSlot /> placeholder that
+      // reserves its space. At z-0 the slot painted on top and swallowed every
+      // touch, leaving the map completely non-interactive. Sticky UI is z-40 and
+      // still wins, and the canvas only ever covers the slot's rectangle.
+      className="overflow-hidden rounded-xl"
+      style={{
+        // Positioning MUST be inline. Mapbox adds its own `mapboxgl-map` class
+        // and mapbox-gl.css sets `position: relative` on it, which loads after
+        // Tailwind and beats the `fixed` utility — the canvas then laid out in
+        // normal flow at the bottom of <body> and drifted with page scroll.
+        position: 'fixed',
+        left: 0,
+        top: 0,
+        // Below step chrome. The address search (z-10) and sticky CTA (z-40)
+        // must stay tappable; the <MapSlot /> placeholder is pointer-events:none
+        // so it cannot swallow touches meant for the canvas.
+        zIndex: 0,
+        // The map owns its gestures; the page never scrolls underneath it.
+        touchAction: 'none',
+        visibility: 'hidden',
+      }}
+    />,
+    document.body
   );
 }
 
 /** Redraw from store state and write back the trench length. */
 function syncFromStore() {
   const map = mapRef.current;
-  if (!map || !map.isStyleLoaded()) return;
+  // Gate on the layers existing, NOT on isStyleLoaded(): that is still false
+  // when 'load' fires, so an array placed before the style settled was computed
+  // and then never drawn, because nothing changed the store again afterwards.
+  if (!map || !map.getLayer(LAYER.hullFill)) return;
 
   const s = useQuoteStore.getState();
   const spec: ArraySpec | null = s.arrayCenter

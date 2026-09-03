@@ -1,6 +1,15 @@
 import { describe, it, expect } from 'vitest';
 import area from '@turf/area';
-import { buildArray, footprintFt, layoutFor, arrayTrenchAnchor, panelGroundFt } from './array';
+import bearing from '@turf/bearing';
+import { point } from '@turf/helpers';
+import {
+  buildArray,
+  footprintFt,
+  layoutFor,
+  arrayTrenchAnchor,
+  panelGroundFt,
+  rotateHandlePosition,
+} from './array';
 import {
   PANELS,
   RACKING,
@@ -197,5 +206,36 @@ describe('layout', () => {
     const fp = footprintFt(0, tier);
     expect(fp.widthFt).toBe(0);
     expect(fp.depthFt).toBe(0);
+  });
+});
+
+describe('rotate handle bearing', () => {
+  it('handle bearing from the centre equals the azimuth, with no offset', () => {
+    // This is what lets the drag handler do setAzimuth(bearing(center, pointer))
+    // directly. An offset here would rotate the array the wrong way.
+    for (const azimuth of [0, 45, 90, 135, 180, 225, 270, 315]) {
+      const spec = { center: FORT_WORTH, azimuth, panelCount: 40, tier };
+      const handle = rotateHandlePosition(spec);
+      const measured = bearing(point(FORT_WORTH), point(handle));
+      const normalized = ((measured % 360) + 360) % 360;
+      expect(normalized).toBeCloseTo(azimuth, 1);
+    }
+  });
+
+  it('sits beyond the array edge, not inside it', () => {
+    const spec = { center: FORT_WORTH, azimuth: 180, panelCount: 40, tier };
+    const handle = rotateHandlePosition(spec);
+    const halfDepthM = feetToMeters(footprintFt(40, tier).depthFt) / 2;
+    expect(distM(FORT_WORTH, handle)).toBeGreaterThan(halfDepthM);
+  });
+
+  it('a raw lng/lat angle would have been several degrees off in Texas', () => {
+    // Documents why turf.bearing replaced atan2 on raw degree deltas.
+    const spec = { center: FORT_WORTH, azimuth: 225, panelCount: 40, tier };
+    const handle = rotateHandlePosition(spec);
+    const naive =
+      (Math.atan2(handle[0] - FORT_WORTH[0], handle[1] - FORT_WORTH[1]) * 180) / Math.PI;
+    const naiveNorm = ((naive % 360) + 360) % 360;
+    expect(Math.abs(naiveNorm - 225)).toBeGreaterThan(3);
   });
 });

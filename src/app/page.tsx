@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect } from 'react';
-import { QuoteContextProvider } from '@/contexts/quoteContextProvider';
+import { QuoteStoreHydrator } from '@/contexts/quoteContext';
 import { BrandProvider } from '@/contexts/BrandContext';
 import { PageContainer } from './quote/pageContainer';
 import ErrorBoundary from '@/components/common/ErrorBoundary';
@@ -15,11 +15,10 @@ export default function Home() {
   return (
     <ErrorBoundary>
       <BrandProvider>
-        <QuoteContextProvider>
-          <main className="bg-white min-h-screen md:max-w-7xl md:mx-auto md:px-4 md:py-[64px] lg:px-10 lg:py-[80px]">
-            <PageContainer />
-          </main>
-        </QuoteContextProvider>
+        <QuoteStoreHydrator />
+        <main className="bg-white min-h-screen md:max-w-7xl md:mx-auto md:px-4 md:py-[64px] lg:px-10 lg:py-[80px]">
+          <PageContainer />
+        </main>
       </BrandProvider>
     </ErrorBoundary>
   );

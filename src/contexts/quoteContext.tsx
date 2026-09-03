@@ -1,57 +1,55 @@
 'use client';
 
-import { createContext, useContext } from 'react';
-import { QuoteContextValues } from './quoteContextProvider';
+import { useEffect } from 'react';
+import { useQuoteStore } from '@/store/quoteStore';
+import {
+  mapRef,
+  mapContainerRef,
+  drawRef,
+  lineFeatureIdRef,
+} from '@/store/mapRefs';
 
-// interface Coordinates {
-//   latitude: number;
-//   longitude: number;
-// }
-
-// interface MeterLocation {
-//   latitude: number;
-//   longitude: number;
-// }
-
-// interface QuoteContextType {
-//   address: string;
-//   setAddress: (address: string) => void;
-//   coordinates: Coordinates;
-//   setCoordinates: (coordinates: Coordinates) => void;
-//   meterLocation: MeterLocation | null;
-//   setMeterLocation: (location: MeterLocation | null) => void;
-// }
-
-export const QuoteContext = createContext<QuoteContextValues | undefined>(undefined);
-
-// export function QuoteProvider({ children }: { children: React.ReactNode }) {
-//   const [address, setAddress] = useState<string>('');
-//   const [coordinates, setCoordinates] = useState<Coordinates>({
-//     latitude: 0,
-//     longitude: 0,
-//   });
-//   const [meterLocation, setMeterLocation] = useState<MeterLocation | null>(null);
-
-//   return (
-//     <QuoteContext.Provider
-//       value={{
-//         address,
-//         setAddress,
-//         coordinates,
-//         setCoordinates,
-//         meterLocation,
-//         setMeterLocation,
-//       }}
-//     >
-//       {children}
-//     </QuoteContext.Provider>
-//   );
-// }
-
+/**
+ * Compatibility shim over the Zustand store.
+ *
+ * The funnel's nine call sites still destructure a single big object, exactly as
+ * they did under the old context provider, so this hook preserves that shape
+ * while the state itself now lives in `@/store/quoteStore` with persistence.
+ * As each step is rewritten (Phases 2 and 4) it should subscribe to narrow
+ * selectors directly and stop using this hook, which then goes away.
+ */
 export function useQuoteContext() {
-  const context = useContext(QuoteContext);
-  if (context === undefined) {
-    throw new Error('useQuoteContext must be used within a QuoteProvider');
-  }
-  return context;
-} 
+  const state = useQuoteStore();
+
+  const isAddressEmpty = state.address.length === 0;
+  const isCoordinatesZero =
+    state.coordinates.latitude === 0 && state.coordinates.longitude === 0;
+
+  return {
+    ...state,
+    // Derived
+    shouldContinueButtonDisabled: isAddressEmpty || isCoordinatesZero,
+    isAddressCoordinatesCompleted: !isAddressEmpty && !isCoordinatesZero,
+    shouldDrawPanels: state.totalPanels > 0,
+    // Imperative Mapbox handles (module-level, never re-rendered)
+    mapRef,
+    mapContainerRef,
+    drawRef,
+    lineFeatureIdRef,
+  };
+}
+
+export type QuoteContextValues = ReturnType<typeof useQuoteContext>;
+
+/**
+ * Restores persisted funnel state on mount. Rehydration is deferred to an effect
+ * (rather than running during store creation) so the server-rendered markup and
+ * the first client render agree; otherwise a returning user trips a hydration
+ * mismatch on every field they had already filled in.
+ */
+export function QuoteStoreHydrator() {
+  useEffect(() => {
+    useQuoteStore.persist.rehydrate();
+  }, []);
+  return null;
+}

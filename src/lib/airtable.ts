@@ -24,7 +24,28 @@ export interface LeadFields {
   'Map Screenshot'?: Array<{ url: string }>;
 }
 
-export async function createLead(fields: LeadFields) {
+/**
+ * Extract Airtable's machine-readable error reason without echoing the request.
+ * Airtable error bodies describe the schema problem (e.g. UNKNOWN_FIELD_NAME),
+ * not the submitted values, so this is safe to surface; the raw body is not.
+ */
+function airtableErrorReason(body: string): string {
+  try {
+    const parsed = JSON.parse(body);
+    const type = parsed?.error?.type;
+    const message = parsed?.error?.message;
+    if (type || message) return [type, message].filter(Boolean).join(': ').slice(0, 200);
+  } catch {
+    // fall through
+  }
+  return 'unparseable_error_body';
+}
+
+/**
+ * @param leadId Client-generated funnel id, used only for log correlation.
+ *               Never log `fields` — it carries name, email, phone and address.
+ */
+export async function createLead(fields: LeadFields, leadId?: string) {
   if (!AIRTABLE_API_KEY || !AIRTABLE_BASE_ID) {
     console.error('[AIRTABLE_CONFIG_ERROR] Missing:', {
       hasApiKey: !!AIRTABLE_API_KEY,
@@ -36,8 +57,7 @@ export async function createLead(fields: LeadFields) {
   const url = `https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${encodeURIComponent(AIRTABLE_TABLE_NAME)}`;
   const payload = { fields };
 
-  console.log('[AIRTABLE_REQUEST] URL:', url);
-  console.log('[AIRTABLE_REQUEST] Payload:', JSON.stringify(payload, null, 2));
+  console.log('[AIRTABLE_REQUEST] createLead', leadId ?? 'no_lead_id');
 
   const response = await fetch(url, {
     method: 'POST',
@@ -49,16 +69,18 @@ export async function createLead(fields: LeadFields) {
   });
 
   if (!response.ok) {
-    const errorText = await response.text();
-    console.error('[AIRTABLE_ERROR] Status:', response.status);
-    console.error('[AIRTABLE_ERROR] StatusText:', response.statusText);
-    console.error('[AIRTABLE_ERROR] Response:', errorText);
-    console.error('[AIRTABLE_ERROR] Payload sent:', JSON.stringify(payload, null, 2));
-    throw new Error(`Airtable error: ${response.status} - ${errorText}`);
+    const reason = airtableErrorReason(await response.text());
+    console.error(
+      '[AIRTABLE_ERROR] createLead',
+      leadId ?? 'no_lead_id',
+      'status:', response.status,
+      'reason:', reason
+    );
+    throw new Error(`Airtable error: ${response.status} - ${reason}`);
   }
 
   const result = await response.json();
-  console.log('[AIRTABLE_SUCCESS] Record created:', result.id);
+  console.log('[AIRTABLE_SUCCESS] createLead', leadId ?? 'no_lead_id', 'record:', result.id);
   return result;
 }
 

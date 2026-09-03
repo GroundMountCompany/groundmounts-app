@@ -1,25 +1,45 @@
 import EmailTemplate from '@/components/common/EmailTemplate';
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { getResendOrThrow } from '@/lib/resendSafe';
-import { enqueueFollowup } from '@/lib/followups';
+import { getClientIp, rateLimitOk, isBotHoneypot, minTimeOk } from '@/lib/guard';
 import type { ReactElement } from 'react';
 
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
   if (!process.env.RESEND_API_KEY) {
     return NextResponse.json({ ok: false, error: "RESEND_API_KEY missing" }, { status: 500 });
   }
-  
+
   try {
     const resend = getResendOrThrow();
-    
+
     const body = await request.json();
+
+    // This route sends mail from our domain to any address in the payload, so it
+    // gets the same guards as /api/leads. The client has always sent `honeypot`
+    // and `ttc_ms`; until now the route simply ignored them.
+    // Phase 7 replaces the in-memory limiter with a durable Upstash bucket and
+    // adds per-leadId idempotency.
+    if (!rateLimitOk(getClientIp(request))) {
+      console.log('[SEND_EMAIL_BLOCKED] Rate limited');
+      return NextResponse.json({ ok: false, error: 'rate_limited' }, { status: 429 });
+    }
+
+    if (isBotHoneypot(body?.honeypot)) {
+      console.log('[SEND_EMAIL_BLOCKED] Bot honeypot triggered');
+      // Pretend success so the bot learns nothing.
+      return NextResponse.json({ ok: true, ignored: true });
+    }
+
+    if (body?.ttc_ms !== undefined && !minTimeOk(body.ttc_ms)) {
+      console.log('[SEND_EMAIL_BLOCKED] Too fast');
+      return NextResponse.json({ ok: false, error: 'too_fast' }, { status: 400 });
+    }
+
     const {
       email,
       address,
-      coordinates,
       quotation,
       totalPanels,
-      paymentMethod,
       additionalCost,
       electricalMeter,
       percentage
@@ -54,7 +74,6 @@ export async function POST(request: Request) {
       calendlyUrl,
     }) as ReactElement;
 
-    console.log("emailTemplate", emailTemplate)
     const { data, error } = await resend.emails.send({
       from: 'Ground Mounts Solar System <info@groundmounts.com>',
       to: [email],
@@ -62,64 +81,9 @@ export async function POST(request: Request) {
       react: emailTemplate,
     });
 
-    // Send data to Google Sheets API endpoint
-    // await fetch(`${process.env.NEXT_PUBLIC_BASE_URL || ''}/api/saveQuoteToSheet`, {
-    //   method: 'POST',
-    //   headers: {
-    //     'Content-Type': 'application/json',
-    //   },
-    //   body: JSON.stringify({
-    //     email,
-    //     address,
-    //     coordinates,
-    //     quotation,
-    //     totalPanels,
-    //     paymentMethod,
-    //     quoteId,
-    //     additionalCost,
-    //     electricalMeter,
-    //     percentage,
-    //     totalCost,
-    //     federalTaxCredit,
-    //     netCostAfterTax,
-    //     systemSizeWatts,
-    //     quoteDate: formattedDate
-    //   })
-    // });
     if (error) {
       console.error("[SEND_EMAIL_ERROR]", error);
       return Response.json({ error }, { status: 500 });
-    }
-
-    // Enqueue follow-up email for 15 minutes later
-    try {
-      const leadId = `${email}_${Date.now()}`;
-      const followupDueMs = Date.now() + (15 * 60 * 1000); // 15 minutes
-      const quoteData = JSON.stringify({
-        email,
-        address,
-        coordinates,
-        quotation,
-        totalPanels,
-        paymentMethod,
-        additionalCost,
-        electricalMeter,
-        percentage,
-      });
-
-      await enqueueFollowup({
-        lead_id: leadId,
-        email,
-        created_at_ms: Date.now(),
-        followup_due_ms: followupDueMs,
-        followup_sent: false,
-        quote_data: quoteData,
-      });
-      
-      console.log("[FOLLOWUP_ENQUEUED]", leadId, email);
-    } catch (followupError) {
-      console.error("[FOLLOWUP_ENQUEUE_ERROR]", followupError);
-      // Don't fail the main email send if follow-up queueing fails
     }
 
     return Response.json({ ok: true, data });

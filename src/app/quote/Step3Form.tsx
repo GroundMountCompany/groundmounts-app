@@ -3,6 +3,7 @@ import { useQuoteContext } from "@/contexts/quoteContext";
 import { useBrand } from "@/contexts/BrandContext";
 import { useState, useEffect, useMemo } from "react";
 import { enqueueOrSend } from "@/lib/leadQueue";
+import { clearPersistedQuote } from "@/store/quoteStore";
 import { useSearchParams } from 'next/navigation';
 
 // eslint-disable-next-line @typescript-eslint/no-empty-object-type
@@ -132,7 +133,12 @@ function Step3Form({}: Step3FormProps) {
             ttc_ms: Date.now() - startedAt,
             mapScreenshot: mapScreenshot || undefined,
           });
-          console.log("[FINAL_LEAD_CAPTURED]", leadId, email, name);
+          console.log("[FINAL_LEAD_CAPTURED]", leadId);
+
+          // The lead is safely away, so the funnel draft can go. Without this a
+          // shared or kiosk device hands the next visitor the previous person's
+          // design and address on load.
+          clearPersistedQuote();
         } catch (error) {
           console.error("[FINAL_LEAD_CAPTURE_ERROR]", error);
         }

@@ -3,9 +3,18 @@ import { createLead, parseAddress, LeadFields } from "@/lib/airtable";
 import { getClientIp, rateLimitOk, isBotHoneypot, minTimeOk } from "@/lib/guard";
 import { getResendOrThrow } from "@/lib/resendSafe";
 import { put } from "@vercel/blob";
+import { escapeHtml, escapeOr, headerSafe } from "@/lib/escape";
+
+/** Decoded screenshots above this are rejected rather than uploaded. */
+const MAX_SCREENSHOT_BYTES = 2 * 1024 * 1024;
+/** PNG signature: \x89 P N G \r \n \x1a \n */
+const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
 const NOTIFICATION_EMAIL = "bert@groundmounts.com";
 const AIRTABLE_BASE_ID = process.env.AIRTABLE_BASE_ID;
+// Airtable record deep links need the table *id* (tblXXXXXXXX), not its name.
+// Without it we link to the base, which always resolves.
+const AIRTABLE_TABLE_ID = process.env.AIRTABLE_TABLE_ID;
 
 interface LeadPayload {
   id: string;
@@ -65,13 +74,10 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
 
-    // Log incoming request
-    console.log("[LEADS_INCOMING]", JSON.stringify(body, null, 2));
-
     // Apply guards before processing
     const ip = getClientIp(req);
     if (!rateLimitOk(ip)) {
-      console.log("[LEADS_BLOCKED] Rate limited:", ip);
+      console.log("[LEADS_BLOCKED] Rate limited");
       return NextResponse.json({ ok: false, error: "rate_limited" }, { status: 429 });
     }
 
@@ -86,7 +92,7 @@ export async function POST(req: NextRequest) {
     }
 
     const lead = validateLead(body);
-    console.log("[LEADS_VALIDATED] Lead ID:", lead.id, "Email:", lead.email, "Source:", lead.source);
+    console.log("[LEADS_VALIDATED]", lead.id);
 
     // Upload map screenshot to Vercel Blob if provided
     let mapScreenshotUrl: string | undefined;
@@ -96,13 +102,25 @@ export async function POST(req: NextRequest) {
         const base64Data = lead.mapScreenshot.replace(/^data:image\/png;base64,/, '');
         const buffer = Buffer.from(base64Data, 'base64');
 
+        // The data: prefix is caller-controlled and proves nothing. Check the
+        // real PNG signature and cap the size before anything reaches Blob
+        // storage, so this endpoint cannot be used to host arbitrary files.
+        if (!buffer.subarray(0, PNG_MAGIC.length).equals(PNG_MAGIC)) {
+          throw new Error('screenshot is not a PNG');
+        }
+        if (buffer.length > MAX_SCREENSHOT_BYTES) {
+          throw new Error(
+            `screenshot too large: ${Math.round(buffer.length / 1024)}KB > ${MAX_SCREENSHOT_BYTES / 1024}KB`
+          );
+        }
+
         // Upload to Vercel Blob
         const blob = await put(`map-screenshots/${lead.id}.png`, buffer, {
           access: 'public',
           contentType: 'image/png',
         });
         mapScreenshotUrl = blob.url;
-        console.log("[MAP_SCREENSHOT_UPLOADED]", mapScreenshotUrl, "size:", Math.round(buffer.length / 1024), "KB");
+        console.log("[MAP_SCREENSHOT_UPLOADED]", lead.id, "size:", Math.round(buffer.length / 1024), "KB");
       } catch (uploadError) {
         console.error("[MAP_SCREENSHOT_UPLOAD_ERROR]", uploadError instanceof Error ? uploadError.message : uploadError);
         // Continue without screenshot - don't fail the lead capture
@@ -111,7 +129,6 @@ export async function POST(req: NextRequest) {
 
     // Parse address components
     const addressParts = lead.address ? parseAddress(lead.address) : {};
-    console.log("[LEADS_ADDRESS_PARSED]", JSON.stringify(addressParts));
 
     // Build Airtable fields
     // Source options in Airtable: groundmounts.com, texasgroundmountsolar.com, backyardsolartexas.com, groundmountsolar.guide
@@ -143,24 +160,34 @@ export async function POST(req: NextRequest) {
       Object.entries(fields).filter(([, v]) => v !== undefined && v !== '')
     ) as LeadFields;
 
-    // Log Airtable payload
-    console.log("[LEADS_AIRTABLE_PAYLOAD]", JSON.stringify(cleanFields, null, 2));
+    const result = await createLead(cleanFields, lead.id);
 
-    const result = await createLead(cleanFields);
-
-    console.log("[LEAD_CAPTURED]", lead.id, lead.email || "no_email", "airtable_id:", result.id);
+    console.log("[LEAD_CAPTURED]", lead.id, "airtable_id:", result.id);
 
     // Send notification email (don't fail request if email fails)
     try {
       const resend = getResendOrThrow();
-      const airtableUrl = `https://airtable.com/${AIRTABLE_BASE_ID}/tblLeads/${result.id}`;
+      const airtableUrl = AIRTABLE_TABLE_ID
+        ? `https://airtable.com/${AIRTABLE_BASE_ID}/${AIRTABLE_TABLE_ID}/${result.id}`
+        : `https://airtable.com/${AIRTABLE_BASE_ID}`;
       const cityDisplay = addressParts.city || 'Unknown City';
       const stateDisplay = addressParts.state || lead.state || 'TX';
+
+      // Everything below is attacker-controlled; escape before it enters HTML.
+      const kw = lead.quote?.systemSizeKw;
+      const panels = lead.quote?.totalPanels;
+      const avgBill = lead.quote?.avgBill;
+      const trenchFt = lead.quote?.electricalMeter?.distanceInFeet;
+      const equipment = lead.quote?.quotation;
+      const trenchCost = lead.quote?.additionalCost;
+      const total = equipment ? equipment + (trenchCost || 0) : undefined;
 
       await resend.emails.send({
         from: 'Ground Mounts <leads@groundmounts.com>',
         to: NOTIFICATION_EMAIL,
-        subject: `New Solar Lead: ${lead.name || 'Unknown'} - ${cityDisplay}, ${stateDisplay}`,
+        subject: headerSafe(
+          `New Solar Lead: ${headerSafe(lead.name, 'Unknown')} - ${headerSafe(cityDisplay)}, ${headerSafe(stateDisplay)}`
+        ),
         html: `
           <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto;">
             <h2 style="color: #16a34a; margin-bottom: 24px;">New Lead Received</h2>
@@ -168,67 +195,67 @@ export async function POST(req: NextRequest) {
             <table style="width: 100%; border-collapse: collapse;">
               <tr>
                 <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5; color: #666; width: 140px;">Name</td>
-                <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5; font-weight: 600;">${lead.name || 'Not provided'}</td>
+                <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5; font-weight: 600;">${escapeOr(lead.name, 'Not provided')}</td>
               </tr>
               <tr>
                 <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5; color: #666;">Email</td>
-                <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5;"><a href="mailto:${lead.email}" style="color: #2563eb;">${lead.email || 'Not provided'}</a></td>
+                <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5;"><a href="mailto:${escapeHtml(lead.email)}" style="color: #2563eb;">${escapeOr(lead.email, 'Not provided')}</a></td>
               </tr>
               <tr>
                 <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5; color: #666;">Phone</td>
-                <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5;"><a href="tel:${lead.phone}" style="color: #2563eb;">${lead.phone || 'Not provided'}</a></td>
+                <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5;"><a href="tel:${escapeHtml(lead.phone)}" style="color: #2563eb;">${escapeOr(lead.phone, 'Not provided')}</a></td>
               </tr>
               <tr>
                 <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5; color: #666;">Address</td>
-                <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5;">${lead.address || 'Not provided'}</td>
+                <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5;">${escapeOr(lead.address, 'Not provided')}</td>
               </tr>
               <tr>
                 <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5; color: #666;">System Size</td>
-                <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5;">${lead.quote?.systemSizeKw ? `${lead.quote.systemSizeKw} kW` : 'N/A'}</td>
+                <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5;">${kw ? `${escapeHtml(kw)} kW` : 'N/A'}</td>
               </tr>
               <tr>
                 <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5; color: #666;">Panels</td>
-                <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5;">${lead.quote?.totalPanels || 'N/A'}</td>
+                <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5;">${panels ? escapeHtml(panels) : 'N/A'}</td>
               </tr>
               <tr>
                 <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5; color: #666;">Monthly Bill (Avg)</td>
-                <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5;">${lead.quote?.avgBill ? `$${lead.quote.avgBill}` : 'N/A'}</td>
+                <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5;">${avgBill ? `$${escapeHtml(avgBill)}` : 'N/A'}</td>
               </tr>
               <tr>
                 <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5; color: #666;">Trenching Distance</td>
-                <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5;">${lead.quote?.electricalMeter?.distanceInFeet ? `${lead.quote.electricalMeter.distanceInFeet} ft` : 'N/A'}</td>
+                <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5;">${trenchFt ? `${escapeHtml(trenchFt)} ft` : 'N/A'}</td>
               </tr>
               <tr>
                 <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5; color: #666;">Equipment Cost</td>
-                <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5;">${lead.quote?.quotation ? `$${lead.quote.quotation.toLocaleString()}` : 'N/A'}</td>
+                <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5;">${typeof equipment === 'number' ? `$${escapeHtml(equipment.toLocaleString())}` : 'N/A'}</td>
               </tr>
               <tr>
                 <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5; color: #666;">Trenching Cost</td>
-                <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5;">${lead.quote?.additionalCost ? `$${lead.quote.additionalCost.toLocaleString()}` : 'N/A'}</td>
+                <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5;">${typeof trenchCost === 'number' ? `$${escapeHtml(trenchCost.toLocaleString())}` : 'N/A'}</td>
               </tr>
               <tr>
                 <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5; color: #666; font-weight: 600;">Total Investment</td>
-                <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5; font-weight: 600; color: #16a34a;">${lead.quote?.quotation ? `$${(lead.quote.quotation + (lead.quote.additionalCost || 0)).toLocaleString()}` : 'N/A'}</td>
+                <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5; font-weight: 600; color: #16a34a;">${typeof total === 'number' ? `$${escapeHtml(total.toLocaleString())}` : 'N/A'}</td>
               </tr>
               <tr>
                 <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5; color: #666;">Source</td>
-                <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5;">${lead.source || 'Direct'}</td>
+                <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5;">${escapeOr(lead.source, 'Direct')}</td>
               </tr>
             </table>
 
             ${mapScreenshotUrl ? `
             <div style="margin-top: 24px;">
               <h3 style="color: #374151; margin-bottom: 12px; font-size: 14px;">Panel Placement Map</h3>
-              <img src="${mapScreenshotUrl}" alt="Panel placement map" style="max-width: 100%; border-radius: 8px; border: 1px solid #e5e5e5;" />
+              <img src="${escapeHtml(mapScreenshotUrl)}" alt="Panel placement map" style="max-width: 100%; border-radius: 8px; border: 1px solid #e5e5e5;" />
             </div>
             ` : ''}
 
             <div style="margin-top: 24px;">
-              <a href="${airtableUrl}" style="display: inline-block; background: #16a34a; color: white; padding: 12px 24px; text-decoration: none; border-radius: 8px; font-weight: 600;">View in Airtable</a>
+              <a href="${escapeHtml(airtableUrl)}" style="display: inline-block; background: #16a34a; color: white; padding: 12px 24px; text-decoration: none; border-radius: 8px; font-weight: 600;">View in Airtable</a>
             </div>
 
             <p style="margin-top: 24px; color: #999; font-size: 12px;">
-              Lead ID: ${lead.id}<br>
+              Lead ID: ${escapeHtml(lead.id)}<br>
               Received: ${new Date().toLocaleString('en-US', { timeZone: 'America/Chicago' })} CT
             </p>
           </div>

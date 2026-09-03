@@ -48,6 +48,7 @@ export const PageContainer = (): JSX.Element => {
         <div className="fixed bottom-0 left-0 right-0 z-40 border-t bg-white/90 backdrop-blur px-4 py-3 md:hidden">
           <button
             type="button"
+            data-testid="mobile-continue"
             onClick={handleContinue}
             disabled={isContinueDisabled}
             className={cn(
@@ -105,6 +106,7 @@ export const PageContainer = (): JSX.Element => {
         <div className="fixed bottom-0 left-0 right-0 z-40 border-t bg-white/90 backdrop-blur px-4 py-3 md:hidden">
           <button
             type="button"
+            data-testid="mobile-continue"
             onClick={handleContinue}
             disabled={isContinueDisabled}
             className={cn(

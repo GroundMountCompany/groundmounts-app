@@ -51,16 +51,38 @@ let isFlushRunning = false;
 let lastFlushTime = 0;
 const MIN_FLUSH_INTERVAL = 2000; // Minimum 2s between flushes
 
-export async function enqueueOrSend(payload: Payload, url = "/api/leads") {
+export interface SendResult {
+  /** The server accepted the lead right now. */
+  ok: boolean;
+  /** It was put on the offline queue and will be retried. */
+  queued: boolean;
+  status?: number;
+}
+
+/**
+ * Send a lead, falling back to the offline queue.
+ *
+ * Returns what actually happened rather than swallowing it. The caller decides
+ * what to tell the customer: a queued lead is not a delivered one, and clearing
+ * their design on a 500 loses work they cannot get back.
+ */
+export async function enqueueOrSend(
+  payload: Payload,
+  url = "/api/leads"
+): Promise<SendResult> {
+  let status: number | undefined;
   try {
     const res = await fetch(url, {
       method: "POST",
       headers: { "Content-Type":"application/json" },
       body: JSON.stringify(payload),
     });
-    if (!res.ok) throw new Error("net");
+    status = res.status;
+    if (res.ok) return { ok: true, queued: false, status };
+    throw new Error("net");
   } catch {
     const q = load(); q.push({ ...payload, _retries: 0 }); save(q);
+    return { ok: false, queued: true, status };
   }
 }
 

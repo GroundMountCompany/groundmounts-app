@@ -43,6 +43,8 @@ interface GmTest {
     setCurrentStepIndex: (v: number) => void;
     setTotalPanels: (v: number) => void;
     setArrayCenter: (v: Pt | null) => void;
+    coordinates: { latitude: number; longitude: number };
+    electricalMeterPosition: Pt | null;
     setElectricalMeterPosition: (v: Pt | null) => void;
   };
   mapCenter: () => Pt;
@@ -51,7 +53,7 @@ interface GmTest {
   renderedHulls: () => number;
   renderedHandles: () => number;
   canvasRect: () => { left: number; top: number; width: number; height: number };
-  hitAt: (pt: Pt) => { handle: number; hull: number };
+  hitAt: (pt: Pt) => { handle: number; hull: number; pin: number; meter: number };
   handleLngLat: () => Pt | null;
   bearingFromCenter: (ll: Pt) => number | null;
   unproject: (pt: Pt) => Pt;
@@ -142,23 +144,6 @@ async function bringMapIntoView(page: Page) {
   }
 }
 
-async function touchDrag(client: CDPSession, from: Pt, to: Pt, steps = 10) {
-  await client.send('Input.dispatchTouchEvent', {
-    type: 'touchStart',
-    touchPoints: [{ x: from[0], y: from[1], id: 1 }],
-  });
-  for (let i = 1; i <= steps; i++) {
-    const t = i / steps;
-    await client.send('Input.dispatchTouchEvent', {
-      type: 'touchMove',
-      touchPoints: [
-        { x: from[0] + (to[0] - from[0]) * t, y: from[1] + (to[1] - from[1]) * t, id: 1 },
-      ],
-    });
-  }
-  await client.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
-}
-
 /** Low-level touch primitives so a second finger can join mid-gesture. */
 async function touchStart(client: CDPSession, points: Array<{ x: number; y: number; id: number }>) {
   await client.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: points });
@@ -199,23 +184,6 @@ async function findArrayGrab(page: Page): Promise<Pt | null> {
   });
 }
 
-/** The compass grip, found by scanning down from the array centre. */
-async function findHandleGrab(page: Page): Promise<Pt | null> {
-  return page.evaluate(() => {
-    const t = window.__gmTest;
-    const r = t.canvasRect();
-    const ac = t.state().arrayCenter;
-    if (!ac) return null;
-    const [cx, cy] = t.project(ac);
-    for (let dy = 10; dy < 220; dy += 3) {
-      if (t.hitAt([cx, cy + dy]).handle > 0) {
-        return [r.left + cx, r.top + cy + dy] as Pt;
-      }
-    }
-    return null;
-  });
-}
-
 /**
  * Wait until the grip's projected position stops moving.
  *
@@ -224,8 +192,6 @@ async function findHandleGrab(page: Page): Promise<Pt | null> {
  * and grabs empty map.
  */
 async function waitForStableHandle(page: Page) {
-  // The camera must have finished first, or every projection below is measured
-  // against a moving target.
   await page.waitForFunction(() => !window.__gmTest.isMoving(), null, { timeout: 10_000 });
   let stable = 0;
   let last = '';
@@ -259,6 +225,136 @@ function distanceToPolygonEdge(point: Pt, ring: Pt[]): number {
   }
   return best;
 }
+
+test.describe('map pins', () => {
+  /** Drag whatever is at `from` to `to` and report what moved. */
+  async function dragAndMeasure(page: Page, from: Pt, to: Pt) {
+    const client = await page.context().newCDPSession(page);
+    const before = await page.evaluate(() => ({
+      coords: window.__gmTest.state().coordinates,
+      meter: window.__gmTest.state().electricalMeterPosition,
+      map: window.__gmTest.mapCenter(),
+    }));
+
+    await touchStart(client, [{ x: from[0], y: from[1], id: 1 }]);
+    for (let i = 1; i <= 10; i++) {
+      const t = i / 10;
+      await touchMove(client, [
+        { x: from[0] + (to[0] - from[0]) * t, y: from[1] + (to[1] - from[1]) * t, id: 1 },
+      ]);
+    }
+    const during = await page.evaluate(() => ({
+      coords: window.__gmTest.state().coordinates,
+      meter: window.__gmTest.state().electricalMeterPosition,
+      map: window.__gmTest.mapCenter(),
+    }));
+    await touchEnd(client);
+
+    return { before, during };
+  }
+
+  test('the address pin is draggable and does not pan the map', async ({ page }) => {
+    // Step 1: no seeded step index, so the funnel opens on the address step.
+    await page.addInitScript(() => {
+      if (window.localStorage.getItem('gmq:v3')) return;
+      window.localStorage.setItem(
+        'gmq:v3',
+        JSON.stringify({
+          state: {
+            currentStepIndex: 0,
+            address: 'County Road 1004, Rural, TX',
+            coordinates: { latitude: 32.1183, longitude: -97.9425 },
+            leadId: 'pin-test',
+          },
+          version: 1,
+        })
+      );
+    });
+    await page.goto('/quote');
+    await page.waitForFunction(() => typeof window.__gmTest !== 'undefined', null, {
+      timeout: 30_000,
+    });
+    await page.waitForFunction(() => window.__gmTest.state().mapReady === true, null, {
+      timeout: 30_000,
+    });
+    await page.waitForFunction(() => !window.__gmTest.isMoving(), null, { timeout: 15_000 });
+    await page.waitForTimeout(600);
+
+    // The pin sits on the stored coordinates.
+    const pinPx = await page.evaluate(() => {
+      const t = window.__gmTest;
+      const r = t.canvasRect();
+      const c = t.state().coordinates;
+      const p = t.project([c.longitude, c.latitude]);
+      return [r.left + p[0], r.top + p[1]] as [number, number];
+    });
+
+    const { before, during } = await dragAndMeasure(page, pinPx, [pinPx[0] + 60, pinPx[1] - 50]);
+
+    const coordMoved = Math.hypot(
+      during.coords.longitude - before.coords.longitude,
+      during.coords.latitude - before.coords.latitude
+    );
+    const mapMoved = Math.hypot(
+      during.map[0] - before.map[0],
+      during.map[1] - before.map[1]
+    );
+
+    expect(coordMoved, 'address pin did not move').toBeGreaterThan(0);
+    expect(coordMoved / Math.max(mapMoved, 1e-12), 'map panned with the pin').toBeGreaterThan(5);
+  });
+
+  test('the meter is draggable on its own step', async ({ page }) => {
+    await page.addInitScript(() => {
+      if (window.localStorage.getItem('gmq:v3')) return;
+      window.localStorage.setItem(
+        'gmq:v3',
+        JSON.stringify({
+          state: {
+            currentStepIndex: 2,
+            address: 'County Road 1004, Rural, TX',
+            coordinates: { latitude: 32.1183, longitude: -97.9425 },
+            electricalMeterPosition: [-97.9425, 32.1183],
+            leadId: 'meter-test',
+          },
+          version: 1,
+        })
+      );
+    });
+    await page.goto('/quote');
+    await page.waitForFunction(() => typeof window.__gmTest !== 'undefined', null, {
+      timeout: 30_000,
+    });
+    await page.waitForFunction(() => window.__gmTest.state().mapReady === true, null, {
+      timeout: 30_000,
+    });
+    await page.waitForFunction(() => !window.__gmTest.isMoving(), null, { timeout: 15_000 });
+    await page.waitForTimeout(600);
+
+    const meterPx = await page.evaluate(() => {
+      const t = window.__gmTest;
+      const r = t.canvasRect();
+      const m = t.state().electricalMeterPosition!;
+      const p = t.project(m);
+      return [r.left + p[0], r.top + p[1]] as [number, number];
+    });
+
+    const { before, during } = await dragAndMeasure(page, meterPx, [
+      meterPx[0] - 70,
+      meterPx[1] + 40,
+    ]);
+
+    const meterMoved = Math.hypot(
+      during.meter![0] - before.meter![0],
+      during.meter![1] - before.meter![1]
+    );
+    const mapMoved = Math.hypot(during.map[0] - before.map[0], during.map[1] - before.map[1]);
+
+    // v1 drew the meter but never let you move it; the drag panned the map.
+    expect(meterMoved, 'meter did not move').toBeGreaterThan(0);
+    expect(meterMoved / Math.max(mapMoved, 1e-12), 'map panned with the meter').toBeGreaterThan(5);
+  });
+});
 
 test.describe('design step gestures', () => {
   test('array appears within 3s on a rural parcel', async ({ page }) => {

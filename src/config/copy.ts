@@ -106,6 +106,31 @@ export const STEPS: StepCopy[] = [
   },
 ];
 
+/** Option cards on step 5. Prices arrive with the pricing engine. */
+export const OPTION_CARDS = [
+  {
+    key: 'panels',
+    title: 'Panels',
+    body: 'Standard or premium. Premium makes more power in the same footprint.',
+  },
+  {
+    key: 'battery',
+    title: 'Battery',
+    body: 'Keeps your lights on when the grid goes down. None, one or two.',
+  },
+  {
+    key: 'siteprep',
+    title: 'Site prep',
+    body: 'Is the spot clear, or does it need brush and trees taken out?',
+  },
+] as const;
+
+/** What a meter looks like, on step 3. */
+export const METER_EXAMPLES = [
+  { src: '/images/meter-img.PNG', label: 'On a wall' },
+  { src: '/images/meter-img2.PNG', label: 'On a pole' },
+] as const;
+
 export const UI = {
   findPanels: 'Find my panels',
   learnMore: 'Learn more',
@@ -129,6 +154,41 @@ export const UI = {
   successTitle: 'On its way',
   successBody: 'Check your email. If you want to talk it through, book a time below.',
   bookCall: 'Book a call',
+
+  // Step 2
+  ratePerKwhHint: 'Look for "price per kWh" on your bill. Leave it be if you are not sure.',
+  annualTargetPrefix: 'That is about',
+  annualTargetSuffix: 'a year to cover.',
+  offsetSliderLabel: 'Offset percentage',
+
+  // Step 3
+  meterTapPrompt: 'Tap the map where your meter sits.',
+  meterPlaced: 'Meter placed. Drag it if it is off.',
+
+  // Step 4
+  optionPriceLater: 'Pricing for this comes next.',
+  trenchNote: 'We route the trench around anything in the way once we are on site.',
+  slopeChecking: 'checking',
+
+  // Step 6
+  summaryPanels: 'Panels',
+  summarySystem: 'System',
+  summaryProduction: 'Production',
+  summaryTrench: 'Trench',
+  fieldName: 'Name',
+  fieldEmail: 'Email',
+  fieldPhone: 'Phone',
+  namePlaceholder: 'John Smith',
+  emailPlaceholder: 'you@example.com',
+  phonePlaceholder: '(555) 555-5555',
+  submitting: 'Sending',
+  submitFailed: 'Did not go through. Try again.',
+
+  // Shell
+  sheetLabel: 'Controls',
+  sheetHandleLabel: 'Resize controls',
+  progressLabel: 'Progress',
+  addressPlaceholder: 'Enter your address',
 } as const;
 
 /**

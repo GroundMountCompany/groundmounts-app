@@ -10,7 +10,7 @@ import { useQuoteStore } from '@/store/quoteStore';
 import { useStepUrl, MAX_STEP } from '@/lib/useStepUrl';
 import { captureAndAdvance } from '@/lib/leadPayload';
 import { useSizing } from './steps/useSizing';
-import { fitDesignView } from '@/components/map/MapCanvas';
+import { fitDesignView, rearmDesignFraming } from '@/components/map/MapCanvas';
 
 import { Suspense } from 'react';
 import AddressInput from './AddressInput';
@@ -26,6 +26,13 @@ const MAP_MODE: MapMode[] = ['address', 'hidden', 'place-meter', 'design', 'hidd
 
 /** Steps that show the map at all. */
 const SHOWS_MAP = MAP_MODE.map((m) => m !== 'hidden');
+
+/**
+ * Steps whose work happens on the map. These open at peek so the pin, meter or
+ * array is not sitting underneath the sheet — the meter step at half hid the
+ * marker the customer was meant to drag.
+ */
+const MAP_FIRST_STEPS = [0, 2, 3];
 
 export default function FunnelShell() {
   useStepUrl();
@@ -58,10 +65,11 @@ export default function FunnelShell() {
     };
   }, []);
 
-  // Opening a step with more to read starts the sheet higher; the design step
-  // starts at peek so the array is not buried.
   useEffect(() => {
-    setSnap(step === 0 || step === 3 ? 'peek' : 'half');
+    setSnap(MAP_FIRST_STEPS.includes(step) ? 'peek' : 'half');
+    // Arriving at the design step frames the array again, however the customer
+    // got here — forward, back, or a reload.
+    if (step === 3) rearmDesignFraming();
   }, [step]);
 
   const blocked = useMemo(() => {
@@ -167,7 +175,7 @@ export default function FunnelShell() {
 /** Back-only progress. Forward taps do nothing. */
 function ProgressRow({ step, onPick }: { step: number; onPick: (n: number) => void }) {
   return (
-    <div className="flex gap-1.5" aria-label="Progress">
+    <div className="-my-3 flex gap-1.5" aria-label={UI.progressLabel}>
       {STEPS.map((s, i) => (
         <button
           key={s.label}
@@ -176,10 +184,18 @@ function ProgressRow({ step, onPick }: { step: number; onPick: (n: number) => vo
           aria-label={`${s.label}${i < step ? '' : ' (not yet)'}`}
           aria-disabled={i >= step}
           onClick={() => i < step && onPick(i)}
-          className={`h-1.5 flex-1 rounded-full ${
-            i <= step ? 'bg-neutral-900' : 'bg-neutral-200'
-          } ${i < step ? 'cursor-pointer' : 'cursor-default'}`}
-        />
+          // The bar stays thin; the tappable box around it does not. A 6px
+          // target is not something a 60-year-old can hit on a moving bus.
+          className={`flex h-12 flex-1 items-center ${
+            i < step ? 'cursor-pointer' : 'cursor-default'
+          }`}
+        >
+          <span
+            className={`h-1.5 w-full rounded-full ${
+              i <= step ? 'bg-neutral-900' : 'bg-neutral-200'
+            }`}
+          />
+        </button>
       ))}
     </div>
   );

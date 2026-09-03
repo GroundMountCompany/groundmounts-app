@@ -7,6 +7,7 @@ import { useEffect, useRef, useState, ChangeEvent, JSX } from 'react';
 import { useQuoteContext } from '@/contexts/quoteContext';
 import { useSearchParams } from 'next/navigation';
 import { fireDesignStartOnce } from '@/lib/fb';
+import { UI } from '@/config/copy';
 
 export const AddressInput = (): JSX.Element => {
   const { setAddress, setCoordinates } = useQuoteContext();
@@ -73,6 +74,9 @@ export const AddressInput = (): JSX.Element => {
     if (searchParams.get('zipcode')) {
       searchZipcode();
     }
+    // Runs once on mount: ?zipcode= is an entry parameter, not something that
+    // should re-geocode every time the store updates.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleSuggestionClick = (suggestion: GeocodingFeature): void => {
@@ -107,7 +111,7 @@ export const AddressInput = (): JSX.Element => {
               try { fireDesignStartOnce(); } catch {}
             }}
             className="h-14 w-full rounded-xl border border-neutral-300 bg-white px-4 text-[17px] outline-none transition focus:border-neutral-500 placeholder:text-neutral-500"
-            placeholder="Enter your address"
+            placeholder={UI.addressPlaceholder}
             autoComplete="off"
           />
           {isLoading && (

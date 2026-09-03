@@ -102,6 +102,7 @@ export const SRC = {
   hit: 'gm-array-hit',
   handle: 'gm-rotate-handle',
   meter: 'gm-meter',
+  pin: 'gm-pin',
 } as const;
 
 export const LAYER = {
@@ -113,6 +114,7 @@ export const LAYER = {
   trenchLabel: 'gm-trench-label',
   handle: 'gm-handle-circle',
   meter: 'gm-meter-circle',
+  pin: 'gm-address-pin',
 } as const;
 
 const EMPTY: FeatureCollection = { type: 'FeatureCollection', features: [] };
@@ -141,6 +143,7 @@ export function installLayers(map: mapboxgl.Map) {
   ensureSource(map, SRC.trench, EMPTY);
   ensureSource(map, SRC.handle, EMPTY);
   ensureSource(map, SRC.meter, EMPTY);
+  ensureSource(map, SRC.pin, EMPTY);
 
   // Invisible, generously padded drag target. Still queryable at opacity 0.
   map.addLayer({
@@ -195,6 +198,20 @@ export function installLayers(map: mapboxgl.Map) {
       // screenshot the same way the array fill and trench line are.
       'text-halo-color': TRENCH_LABEL_HALO,
       'text-halo-width': 2.5,
+    },
+  });
+
+  // Address pin. Big enough to grab with a thumb, since dragging it is the
+  // whole point of step 1.
+  map.addLayer({
+    id: LAYER.pin,
+    type: 'circle',
+    source: SRC.pin,
+    paint: {
+      'circle-radius': 13,
+      'circle-color': '#dc2626',
+      'circle-stroke-color': '#ffffff',
+      'circle-stroke-width': 3,
     },
   });
 
@@ -307,6 +324,8 @@ export function installCompassIcon(map: mapboxgl.Map) {
 export interface RenderInput {
   spec: ArraySpec | null;
   meter: LngLat | null;
+  /** Address pin, shown on step 1 only. */
+  pin?: LngLat | null;
 }
 
 export interface RenderOutput {
@@ -315,7 +334,10 @@ export interface RenderOutput {
 }
 
 /** Push current geometry into the sources. Cheap enough to call per drag frame. */
-export function renderDesign(map: mapboxgl.Map, { spec, meter }: RenderInput): RenderOutput {
+export function renderDesign(
+  map: mapboxgl.Map,
+  { spec, meter, pin }: RenderInput
+): RenderOutput {
   if (!map.getLayer(LAYER.hullFill)) return { trenchFeet: null, handleAt: null };
 
   if (!spec || spec.panelCount <= 0) {
@@ -350,6 +372,14 @@ export function renderDesign(map: mapboxgl.Map, { spec, meter }: RenderInput): R
       ensureSource(map, SRC.trench, EMPTY);
     }
   }
+
+  ensureSource(
+    map,
+    SRC.pin,
+    pin
+      ? { type: 'Feature', geometry: { type: 'Point', coordinates: pin }, properties: {} }
+      : EMPTY
+  );
 
   ensureSource(
     map,

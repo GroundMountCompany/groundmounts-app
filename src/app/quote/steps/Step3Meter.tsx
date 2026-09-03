@@ -2,7 +2,7 @@
 
 import Image from 'next/image';
 import EducationCard from '@/components/shell/EducationCard';
-import { STEPS } from '@/config/copy';
+import { STEPS, UI, METER_EXAMPLES } from '@/config/copy';
 import { useQuoteStore } from '@/store/quoteStore';
 
 /** What a meter looks like, then tap the map. */
@@ -12,10 +12,7 @@ export default function Step3Meter() {
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-2 gap-3">
-        {[
-          { src: '/images/meter-img.PNG', label: 'On a wall' },
-          { src: '/images/meter-img2.PNG', label: 'On a pole' },
-        ].map((m) => (
+        {METER_EXAMPLES.map((m) => (
           <figure key={m.src} className="overflow-hidden rounded-xl border border-neutral-200">
             <Image
               src={m.src}
@@ -35,7 +32,7 @@ export default function Step3Meter() {
         data-testid="meter-status"
         className={`text-[17px] ${placed ? 'text-green-700' : 'text-neutral-700'}`}
       >
-        {placed ? 'Meter placed. Drag it if it is off.' : 'Tap the map where your meter sits.'}
+        {placed ? UI.meterPlaced : UI.meterTapPrompt}
       </p>
 
       <EducationCard copy={STEPS[2].education} />

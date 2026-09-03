@@ -12,7 +12,7 @@ import { useDesignSetup } from './useDesignSetup';
 function Stat({ label, value, testId }: { label: string; value: string; testId: string }) {
   return (
     <div className="rounded-xl border border-neutral-200 px-3 py-2">
-      <p className="text-[13px] uppercase tracking-wide text-neutral-500">{label}</p>
+      <p className="text-[15px] uppercase tracking-wide text-neutral-500">{label}</p>
       <p data-testid={testId} className="text-[17px] font-semibold text-neutral-900">
         {value}
       </p>
@@ -91,8 +91,10 @@ export default function Step4Design() {
 
       <p className="text-[16px] text-neutral-700">
         {UI.slope}:{' '}
-        {slopePercent === null ? 'checking' : `${slopePercent}% · ${slopeTier.toLowerCase()}`}.
-        We route the trench around anything in the way once we are on site.
+        {slopePercent === null
+          ? UI.slopeChecking
+          : `${slopePercent}% · ${slopeTier.toLowerCase()}`}
+        . {UI.trenchNote}
       </p>
 
       <EducationCard copy={STEPS[3].education} />

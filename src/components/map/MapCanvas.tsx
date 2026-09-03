@@ -51,10 +51,12 @@ export type MapMode = 'address' | 'place-meter' | 'design' | 'hidden';
 /** Debounce for the slope lookup after the array settles. */
 const SLOPE_DEBOUNCE_MS = 600;
 
+type GrabKind = 'array' | 'rotate' | 'pin' | 'meter';
+
 interface Grab {
-  kind: 'array' | 'rotate';
+  kind: GrabKind;
   pointerId: number;
-  /** Where the finger went down, and where the array was at that moment. */
+  /** Where the finger went down, and where the dragged thing was then. */
   startLngLat: LngLat;
   startCenter: LngLat;
   /** Camera position when the grab began; held there until the finger lifts. */
@@ -72,6 +74,7 @@ export default function MapStage({ mode }: { mode: MapMode }) {
   const host = useRef<HTMLDivElement | null>(null);
   const modeRef = useRef(mode);
   modeRef.current = mode;
+  currentMode.current = mode;
 
   const grab = useRef<Grab | null>(null);
   const slopeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -150,12 +153,28 @@ export default function MapStage({ mode }: { mode: MapMode }) {
       return [e.clientX - rect.left, e.clientY - rect.top];
     };
 
-    const hitTest = (pt: [number, number]): Grab['kind'] | null => {
-      if (map.queryRenderedFeatures(pt, { layers: [LAYER.handle] }).length) return 'rotate';
+    /** What, if anything, this point grabs — respecting the current step. */
+    const hitTest = (pt: [number, number]): GrabKind | null => {
+      const hits = (layer: string) => {
+        try {
+          return map.queryRenderedFeatures(pt, { layers: [layer] }).length > 0;
+        } catch {
+          return false; // layer not installed yet
+        }
+      };
+
+      if (modeRef.current === 'address') {
+        return hits(LAYER.pin) ? 'pin' : null;
+      }
+      if (modeRef.current === 'place-meter') {
+        return hits(LAYER.meter) ? 'meter' : null;
+      }
+      if (modeRef.current !== 'design') return null;
+
+      if (hits(LAYER.handle)) return 'rotate';
       // The padded hit area, not the drawn hull: the visible table is only a
       // few pixels deep on screen.
-      if (map.queryRenderedFeatures(pt, { layers: [LAYER.hitPad] }).length) return 'array';
-      return null;
+      return hits(LAYER.hitPad) ? 'array' : null;
     };
 
     const releaseGrab = () => {
@@ -170,14 +189,22 @@ export default function MapStage({ mode }: { mode: MapMode }) {
         releaseGrab();
         return;
       }
-      if (modeRef.current !== 'design' || !e.isPrimary) return;
+      if (!e.isPrimary) return;
 
       const pt = pointFor(e);
       const kind = hitTest(pt);
       if (!kind) return;
 
-      const { arrayCenter } = useQuoteStore.getState();
-      if (!arrayCenter) return;
+      const st = useQuoteStore.getState();
+      // Whatever is being dragged, remember where it started so the move is a
+      // delta from the grab point rather than a jump to the finger.
+      const anchor: LngLat | null =
+        kind === 'pin'
+          ? [st.coordinates.longitude, st.coordinates.latitude]
+          : kind === 'meter'
+            ? st.electricalMeterPosition
+            : st.arrayCenter;
+      if (!anchor) return;
 
       const ll = map.unproject(pt);
       const cam = map.getCenter();
@@ -185,7 +212,7 @@ export default function MapStage({ mode }: { mode: MapMode }) {
         kind,
         pointerId: e.pointerId,
         startLngLat: [ll.lng, ll.lat],
-        startCenter: arrayCenter,
+        startCenter: anchor,
         cameraCenter: [cam.lng, cam.lat],
       };
       map.dragPan.disable();
@@ -202,13 +229,19 @@ export default function MapStage({ mode }: { mode: MapMode }) {
       }
       const store = useQuoteStore.getState();
 
+      // Delta from the grab point, so whatever is dragged keeps its offset under
+      // the finger instead of snapping its centre there.
+      const moved: LngLat = [
+        g.startCenter[0] + (ll.lng - g.startLngLat[0]),
+        g.startCenter[1] + (ll.lat - g.startLngLat[1]),
+      ];
+
       if (g.kind === 'array') {
-        // Move by the pointer's delta from the grab point, so the array keeps
-        // its offset under the finger instead of snapping its centre there.
-        store.setArrayCenter([
-          g.startCenter[0] + (ll.lng - g.startLngLat[0]),
-          g.startCenter[1] + (ll.lat - g.startLngLat[1]),
-        ]);
+        store.setArrayCenter(moved);
+      } else if (g.kind === 'pin') {
+        store.setCoordinates({ longitude: moved[0], latitude: moved[1] });
+      } else if (g.kind === 'meter') {
+        store.setElectricalMeterPosition(moved);
       } else {
         const c = store.arrayCenter;
         if (c) {
@@ -300,8 +333,13 @@ export default function MapStage({ mode }: { mode: MapMode }) {
 
     const unsubscribeStore = useQuoteStore.subscribe(syncFromStore);
 
-    // Frame the design the first time the array exists in design mode.
+    // Frame the design on every entry to the step, not once per map lifetime.
+    // The map outlives the funnel now, so a customer who steps back and returns
+    // used to arrive at whatever camera they left behind.
     let framed = false;
+    framedResetRef.current = () => {
+      framed = false;
+    };
     const maybeFit = () => {
       // Never re-frame while a finger is down: the drag writes to the store on
       // every frame, and moving the camera underneath the gesture is exactly
@@ -397,10 +435,21 @@ export default function MapStage({ mode }: { mode: MapMode }) {
           const r = map.getCanvas().getBoundingClientRect();
           return { left: r.left, top: r.top, width: r.width, height: r.height };
         },
-        hitAt: (pt: [number, number]) => ({
-          handle: map.queryRenderedFeatures(pt, { layers: [LAYER.handle] }).length,
-          hull: map.queryRenderedFeatures(pt, { layers: [LAYER.hitPad] }).length,
-        }),
+        hitAt: (pt: [number, number]) => {
+          const count = (layer: string) => {
+            try {
+              return map.queryRenderedFeatures(pt, { layers: [layer] }).length;
+            } catch {
+              return 0;
+            }
+          };
+          return {
+            handle: count(LAYER.handle),
+            hull: count(LAYER.hitPad),
+            pin: count(LAYER.pin),
+            meter: count(LAYER.meter),
+          };
+        },
       };
     }
 
@@ -409,6 +458,7 @@ export default function MapStage({ mode }: { mode: MapMode }) {
       unsubscribeFit();
       map.off('idle', maybeFit);
       fitRef.current = null;
+      framedResetRef.current = null;
       if (slopeTimer.current) clearTimeout(slopeTimer.current);
       canvas.removeEventListener('touchstart', onTouchStartCapture, { capture: true });
       canvas.removeEventListener('pointerdown', onPointerDown);
@@ -425,7 +475,6 @@ export default function MapStage({ mode }: { mode: MapMode }) {
       useQuoteStore.getState().setMapReady(false);
     };
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mounted]);
 
   /** Re-run the slope lookup once the array has settled. */
@@ -483,7 +532,8 @@ export default function MapStage({ mode }: { mode: MapMode }) {
     () =>
       useQuoteStore.subscribe((s, prev) => {
         const map = mapRef.current;
-        if (!map) return;
+        // Never chase the pin while the customer is dragging it.
+        if (!map || grab.current) return;
         if (
           s.coordinates.latitude !== prev.coordinates.latitude ||
           s.coordinates.longitude !== prev.coordinates.longitude
@@ -546,8 +596,23 @@ function currentSpec(): ArraySpec | null {
   };
 }
 
+/**
+ * The mode the map is showing, at module scope so syncFromStore can read it.
+ * It runs from a store subscription, outside React, and needs to know whether
+ * the address pin should be drawn.
+ */
+const currentMode: { current: MapMode } = { current: 'hidden' };
+
 /** Set by the live map; called by the "Find my panels" button. */
 const fitRef: { current: (() => void) | null } = { current: null };
+
+/** Lets the shell re-arm framing when the design step is entered again. */
+const framedResetRef: { current: (() => void) | null } = { current: null };
+
+/** Re-arm the one-shot framing so the next design entry frames again. */
+export function rearmDesignFraming() {
+  framedResetRef.current?.();
+}
 
 /** Re-frame the array and meter. Safe to call when no map exists. */
 export function fitDesignView() {
@@ -565,7 +630,14 @@ function syncFromStore() {
   const s = useQuoteStore.getState();
   const spec = currentSpec();
 
-  renderDesign(map, { spec, meter: s.electricalMeterPosition });
+  renderDesign(map, {
+    spec,
+    meter: s.electricalMeterPosition,
+    pin:
+      currentMode.current === 'address'
+        ? [s.coordinates.longitude, s.coordinates.latitude]
+        : null,
+  });
 
   if (spec && s.electricalMeterPosition && spec.panelCount > 0) {
     const feet = buildTrench(spec, s.electricalMeterPosition).feet;

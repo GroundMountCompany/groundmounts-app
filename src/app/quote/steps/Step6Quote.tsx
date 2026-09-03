@@ -56,7 +56,7 @@ export default function Step6Quote() {
     );
 
     try {
-      await fetch('/api/sendEmail', {
+      const emailRes = await fetch('/api/sendEmail', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -74,11 +74,26 @@ export default function Step6Quote() {
         }),
       });
 
-      await enqueueOrSend(payload);
+      // A 429 or a 500 is not a success. Without this check the funnel cleared
+      // the customer's design and showed the thank-you screen while the lead
+      // went nowhere.
+      if (!emailRes.ok) {
+        setError(UI.submitFailed);
+        return;
+      }
+
+      const result = await enqueueOrSend(payload);
+      if (!result.ok) {
+        // Queued leads are retried in the background, but nothing is confirmed
+        // yet, so the design stays put and they can try again.
+        setError(UI.submitFailed);
+        return;
+      }
+
       clearPersistedQuote();
       setDone(true);
     } catch {
-      setError('That did not go through. Try once more.');
+      setError(UI.submitFailed);
     } finally {
       setSubmitting(false);
     }
@@ -106,13 +121,13 @@ export default function Step6Quote() {
       {/* Visible, unblurred: this is what they built. */}
       <div data-testid="design-summary" className="rounded-xl border border-neutral-200 p-4">
         <dl className="grid grid-cols-2 gap-y-2 text-[17px]">
-          <dt className="text-neutral-500">Panels</dt>
+          <dt className="text-neutral-500">{UI.summaryPanels}</dt>
           <dd className="text-right font-semibold">{totalPanels}</dd>
-          <dt className="text-neutral-500">System</dt>
+          <dt className="text-neutral-500">{UI.summarySystem}</dt>
           <dd className="text-right font-semibold">{kw.toFixed(1)} kW</dd>
-          <dt className="text-neutral-500">Production</dt>
+          <dt className="text-neutral-500">{UI.summaryProduction}</dt>
           <dd className="text-right font-semibold">{production.toLocaleString()} kWh/yr</dd>
-          <dt className="text-neutral-500">Trench</dt>
+          <dt className="text-neutral-500">{UI.summaryTrench}</dt>
           <dd className="text-right font-semibold">{trenchFeet} ft</dd>
         </dl>
       </div>
@@ -137,36 +152,36 @@ export default function Step6Quote() {
       />
 
       <label className="block">
-        <span className="block text-[17px] font-medium">Name</span>
+        <span className="block text-[17px] font-medium">{UI.fieldName}</span>
         <input
           id="name"
           value={name}
           onChange={(e) => setName(e.target.value)}
-          placeholder="John Smith"
+          placeholder={UI.namePlaceholder}
           className="mt-1 h-14 w-full rounded-xl border border-neutral-300 px-4 text-[17px] outline-none focus:border-neutral-500"
         />
       </label>
       <label className="block">
-        <span className="block text-[17px] font-medium">Email</span>
+        <span className="block text-[17px] font-medium">{UI.fieldEmail}</span>
         <input
           id="email"
           type="email"
           inputMode="email"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
-          placeholder="you@example.com"
+          placeholder={UI.emailPlaceholder}
           className="mt-1 h-14 w-full rounded-xl border border-neutral-300 px-4 text-[17px] outline-none focus:border-neutral-500"
         />
       </label>
       <label className="block">
-        <span className="block text-[17px] font-medium">Phone</span>
+        <span className="block text-[17px] font-medium">{UI.fieldPhone}</span>
         <input
           id="phone"
           type="tel"
           inputMode="tel"
           value={phone}
           onChange={(e) => setPhone(e.target.value)}
-          placeholder="(555) 555-5555"
+          placeholder={UI.phonePlaceholder}
           className="mt-1 h-14 w-full rounded-xl border border-neutral-300 px-4 text-[17px] outline-none focus:border-neutral-500"
         />
       </label>
@@ -180,7 +195,7 @@ export default function Step6Quote() {
         disabled={!ready || submitting}
         className="h-14 w-full rounded-xl bg-green-700 text-[17px] font-semibold text-white disabled:opacity-50"
       >
-        {submitting ? 'Sending' : STEPS[5].cta}
+        {submitting ? UI.submitting : STEPS[5].cta}
       </button>
 
       <EducationCard copy={STEPS[5].education} />

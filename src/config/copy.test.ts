@@ -1,21 +1,35 @@
 import { describe, it, expect } from 'vitest';
-import { STEPS, UI, BANNED_WORDS, BANNED_OPENINGS } from './copy';
+import * as copy from './copy';
+import { STEPS, BANNED_WORDS, BANNED_OPENINGS } from './copy';
 
-/** Every customer-facing string in the copy config, with a path for reporting. */
+/**
+ * Every string anywhere in the copy module, found by walking the whole export
+ * tree rather than a hand-listed set of keys.
+ *
+ * The previous version enumerated STEPS and UI by hand, so a new export — or a
+ * string hard-coded in a component — was simply never checked.
+ */
 function allStrings(): Array<{ path: string; text: string }> {
   const out: Array<{ path: string; text: string }> = [];
+  const skip = new Set(['BANNED_WORDS', 'BANNED_OPENINGS']);
 
-  STEPS.forEach((step, i) => {
-    out.push({ path: `STEPS[${i}].label`, text: step.label });
-    out.push({ path: `STEPS[${i}].title`, text: step.title });
-    out.push({ path: `STEPS[${i}].intro`, text: step.intro });
-    out.push({ path: `STEPS[${i}].cta`, text: step.cta });
-    out.push({ path: `STEPS[${i}].education.why`, text: step.education.why });
-    out.push({ path: `STEPS[${i}].education.more`, text: step.education.more });
-  });
+  const walk = (value: unknown, path: string) => {
+    if (typeof value === 'string') {
+      out.push({ path, text: value });
+      return;
+    }
+    if (Array.isArray(value)) {
+      value.forEach((v, i) => walk(v, `${path}[${i}]`));
+      return;
+    }
+    if (value && typeof value === 'object') {
+      for (const [k, v] of Object.entries(value)) walk(v, `${path}.${k}`);
+    }
+  };
 
-  for (const [key, value] of Object.entries(UI)) {
-    out.push({ path: `UI.${key}`, text: value });
+  for (const [key, value] of Object.entries(copy)) {
+    if (skip.has(key)) continue; // the lists of banned terms are not copy
+    walk(value, key);
   }
 
   return out;
@@ -28,9 +42,10 @@ describe('voice', () => {
     for (const { path, text } of allStrings()) {
       const lower = text.toLowerCase();
       for (const word of BANNED_WORDS) {
-        // Word boundary, so "fostering" is caught but "landscaper" would not be
-        // a false positive on a different word.
-        if (new RegExp(`\\b${word}\\b`).test(lower)) {
+        // Prefix match, not a whole-word one: "fostering" and "solutions"
+        // must trip "foster" and "solutions". A trailing \\b let inflections
+        // through, which is exactly how marketing language creeps back.
+        if (new RegExp(`\\b${word}`).test(lower)) {
           offences.push(`${path}: "${word}"`);
         }
       }
@@ -40,8 +55,16 @@ describe('voice', () => {
   });
 
   it('allows "unlock" only as the final button label', () => {
-    const uses = allStrings().filter(({ text }) => /\bunlock\b/i.test(text));
+    const uses = allStrings().filter(({ text }) => /\bunlock/i.test(text));
     expect(uses.map((u) => u.path)).toEqual(['STEPS[5].cta']);
+  });
+
+  it('catches inflected forms of banned words', () => {
+    // Guards the regex itself: a trailing word boundary would miss these.
+    for (const sample of ['fostering growth', 'our solutions', 'leveraged']) {
+      const hit = BANNED_WORDS.some((w) => new RegExp(`\\b${w}`).test(sample));
+      expect(hit, `"${sample}" should trip the banned list`).toBe(true);
+    }
   });
 
   it('never opens with filler', () => {

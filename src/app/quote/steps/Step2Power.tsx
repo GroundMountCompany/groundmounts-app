@@ -83,7 +83,7 @@ export default function Step2Power() {
           />
         </div>
         <span className="mt-1 block text-[15px] text-neutral-500">
-          Look for &ldquo;price per kWh&rdquo; on your bill. Leave it be if you are not sure.
+          {UI.ratePerKwhHint}
         </span>
       </label>
 
@@ -106,14 +106,15 @@ export default function Step2Power() {
           <Slider.Track className="SliderTrack">
             <Slider.Range className="SliderRange" />
           </Slider.Track>
-          <Slider.Thumb className="SliderThumb" aria-label="Offset percentage" />
+          <Slider.Thumb className="SliderThumb" aria-label={UI.offsetSliderLabel} />
         </Slider.Root>
       </div>
 
       {annualTarget > 0 && (
         <p data-testid="annual-target" className="text-[17px] text-neutral-800">
-          That is about <span className="font-semibold">{annualTarget.toLocaleString()} kWh</span> a
-          year to cover.
+          {UI.annualTargetPrefix}{' '}
+          <span className="font-semibold">{annualTarget.toLocaleString()} kWh</span>{' '}
+          {UI.annualTargetSuffix}
         </p>
       )}
 

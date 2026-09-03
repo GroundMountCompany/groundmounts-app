@@ -57,6 +57,17 @@ export default defineConfig({
       use: { ...devices['Desktop Chrome'] },
     },
     {
+      // A phone-sized Chromium for touch work that needs CDP, which WebKit does
+      // not expose. No Mapbox token required: these are DOM-level gestures.
+      name: 'mobile-chromium',
+      testMatch: /shell\.spec\.ts/,
+      use: {
+        ...devices['Desktop Chrome'],
+        viewport: { width: 390, height: 844 },
+        hasTouch: true,
+      },
+    },
+    {
       // Real map gestures. Chromium because it is the only engine here that
       // gives headless WebGL via SwiftShader; WebKit headless has none, which
       // is why the drag and pinch paths went unverified until now.

@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { UI } from '@/config/copy';
 
 export type Snap = 'peek' | 'half' | 'full';
 
@@ -11,10 +12,17 @@ const SNAP_FRACTION: Record<Snap, number> = {
   full: 0.88,
 };
 
-/** Peek shows one line of context plus the primary button, and nothing else. */
-const PEEK_PX = 168;
+/**
+ * Floor for the peek height. The real height is measured from the content, so
+ * the primary button is always on screen: a fixed number silently pushed it
+ * below the fold the moment the peek row grew.
+ */
+const MIN_PEEK_PX = 120;
 
 const ORDER: Snap[] = ['peek', 'half', 'full'];
+
+/** Movement beyond this counts as a drag rather than a tap. */
+const DRAG_THRESHOLD_PX = 6;
 
 interface Props {
   snap: Snap;
@@ -24,8 +32,8 @@ interface Props {
   children: React.ReactNode;
 }
 
-function heightFor(snap: Snap, viewport: number): number {
-  return snap === 'peek' ? PEEK_PX : Math.round(viewport * SNAP_FRACTION[snap]);
+function heightFor(snap: Snap, viewport: number, peekPx: number): number {
+  return snap === 'peek' ? peekPx : Math.round(viewport * SNAP_FRACTION[snap]);
 }
 
 /**
@@ -38,8 +46,12 @@ function heightFor(snap: Snap, viewport: number): number {
  */
 export default function BottomSheet({ snap, onSnapChange, peek, children }: Props) {
   const [viewport, setViewport] = useState(0);
+  const [peekPx, setPeekPx] = useState(MIN_PEEK_PX);
+  const headRef = useRef<HTMLDivElement>(null);
   const [dragPx, setDragPx] = useState<number | null>(null);
   const dragStart = useRef<{ y: number; height: number } | null>(null);
+  /** Set when a pointer moved far enough to count as a drag, not a tap. */
+  const dragged = useRef(false);
 
   useEffect(() => {
     const measure = () => setViewport(window.innerHeight);
@@ -48,12 +60,25 @@ export default function BottomSheet({ snap, onSnapChange, peek, children }: Prop
     return () => window.removeEventListener('resize', measure);
   }, []);
 
-  const settled = viewport ? heightFor(snap, viewport) : PEEK_PX;
+  // Measure the handle plus the always-visible peek row. Whatever the copy or
+  // the progress row do, the button stays on screen at peek.
+  useEffect(() => {
+    const el = headRef.current;
+    if (!el) return;
+    const measure = () => setPeekPx(Math.max(MIN_PEEK_PX, Math.ceil(el.scrollHeight)));
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  const settled = viewport ? heightFor(snap, viewport, peekPx) : peekPx;
   const height = dragPx ?? settled;
 
   const onPointerDown = useCallback(
     (e: React.PointerEvent) => {
       dragStart.current = { y: e.clientY, height: settled };
+      dragged.current = false;
       setDragPx(settled);
       (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
     },
@@ -65,24 +90,33 @@ export default function BottomSheet({ snap, onSnapChange, peek, children }: Prop
       const start = dragStart.current;
       if (!start || !viewport) return;
       // Dragging up grows the sheet, so the delta is inverted.
-      const next = start.height + (start.y - e.clientY);
-      setDragPx(Math.max(PEEK_PX, Math.min(next, viewport * SNAP_FRACTION.full)));
+      const delta = start.y - e.clientY;
+      if (Math.abs(delta) > DRAG_THRESHOLD_PX) dragged.current = true;
+      const next = start.height + delta;
+      setDragPx(Math.max(peekPx, Math.min(next, viewport * SNAP_FRACTION.full)));
     },
-    [viewport]
+    [viewport, peekPx]
   );
 
   const onPointerUp = useCallback(
     (e: React.PointerEvent) => {
       const start = dragStart.current;
       dragStart.current = null;
-      if (!start || !viewport || dragPx === null) {
+      if (!start || !viewport) {
         setDragPx(null);
         return;
       }
-      // Snap to whichever point the sheet ended up closest to.
+
+      // Snap from the release coordinate, not from the last rendered height:
+      // the two can differ by a frame, which was enough to land on the wrong
+      // snap point on a fast flick.
+      const released = Math.max(
+        peekPx,
+        Math.min(start.height + (start.y - e.clientY), viewport * SNAP_FRACTION.full)
+      );
       const nearest = ORDER.reduce((best, candidate) =>
-        Math.abs(heightFor(candidate, viewport) - dragPx) <
-        Math.abs(heightFor(best, viewport) - dragPx)
+        Math.abs(heightFor(candidate, viewport, peekPx) - released) <
+        Math.abs(heightFor(best, viewport, peekPx) - released)
           ? candidate
           : best
       );
@@ -94,38 +128,51 @@ export default function BottomSheet({ snap, onSnapChange, peek, children }: Prop
       }
       if (nearest !== snap) onSnapChange(nearest);
     },
-    [dragPx, viewport, snap, onSnapChange]
+    [viewport, peekPx, snap, onSnapChange]
   );
 
-  const cycle = () => onSnapChange(snap === 'full' ? 'peek' : snap === 'half' ? 'full' : 'half');
+  /**
+   * Tap cycles the sheet open. Suppressed after a drag: the click that follows
+   * a pointer sequence used to fire straight after the snap and undo it, so a
+   * drag to half immediately became full.
+   */
+  const onClick = () => {
+    if (dragged.current) {
+      dragged.current = false;
+      return;
+    }
+    onSnapChange(snap === 'full' ? 'peek' : snap === 'half' ? 'full' : 'half');
+  };
 
   return (
     <section
       data-testid="bottom-sheet"
       data-snap={snap}
-      aria-label="Controls"
+      aria-label={UI.sheetLabel}
       className="fixed inset-x-0 bottom-0 z-40 flex flex-col rounded-t-2xl border-t border-neutral-200 bg-white shadow-[0_-8px_24px_rgba(0,0,0,0.12)] md:static md:h-full md:rounded-none md:border-0 md:shadow-none"
       style={{
         height: viewport ? height : undefined,
         transition: dragPx === null ? 'height 220ms ease' : 'none',
       }}
     >
+      <div ref={headRef} className="shrink-0">
       {/* Grab handle. The only thing that resizes the sheet. */}
       <button
         type="button"
         data-testid="sheet-handle"
-        aria-label="Resize controls"
+        aria-label={UI.sheetHandleLabel}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerUp}
-        onClick={cycle}
-        className="flex h-9 w-full shrink-0 touch-none items-center justify-center md:hidden"
+        onClick={onClick}
+        className="flex h-12 w-full shrink-0 touch-none items-center justify-center md:hidden"
       >
         <span className="h-1.5 w-12 rounded-full bg-neutral-300" />
       </button>
 
-      <div className="shrink-0 px-5 pb-3 md:px-0 md:pt-2">{peek}</div>
+      <div className="px-5 pb-3 md:px-0 md:pt-2">{peek}</div>
+      </div>
 
       <div
         data-testid="sheet-content"

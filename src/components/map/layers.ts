@@ -134,17 +134,16 @@ export function installLayers(map: mapboxgl.Map) {
       'icon-image': COMPASS_ICON,
       'icon-size': 0.5,
       'icon-allow-overlap': true,
-      // Push the grip clear of the array in SCREEN space. A ground offset does
-      // not work: an IronRidge table is only ~13.6 ft deep, which at zoom 18 is
-      // about 25px, so a 44px compass anchored a few feet away covered the whole
-      // array and stole every drag from it.
-      'icon-offset': [0, 120],
+      // Anchored dead centre on its own coordinate: the source point already
+      // sits ROTATE_HANDLE_OFFSET_FT beyond the array edge along the current
+      // azimuth, so the icon renders exactly where the grip is.
+      'icon-anchor': 'center',
       // The map itself never rotates (dragRotate is off), so screen-up is always
       // true north. The compass must stay fixed; rotating it with the array
       // would point N somewhere north isn't.
       'icon-rotation-alignment': 'viewport',
       'text-field': 'Turn',
-      'text-offset': [0, 5.4],
+      'text-offset': [0, 1.9],
       'text-size': 13,
       'text-allow-overlap': true,
       'text-font': ['DIN Offc Pro Medium', 'Arial Unicode MS Bold'],

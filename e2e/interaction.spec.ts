@@ -31,6 +31,12 @@ interface GmTest {
     azimuth: number;
     trenchFeet: number;
     totalPanels: number;
+    currentStepIndex: number;
+    mapScreenshot: string | null;
+    setCurrentStepIndex: (v: number) => void;
+    setTotalPanels: (v: number) => void;
+    setArrayCenter: (v: Pt | null) => void;
+    setElectricalMeterPosition: (v: Pt | null) => void;
   };
   mapCenter: () => Pt;
   mapZoom: () => number;
@@ -39,6 +45,12 @@ interface GmTest {
   renderedHandles: () => number;
   canvasRect: () => { left: number; top: number; width: number; height: number };
   hitAt: (pt: Pt) => { handle: number; hull: number };
+  handleLngLat: () => Pt | null;
+  bearingFromCenter: (ll: Pt) => number | null;
+  unproject: (pt: Pt) => Pt;
+  setZoom: (z: number) => void;
+  isMoving: () => boolean;
+  lastPointer: () => Pt | null;
   styleLoaded: () => boolean;
   capture: () => Promise<{ dataUrl: string | null; reason?: string }>;
 }
@@ -128,29 +140,14 @@ async function touchDrag(client: CDPSession, from: Pt, to: Pt, steps = 10) {
   await client.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
 }
 
-/** Two fingers moving apart from a common centre. */
-async function pinchOut(client: CDPSession, centre: Pt, steps = 10) {
-  const [cx, cy] = centre;
-  const from = 30;
-  const to = 150;
-
-  await client.send('Input.dispatchTouchEvent', {
-    type: 'touchStart',
-    touchPoints: [
-      { x: cx - from, y: cy, id: 1 },
-      { x: cx + from, y: cy, id: 2 },
-    ],
-  });
-  for (let i = 1; i <= steps; i++) {
-    const spread = from + ((to - from) * i) / steps;
-    await client.send('Input.dispatchTouchEvent', {
-      type: 'touchMove',
-      touchPoints: [
-        { x: cx - spread, y: cy, id: 1 },
-        { x: cx + spread, y: cy, id: 2 },
-      ],
-    });
-  }
+/** Low-level touch primitives so a second finger can join mid-gesture. */
+async function touchStart(client: CDPSession, points: Array<{ x: number; y: number; id: number }>) {
+  await client.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: points });
+}
+async function touchMove(client: CDPSession, points: Array<{ x: number; y: number; id: number }>) {
+  await client.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: points });
+}
+async function touchEnd(client: CDPSession) {
   await client.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
 }
 
@@ -198,6 +195,32 @@ async function findHandleGrab(page: Page): Promise<Pt | null> {
     }
     return null;
   });
+}
+
+/**
+ * Wait until the grip's projected position stops moving.
+ *
+ * Camera animations and late layout both shift it, and under parallel load a
+ * fixed sleep is not enough — the drag then starts before the zoom has settled
+ * and grabs empty map.
+ */
+async function waitForStableHandle(page: Page) {
+  // The camera must have finished first, or every projection below is measured
+  // against a moving target.
+  await page.waitForFunction(() => !window.__gmTest.isMoving(), null, { timeout: 10_000 });
+  let stable = 0;
+  let last = '';
+  for (let i = 0; i < 40 && stable < 4; i++) {
+    const key = await page.evaluate(() => {
+      const h = window.__gmTest.handleLngLat();
+      if (!h) return 'none';
+      const p = window.__gmTest.project(h);
+      return `${Math.round(p[0])},${Math.round(p[1])}`;
+    });
+    stable = key === last && key !== 'none' ? stable + 1 : 0;
+    last = key;
+    await page.waitForTimeout(150);
+  }
 }
 
 const distance = (a: Pt, b: Pt) => Math.hypot(a[0] - b[0], a[1] - b[1]);
@@ -252,43 +275,70 @@ test.describe('design step gestures', () => {
     expect(mapDrift).toBeLessThan(1e-9);
   });
 
-  test('two-finger pinch zooms the map and leaves the array alone', async ({ page }) => {
+  test('a second finger hands the gesture to the map mid-drag', async ({ page }) => {
     await openDesignStep(page);
     await waitForArray(page, 15_000);
     await bringMapIntoView(page);
 
     const client = await page.context().newCDPSession(page);
-    const before = await page.evaluate(() => ({
+
+    // Finger one, alone, on a point confirmed to hit the array layer.
+    const grab = await findArrayGrab(page);
+    expect(grab, 'no point on the array reported a hit').not.toBeNull();
+    const [gx, gy] = grab!;
+
+    const start = await page.evaluate(() => ({
       array: window.__gmTest.state().arrayCenter!,
       zoom: window.__gmTest.mapZoom(),
     }));
 
-    // Pinch centred on the array — the case most likely to be misclaimed as a
-    // drag. Two fingers must always belong to the map.
-    const centre = await page.evaluate(() => {
-      const t = window.__gmTest;
-      const r = t.canvasRect();
-      const [cx, cy] = t.project(t.state().arrayCenter!);
-      return [r.left + cx, r.top + cy] as Pt;
-    });
-    await pinchOut(client, centre);
+    await touchStart(client, [{ x: gx, y: gy, id: 1 }]);
+    for (let i = 1; i <= 6; i++) {
+      await touchMove(client, [{ x: gx + i * 8, y: gy + i * 5, id: 1 }]);
+    }
 
-    await expect
-      .poll(async () =>
-        page.evaluate((z) => Math.abs(window.__gmTest.mapZoom() - z), before.zoom)
-      )
-      .toBeGreaterThan(0.05);
+    // Let any queued pointermove flush before sampling, so the freeze assertion
+    // measures the handler's behaviour and not event-loop timing.
+    await page.waitForTimeout(150);
+    const afterOneFinger = await page.evaluate(() => window.__gmTest.state().arrayCenter!);
+    expect(
+      distance(afterOneFinger, start.array),
+      'array did not follow a single finger'
+    ).toBeGreaterThan(0);
 
-    const after = await page.evaluate(() => ({
+    // Finger two joins. From here the gesture belongs to the map: the array
+    // must freeze and the zoom must change.
+    const cx = gx + 48;
+    const cy = gy + 30;
+    await touchStart(client, [
+      { x: cx, y: cy, id: 1 },
+      { x: cx + 40, y: cy, id: 2 },
+    ]);
+    for (let i = 1; i <= 10; i++) {
+      const spread = 40 + i * 11;
+      await touchMove(client, [
+        { x: cx - spread / 2, y: cy, id: 1 },
+        { x: cx + spread / 2, y: cy, id: 2 },
+      ]);
+    }
+    await touchEnd(client);
+
+    const end = await page.evaluate(() => ({
       array: window.__gmTest.state().arrayCenter!,
       zoom: window.__gmTest.mapZoom(),
     }));
 
-    expect(Math.abs(after.zoom - before.zoom)).toBeGreaterThan(0.05);
-    expect(distance(after.array, before.array)).toBeLessThan(1e-9);
+    expect(
+      distance(end.array, afterOneFinger),
+      'array kept moving after the second finger landed'
+    ).toBeLessThan(1e-9);
+    expect(
+      Math.abs(end.zoom - start.zoom),
+      'pinch did not reach the map'
+    ).toBeGreaterThan(0.05);
   });
 
-  test('dragging the compass handle changes azimuth', async ({ page }) => {
+  test('compass tracks the finger and sets azimuth from its bearing', async ({ page }) => {
     await openDesignStep(page);
     await waitForArray(page, 15_000);
     await bringMapIntoView(page);
@@ -296,39 +346,216 @@ test.describe('design step gestures', () => {
       timeout: 10_000,
     });
 
-    const client = await page.context().newCDPSession(page);
-    let delta = 0;
+    // Zoom in so the grip's radius on screen is large enough for the angular
+    // assertion to be meaningful: at the default zoom the handle is ~40px from
+    // the array centre, where 2 degrees is barely one pixel of touch precision.
+    await page.evaluate(() => window.__gmTest.setZoom(18.8));
+    await waitForStableHandle(page);
 
-    for (let attempt = 0; attempt < 4 && delta <= 5; attempt++) {
-      const grab = await findHandleGrab(page);
-      if (!grab) {
-        await page.waitForTimeout(300);
-        continue;
+    const client = await page.context().newCDPSession(page);
+
+    /**
+     * Drag the grip around the array to a target bearing, keeping the finger on
+     * the circle the handle actually rides so "is the icon under the finger?"
+     * is a fair question.
+     */
+    async function swingTo(targetBearing: number) {
+      const geom = await page.evaluate((target) => {
+        const t = window.__gmTest;
+        const r = t.canvasRect();
+        const centre = t.state().arrayCenter!;
+        const handle = t.handleLngLat()!;
+        const c = t.project(centre);
+        const h = t.project(handle);
+        const radius = Math.hypot(h[0] - c[0], h[1] - c[1]);
+        // Screen y grows downward, so bearing 180 (south) is +y.
+        const rad = (target * Math.PI) / 180;
+        const to: [number, number] = [
+          c[0] + radius * Math.sin(rad),
+          c[1] - radius * Math.cos(rad),
+        ];
+        return {
+          from: [r.left + h[0], r.top + h[1]] as Pt,
+          to: [r.left + to[0], r.top + to[1]] as Pt,
+          // Both ends must be inside the canvas or the touch never reaches the
+          // grip and Mapbox pans the map instead.
+          onScreen:
+            h[0] > 0 && h[0] < r.width && h[1] > 0 && h[1] < r.height &&
+            to[0] > 0 && to[0] < r.width && to[1] > 0 && to[1] < r.height,
+          radius,
+          // Canvas-space target, so the bearing check never depends on the
+          // canvas rect and cannot be skewed by late layout shifts.
+          toCanvas: to as Pt,
+        };
+      }, targetBearing);
+
+      expect(
+        geom.onScreen,
+        `grip or target off-screen (radius ${Math.round(geom.radius)}px)`
+      ).toBe(true);
+
+      await touchStart(client, [{ x: geom.from[0], y: geom.from[1], id: 1 }]);
+      const steps = 12;
+      for (let i = 1; i <= steps; i++) {
+        const t = i / steps;
+        await touchMove(client, [
+          {
+            x: geom.from[0] + (geom.to[0] - geom.from[0]) * t,
+            y: geom.from[1] + (geom.to[1] - geom.from[1]) * t,
+            id: 1,
+          },
+        ]);
       }
-      const before = await page.evaluate(() => window.__gmTest.state().azimuth);
-      // Swing the grip well to the east.
-      await touchDrag(client, grab, [grab[0] + 140, grab[1] - 40]);
-      delta = await page.evaluate(
-        (a) => Math.abs(window.__gmTest.state().azimuth - a),
-        before
-      );
+      await touchEnd(client);
+      // The last pointermove can still be queued when touchEnd returns; read
+      // azimuth only once it has stopped changing.
+      let stable = 0;
+      let last = Number.NaN;
+      for (let i = 0; i < 25 && stable < 3; i++) {
+        const az = await page.evaluate(() => window.__gmTest.state().azimuth);
+        stable = az === last ? stable + 1 : 0;
+        last = az;
+        await page.waitForTimeout(80);
+      }
+      return geom;
     }
 
-    expect(delta, 'azimuth did not change when the compass was dragged').toBeGreaterThan(5);
+    // First swing: south to roughly due east.
+    await swingTo(90);
+    await expect
+      .poll(async () => page.evaluate(() => window.__gmTest.state().azimuth))
+      .toBeGreaterThan(5);
+    await waitForStableHandle(page);
+
+    // Re-grab at the new position and swing again. This is where a fixed
+    // screen-space icon offset shows up: the grip drifts off the finger once
+    // the azimuth leaves 180.
+    const swing = await swingTo(135);
+    await waitForStableHandle(page);
+
+    const result = await page.evaluate((f) => {
+      const t = window.__gmTest;
+      const handle = t.handleLngLat()!;
+      const hp = t.project(handle);
+      // Drift compares the rendered icon against the point we dispatched.
+      //
+      // The bearing check uses the pointer position the handler ACTUALLY saw,
+      // not the one we aimed at: CDP dispatch coordinates and the page's own
+      // getBoundingClientRect differ by a fixed ~6px in this harness, which at
+      // the grip's radius is ~2.5 degrees — larger than the tolerance, and
+      // nothing to do with the app's maths. This asserts the property that
+      // matters: azimuth equals the bearing to wherever the finger really was.
+      const observed = t.lastPointer();
+      return {
+        drift: Math.hypot(hp[0] - f[0], hp[1] - f[1]),
+        azimuth: t.state().azimuth,
+        pointerBearing: observed ? t.bearingFromCenter(observed)! : Number.NaN,
+      };
+    }, swing.toCanvas);
+    expect(result.drift, 'compass drifted away from the finger').toBeLessThan(8);
+
+    const norm = (a: number) => ((a % 360) + 360) % 360;
+    const delta = Math.abs(norm(result.azimuth) - norm(result.pointerBearing));
+    expect(Math.min(delta, 360 - delta), 'azimuth does not match pointer bearing').toBeLessThan(2);
   });
 
-  test('captured map screenshot is a non-blank PNG', async ({ page }) => {
+  test('the real Continue button stores a screenshot containing the design', async ({
+    page,
+  }) => {
     await openDesignStep(page);
     await waitForArray(page, 15_000);
-    // Let tiles finish so the buffer holds imagery, not just the array.
+    await bringMapIntoView(page);
+    // Let satellite tiles finish so the buffer holds imagery, not just layers.
     await page.waitForTimeout(2500);
 
-    const result = await page.evaluate(() => window.__gmTest.capture());
+    // Go through the button a customer actually taps, not the dev capture hook.
+    const cta = page.getByTestId('mobile-continue');
+    await expect(cta).toBeEnabled();
+    await cta.click();
 
-    expect(result.reason ?? 'ok').not.toBe('blank');
-    expect(result.dataUrl).toBeTruthy();
-    expect(result.dataUrl!.startsWith('data:image/png;base64,')).toBe(true);
-    // A blank 390x844 PNG compresses to a few hundred bytes; imagery does not.
-    expect(result.dataUrl!.length).toBeGreaterThan(50_000);
+    await expect
+      .poll(async () => page.evaluate(() => window.__gmTest.state().currentStepIndex), {
+        timeout: 15_000,
+      })
+      .toBe(4);
+
+    const shot = await page.evaluate(() => window.__gmTest.state().mapScreenshot);
+    expect(shot, 'Continue did not store a screenshot').toBeTruthy();
+    expect(shot!.startsWith('data:image/png;base64,')).toBe(true);
+
+    const counts = await countDesignPixels(page, shot!);
+
+    // Satellite imagery of open Texas farmland does not contain saturated
+    // royal blue or this exact amber; these can only come from our own layers.
+    expect(counts.arrayFill, 'no array-fill pixels in the screenshot').toBeGreaterThan(2000);
+    expect(counts.trench, 'no trench-line pixels in the screenshot').toBeGreaterThan(150);
+    expect(counts.total).toBeGreaterThan(100_000);
+
+    // Control: same scene with the design cleared. If imagery alone could hit
+    // those thresholds, this would too.
+    // Step back to the meter step first: on the design step, Step2Form's sizing
+    // effect immediately recomputes the panel count from the bill and re-places
+    // the array, which would quietly defeat the control.
+    await page.evaluate(() => window.__gmTest.state().setCurrentStepIndex(2));
+    await page.waitForTimeout(300);
+    // Clear the meter too: its marker is the same amber as the trench line, so
+    // leaving it would let the control score trench pixels for the wrong reason.
+    await page.evaluate(() => {
+      window.__gmTest.state().setArrayCenter(null);
+      window.__gmTest.state().setElectricalMeterPosition(null);
+    });
+    await page.waitForTimeout(1500);
+    const blank = await page.evaluate(() => window.__gmTest.capture());
+    const control = await countDesignPixels(page, blank.dataUrl!);
+
+    expect(control.arrayFill, 'array pixels found with no array present').toBeLessThan(
+      counts.arrayFill / 10
+    );
+    expect(control.trench, 'trench pixels found with no trench present').toBeLessThan(
+      counts.trench / 10
+    );
   });
 });
+
+/**
+ * Decode a PNG data URL and count pixels belonging to the design layers.
+ *
+ * Done in the page because a canvas is already available there; adding an image
+ * decoding dependency to the repo for one assertion is not worth it.
+ */
+async function countDesignPixels(page: Page, dataUrl: string) {
+  return page.evaluate(async (url) => {
+    const img = new Image();
+    await new Promise<void>((resolve, reject) => {
+      img.onload = () => resolve();
+      img.onerror = () => reject(new Error('screenshot failed to decode'));
+      img.src = url;
+    });
+
+    const canvas = document.createElement('canvas');
+    canvas.width = img.naturalWidth;
+    canvas.height = img.naturalHeight;
+    const ctx = canvas.getContext('2d')!;
+    ctx.drawImage(img, 0, 0);
+    const { data } = ctx.getImageData(0, 0, canvas.width, canvas.height);
+
+    let arrayFill = 0;
+    let trench = 0;
+    const total = data.length / 4;
+
+    for (let i = 0; i < data.length; i += 4) {
+      const r = data[i];
+      const g = data[i + 1];
+      const b = data[i + 2];
+
+      // Array fill is #1d4ed8 at 35% over imagery, plus a #bfdbfe outline: both
+      // leave blue clearly dominant, which farmland never is.
+      if (b > 90 && b - r > 45 && b - g > 30) arrayFill++;
+
+      // Trench line is #f59e0b, opaque: strong red, mid green, almost no blue.
+      if (r > 190 && g > 110 && g < 200 && b < 90 && r - b > 120) trench++;
+    }
+
+    return { arrayFill, trench, total };
+  }, dataUrl);
+}

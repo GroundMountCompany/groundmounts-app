@@ -322,13 +322,14 @@ function Step2Form({
         </div>
       )}
 
-      {azimuth !== 180 && (
-        <p className="mb-4 text-sm text-neutral-700">
-          South makes the most power in Texas. Facing this way you get about{' '}
-          <span className="font-semibold">{southPct}%</span> of that. Turn it back if
-          your land allows.
-        </p>
-      )}
+      {/* Always rendered at a fixed height. Showing this only when the array is
+          turned changed the page height mid-drag, which scrolled the map out
+          from under the user's finger. */}
+      <p className="mb-4 min-h-[3.25rem] text-sm text-neutral-700">
+        {azimuth === 180
+          ? 'Facing south. That is the most power your panels can make in Texas.'
+          : `South makes the most power in Texas. Facing this way you get about ${southPct}% of that. Turn it back if your land allows.`}
+      </p>
 
       {/* Trenching distance display - below the map */}
       {showForm && additionalCost > 0 && (

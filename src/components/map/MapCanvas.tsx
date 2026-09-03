@@ -7,6 +7,7 @@ import 'mapbox-gl/dist/mapbox-gl.css';
 import { useQuoteStore } from '@/store/quoteStore';
 import { mapRef, mapContainerRef } from '@/store/mapRefs';
 import { installLayers, renderDesign, LAYER, installCompassIcon } from './layers';
+import { rotateHandlePosition } from '@/lib/geo/array';
 import { getMapSlot, subscribeMapSlot } from './mapStage';
 import bearing from '@turf/bearing';
 import { point } from '@turf/helpers';
@@ -150,6 +151,9 @@ export default function MapStage({ mode }: { mode: MapMode }) {
       e.preventDefault();
 
       const ll = map.unproject(pointFor(e));
+      if (process.env.NODE_ENV !== 'production') {
+        (window as unknown as Record<string, unknown>).__gmLastPointer = [ll.lng, ll.lat];
+      }
       const store = useQuoteStore.getState();
 
       if (g.kind === 'array') {
@@ -209,6 +213,32 @@ export default function MapStage({ mode }: { mode: MapMode }) {
         },
         renderedHulls: () => map.queryRenderedFeatures({ layers: [LAYER.hullFill] }).length,
         renderedHitPads: () => map.queryRenderedFeatures({ layers: [LAYER.hitPad] }).length,
+        /** Where the compass grip currently sits, in lng/lat. */
+        handleLngLat: (): LngLat | null => {
+          const st = useQuoteStore.getState();
+          if (!st.arrayCenter || st.totalPanels <= 0) return null;
+          return rotateHandlePosition({
+            center: st.arrayCenter,
+            azimuth: st.azimuth,
+            panelCount: st.totalPanels,
+            tier: st.panelTier,
+          });
+        },
+        /** Bearing from the array centre to an arbitrary point. */
+        bearingFromCenter: (ll: LngLat): number | null => {
+          const st = useQuoteStore.getState();
+          if (!st.arrayCenter) return null;
+          return bearing(point(st.arrayCenter), point(ll));
+        },
+        setZoom: (z: number) => map.setZoom(z),
+        isMoving: () => map.isMoving() || map.isZooming() || map.isEasing(),
+        /** The pointer position the drag handler last acted on, in lng/lat. */
+        lastPointer: (): LngLat | null =>
+          ((window as unknown as Record<string, unknown>).__gmLastPointer as LngLat) ?? null,
+        unproject: (pt: [number, number]): LngLat => {
+          const ll = map.unproject(pt);
+          return [ll.lng, ll.lat];
+        },
         renderedHandles: () => map.queryRenderedFeatures({ layers: [LAYER.handle] }).length,
         capture: () => captureMap(map),
         styleLoaded: () => map.isStyleLoaded(),

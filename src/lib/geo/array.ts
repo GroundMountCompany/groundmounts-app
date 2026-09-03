@@ -205,8 +205,15 @@ export function buildArrayHitArea(
   );
 }
 
-/** How far the rotate grip sits beyond the array's south edge. */
-export const ROTATE_HANDLE_OFFSET_FT = 18;
+/**
+ * How far the rotate grip sits beyond the array's south edge, on the ground.
+ *
+ * This must be large enough that a 44px compass clears the table on screen. A
+ * screen-space icon offset cannot do that job: the offset stays straight down
+ * while the anchor swings around the array, so the icon drifts away from the
+ * finger as soon as the azimuth leaves 180 degrees.
+ */
+export const ROTATE_HANDLE_OFFSET_FT = 60;
 
 /**
  * The rotate grip, held off the array's south edge.

@@ -12,9 +12,7 @@ import {
   LAYER,
   installCompassIcon,
   currentHandlePosition,
-  handleOffsetFt,
 } from './layers';
-import { footprintFt } from '@/lib/geo/array';
 
 import { getMapSlot, subscribeMapSlot } from './mapStage';
 import bearing from '@turf/bearing';
@@ -244,22 +242,31 @@ export default function MapStage({ mode }: { mode: MapMode }) {
           return bearing(point(st.arrayCenter), point(ll));
         },
         setZoom: (z: number) => map.setZoom(z),
-        /** Geometry needed to check the grip keeps a constant screen radius. */
-        handleGeom: () => {
-          const st = useQuoteStore.getState();
-          if (!st.arrayCenter || st.totalPanels <= 0) return null;
-          const spec = {
-            center: st.arrayCenter,
-            azimuth: st.azimuth,
-            panelCount: st.totalPanels,
-            tier: st.panelTier,
-          };
-          const c = map.project(spec.center);
-          const h = map.project(currentHandlePosition(map, spec));
+        /** Jump to a zoom with the array centred, so it stays in the viewport. */
+        viewArrayAt: (z: number) => {
+          const c = useQuoteStore.getState().arrayCenter;
+          map.jumpTo(c ? { center: c, zoom: z } : { zoom: z });
+        },
+        /**
+         * The grip and array as Mapbox actually has them rendered, in screen
+         * pixels. Read back from the map rather than recomputed, so a test
+         * using this fails if the geometry stops being pushed to the source.
+         */
+        renderedGeom: () => {
+          const handleFeature = map.queryRenderedFeatures({ layers: [LAYER.handle] })[0];
+          const hullFeature = map.queryRenderedFeatures({ layers: [LAYER.hullFill] })[0];
+          if (!handleFeature || !hullFeature) return null;
+          if (handleFeature.geometry.type !== 'Point') return null;
+          if (hullFeature.geometry.type !== 'Polygon') return null;
+
+          const h = map.project(handleFeature.geometry.coordinates as [number, number]);
+          const ring = hullFeature.geometry.coordinates[0] as Array<[number, number]>;
           return {
-            centreToHandlePx: Math.hypot(h.x - c.x, h.y - c.y),
-            depthFt: footprintFt(spec.panelCount, spec.tier).depthFt,
-            offsetFt: handleOffsetFt(map),
+            handlePx: [h.x, h.y] as [number, number],
+            hullPx: ring.map((c) => {
+              const p = map.project(c);
+              return [p.x, p.y] as [number, number];
+            }),
           };
         },
         isMoving: () => map.isMoving() || map.isZooming() || map.isEasing(),

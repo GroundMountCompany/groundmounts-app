@@ -1,4 +1,5 @@
 import { test, expect, type Page, type CDPSession } from '@playwright/test';
+import { minTimeOk } from '../src/lib/guard';
 
 /**
  * Real gesture proof, on a real WebGL map.
@@ -49,12 +50,12 @@ interface GmTest {
   bearingFromCenter: (ll: Pt) => number | null;
   unproject: (pt: Pt) => Pt;
   setZoom: (z: number) => void;
+  viewArrayAt: (z: number) => void;
   isMoving: () => boolean;
   lastPointer: () => Pt | null;
-  handleGeom: () => {
-    centreToHandlePx: number;
-    depthFt: number;
-    offsetFt: number;
+  renderedGeom: () => {
+    handlePx: Pt;
+    hullPx: Pt[];
   } | null;
   styleLoaded: () => boolean;
   capture: () => Promise<{ dataUrl: string | null; reason?: string }>;
@@ -87,6 +88,9 @@ async function openDesignStep(page: Page) {
             panelTier: 'standard',
             azimuth: 180,
             leadId: 'interaction-test-lead',
+            // Ten minutes ago, so a ttc_ms measured from the funnel start is
+            // impossible to confuse with one measured from the reload.
+            startedAt: Date.now() - 600_000,
           },
           version: 1,
         })
@@ -232,6 +236,22 @@ async function waitForStableHandle(page: Page) {
 }
 
 const distance = (a: Pt, b: Pt) => Math.hypot(a[0] - b[0], a[1] - b[1]);
+
+/** Shortest distance from a point to a polygon's edges, in screen pixels. */
+function distanceToPolygonEdge(point: Pt, ring: Pt[]): number {
+  let best = Number.POSITIVE_INFINITY;
+  for (let i = 0; i < ring.length - 1; i++) {
+    const [ax, ay] = ring[i];
+    const [bx, by] = ring[i + 1];
+    const dx = bx - ax;
+    const dy = by - ay;
+    const lenSq = dx * dx + dy * dy;
+    const t =
+      lenSq === 0 ? 0 : Math.max(0, Math.min(1, ((point[0] - ax) * dx + (point[1] - ay) * dy) / lenSq));
+    best = Math.min(best, Math.hypot(point[0] - (ax + t * dx), point[1] - (ay + t * dy)));
+  }
+  return best;
+}
 
 test.describe('design step gestures', () => {
   test('array appears within 3s on a rural parcel', async ({ page }) => {
@@ -476,10 +496,18 @@ test.describe('design step gestures', () => {
   }) => {
     // Mock the two endpoints so the flow completes without touching Airtable or
     // Resend, and so the outgoing lead payload can be inspected.
-    let leadBody: { mapScreenshot?: string } | null = null;
-    await page.route('**/api/sendEmail', (route) =>
-      route.fulfill({ status: 200, contentType: 'application/json', body: '{"ok":true}' })
-    );
+    let leadBody: { mapScreenshot?: string; ttc_ms?: number } | null = null;
+    let emailBody: { ttc_ms?: number } | null = null;
+
+    // Intercepted, not blindly succeeded: the request itself is the evidence.
+    await page.route('**/api/sendEmail', (route) => {
+      emailBody = JSON.parse(route.request().postData() ?? '{}');
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: '{"ok":true}',
+      });
+    });
     await page.route('**/api/leads', (route) => {
       leadBody = JSON.parse(route.request().postData() ?? '{}');
       return route.fulfill({
@@ -535,6 +563,19 @@ test.describe('design step gestures', () => {
     expect(shot, 'lead payload has no screenshot after reload').toBeTruthy();
     expect(shot!.startsWith('data:image/jpeg;base64,')).toBe(true);
     expect(shot!.length).toBeGreaterThan(1000);
+
+    // The funnel timer must survive the reload. If startedAt were not persisted,
+    // ttc_ms would measure the seconds since the refresh and a prompt submit
+    // would be rejected by the min-time guard on /api/sendEmail.
+    expect(emailBody, '/api/sendEmail was never called').not.toBeNull();
+    expect(
+      emailBody!.ttc_ms,
+      'ttc_ms restarted at the reload instead of the funnel start'
+    ).toBeGreaterThan(300_000);
+    expect(leadBody!.ttc_ms).toBeGreaterThan(300_000);
+
+    // And it must still pass the guard the server actually applies.
+    expect(minTimeOk(emailBody!.ttc_ms)).toBe(true);
   });
 
   test('grip keeps a usable screen distance from the array at any zoom', async ({
@@ -547,16 +588,21 @@ test.describe('design step gestures', () => {
     // A fixed ground offset cannot work at both ends: 60 ft is ~5px at zoom 15
     // and ~290px at zoom 21. The offset is derived from a constant screen
     // radius instead, so the gap must hold across a 16x scale change.
+    //
+    // Measured from what Mapbox actually has rendered, not from a recomputed
+    // expected position — otherwise this would still pass with the zoomend
+    // wiring removed, because the recomputation would silently agree with
+    // itself while the map showed something stale.
     for (const zoom of [16, 20]) {
-      await page.evaluate((z) => window.__gmTest.setZoom(z), zoom);
+      // Centre on the array as well: at zoom 20 it otherwise sits outside the
+      // viewport and there is nothing rendered to read back.
+      await page.evaluate((z) => window.__gmTest.viewArrayAt(z), zoom);
       await waitForStableHandle(page);
 
-      const gapPx = await page.evaluate(() => {
-        const g = window.__gmTest.handleGeom()!;
-        // Centre, edge and grip are colinear, so the edge-to-grip gap is the
-        // offset's share of the centre-to-grip distance.
-        return (g.centreToHandlePx * g.offsetFt) / (g.depthFt / 2 + g.offsetFt);
-      });
+      const geom = await page.evaluate(() => window.__gmTest.renderedGeom());
+      expect(geom, `no rendered array or grip at zoom ${zoom}`).not.toBeNull();
+
+      const gapPx = distanceToPolygonEdge(geom!.handlePx, geom!.hullPx);
 
       expect(gapPx, `grip gap at zoom ${zoom}`).toBeGreaterThan(48);
       expect(gapPx, `grip gap at zoom ${zoom}`).toBeLessThan(96);

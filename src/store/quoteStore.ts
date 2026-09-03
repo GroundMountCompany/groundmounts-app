@@ -226,6 +226,10 @@ export const useQuoteStore = create<QuoteStore>()(
         paymentMethod: state.paymentMethod,
         quoteId: state.quoteId,
         leadId: state.leadId,
+        // Persisted so a reload does not restart the funnel timer. Without it
+        // ttc_ms measures time since the refresh, and a returning user who
+        // submits promptly trips the min-time guard on /api/sendEmail.
+        startedAt: state.startedAt,
         electricalMeter: state.electricalMeter,
         additionalCost: state.additionalCost,
         panelPosition: state.panelPosition,

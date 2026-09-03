@@ -236,7 +236,9 @@ export const useQuoteStore = create<QuoteStore>()(
         trenchFeet: state.trenchFeet,
         slopePercent: state.slopePercent,
         slopeTier: state.slopeTier,
-        // mapScreenshot is a multi-MB data URL — never persisted.
+        // Downscaled JPEG, so it is small enough to persist. Without this a
+        // refresh on the contact form dropped the screenshot silently.
+        mapScreenshot: state.mapScreenshot,
       }),
       onRehydrateStorage: () => (state, error) => {
         if (error) console.warn('[QUOTE] rehydrate failed', error);

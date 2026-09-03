@@ -206,12 +206,11 @@ export function buildArrayHitArea(
 }
 
 /**
- * How far the rotate grip sits beyond the array's south edge, on the ground.
+ * Fallback grip offset, in feet, used when no map is available to derive one.
  *
- * This must be large enough that a 44px compass clears the table on screen. A
- * screen-space icon offset cannot do that job: the offset stays straight down
- * while the anchor swings around the array, so the icon drifts away from the
- * finger as soon as the azimuth leaves 180 degrees.
+ * A fixed ground distance is wrong at the extremes — 60 ft is about 5px at zoom
+ * 15 and 290px at zoom 21 — so callers with a map should pass an offset derived
+ * from a constant screen radius instead. See handleOffsetFt() in the map layer.
  */
 export const ROTATE_HANDLE_OFFSET_FT = 60;
 
@@ -224,10 +223,11 @@ export const ROTATE_HANDLE_OFFSET_FT = 60;
  */
 export function rotateHandlePosition(
   spec: ArraySpec,
-  racking: RackingConfig = RACKING
+  racking: RackingConfig = RACKING,
+  offsetFt: number = ROTATE_HANDLE_OFFSET_FT
 ): LngLat {
   const layout = footprintFt(spec.panelCount, spec.tier, racking);
-  const south = -(feetToMeters(layout.depthFt) / 2 + feetToMeters(ROTATE_HANDLE_OFFSET_FT));
+  const south = -(feetToMeters(layout.depthFt) / 2 + feetToMeters(offsetFt));
   const [re, rn] = rotateEastNorth(0, south, spec.azimuth - 180);
   return offsetMeters(spec.center, re, rn);
 }

@@ -51,6 +51,11 @@ interface GmTest {
   setZoom: (z: number) => void;
   isMoving: () => boolean;
   lastPointer: () => Pt | null;
+  handleGeom: () => {
+    centreToHandlePx: number;
+    depthFt: number;
+    offsetFt: number;
+  } | null;
   styleLoaded: () => boolean;
   capture: () => Promise<{ dataUrl: string | null; reason?: string }>;
 }
@@ -65,6 +70,9 @@ declare global {
 async function openDesignStep(page: Page) {
   await page.addInitScript(
     ([rural, meter]) => {
+      // Seed once only: addInitScript runs on every navigation, and re-seeding
+      // on reload would wipe exactly the persisted state a reload test checks.
+      if (window.localStorage.getItem('gmq:v3')) return;
       window.localStorage.setItem(
         'gmq:v3',
         JSON.stringify({
@@ -423,8 +431,12 @@ test.describe('design step gestures', () => {
     // First swing: south to roughly due east.
     await swingTo(90);
     await expect
-      .poll(async () => page.evaluate(() => window.__gmTest.state().azimuth))
-      .toBeGreaterThan(5);
+      .poll(async () => {
+        const az = await page.evaluate(() => window.__gmTest.state().azimuth);
+        const n = ((az % 360) + 360) % 360;
+        return Math.min(Math.abs(n - 90), 360 - Math.abs(n - 90));
+      })
+      .toBeLessThan(10);
     await waitForStableHandle(page);
 
     // Re-grab at the new position and swing again. This is where a fixed
@@ -459,6 +471,98 @@ test.describe('design step gestures', () => {
     expect(Math.min(delta, 360 - delta), 'azimuth does not match pointer bearing').toBeLessThan(2);
   });
 
+  test('screenshot survives a reload on the contact form and reaches the lead', async ({
+    page,
+  }) => {
+    // Mock the two endpoints so the flow completes without touching Airtable or
+    // Resend, and so the outgoing lead payload can be inspected.
+    let leadBody: { mapScreenshot?: string } | null = null;
+    await page.route('**/api/sendEmail', (route) =>
+      route.fulfill({ status: 200, contentType: 'application/json', body: '{"ok":true}' })
+    );
+    await page.route('**/api/leads', (route) => {
+      leadBody = JSON.parse(route.request().postData() ?? '{}');
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: '{"ok":true,"airtableId":"recTest"}',
+      });
+    });
+
+    await openDesignStep(page);
+    await waitForArray(page, 15_000);
+    await bringMapIntoView(page);
+    await page.waitForTimeout(2500);
+
+    const cta = page.getByTestId('mobile-continue');
+    await expect(cta).toBeEnabled();
+    await cta.click();
+
+    await expect
+      .poll(async () => page.evaluate(() => window.__gmTest.state().currentStepIndex), {
+        timeout: 15_000,
+      })
+      .toBe(4);
+
+    const captured = await page.evaluate(() => window.__gmTest.state().mapScreenshot);
+    expect(captured).toBeTruthy();
+
+    // The regression: a full-size PNG could not go in localStorage, so a refresh
+    // on the contact form dropped the screenshot without saying anything.
+    await page.reload();
+    await page.waitForFunction(() => typeof window.__gmTest !== 'undefined', null, {
+      timeout: 20_000,
+    });
+
+    await expect
+      .poll(async () => page.evaluate(() => window.__gmTest.state().mapScreenshot?.length ?? 0), {
+        timeout: 15_000,
+      })
+      .toBeGreaterThan(1000);
+
+    // Step 3's intro animation runs before the form appears.
+    const nameField = page.locator('#name');
+    await expect(nameField).toBeVisible({ timeout: 20_000 });
+
+    await nameField.fill('Bert Ortiz');
+    await page.locator('#email').fill('bert@example.com');
+    await page.locator('#phone').fill('(469) 555-0100');
+    await page.getByRole('button', { name: /send|get|quote/i }).last().click();
+
+    await expect.poll(() => (leadBody ? 'sent' : 'pending'), { timeout: 20_000 }).toBe('sent');
+
+    const shot = leadBody!.mapScreenshot;
+    expect(shot, 'lead payload has no screenshot after reload').toBeTruthy();
+    expect(shot!.startsWith('data:image/jpeg;base64,')).toBe(true);
+    expect(shot!.length).toBeGreaterThan(1000);
+  });
+
+  test('grip keeps a usable screen distance from the array at any zoom', async ({
+    page,
+  }) => {
+    await openDesignStep(page);
+    await waitForArray(page, 15_000);
+    await bringMapIntoView(page);
+
+    // A fixed ground offset cannot work at both ends: 60 ft is ~5px at zoom 15
+    // and ~290px at zoom 21. The offset is derived from a constant screen
+    // radius instead, so the gap must hold across a 16x scale change.
+    for (const zoom of [16, 20]) {
+      await page.evaluate((z) => window.__gmTest.setZoom(z), zoom);
+      await waitForStableHandle(page);
+
+      const gapPx = await page.evaluate(() => {
+        const g = window.__gmTest.handleGeom()!;
+        // Centre, edge and grip are colinear, so the edge-to-grip gap is the
+        // offset's share of the centre-to-grip distance.
+        return (g.centreToHandlePx * g.offsetFt) / (g.depthFt / 2 + g.offsetFt);
+      });
+
+      expect(gapPx, `grip gap at zoom ${zoom}`).toBeGreaterThan(48);
+      expect(gapPx, `grip gap at zoom ${zoom}`).toBeLessThan(96);
+    }
+  });
+
   test('the real Continue button stores a screenshot containing the design', async ({
     page,
   }) => {
@@ -481,7 +585,8 @@ test.describe('design step gestures', () => {
 
     const shot = await page.evaluate(() => window.__gmTest.state().mapScreenshot);
     expect(shot, 'Continue did not store a screenshot').toBeTruthy();
-    expect(shot!.startsWith('data:image/png;base64,')).toBe(true);
+    // Stored as a downscaled JPEG so it fits in persisted state.
+    expect(shot!.startsWith('data:image/jpeg;base64,')).toBe(true);
 
     const counts = await countDesignPixels(page, shot!);
 
@@ -489,6 +594,10 @@ test.describe('design step gestures', () => {
     // royal blue or this exact amber; these can only come from our own layers.
     expect(counts.arrayFill, 'no array-fill pixels in the screenshot').toBeGreaterThan(2000);
     expect(counts.trench, 'no trench-line pixels in the screenshot').toBeGreaterThan(150);
+    expect(
+      counts.labelHalo,
+      'no trench distance label in the screenshot'
+    ).toBeGreaterThan(80);
     expect(counts.total).toBeGreaterThan(100_000);
 
     // Control: same scene with the design cleared. If imagery alone could hit
@@ -513,6 +622,9 @@ test.describe('design step gestures', () => {
     );
     expect(control.trench, 'trench pixels found with no trench present').toBeLessThan(
       counts.trench / 10
+    );
+    expect(control.labelHalo, 'label pixels found with no label present').toBeLessThan(
+      counts.labelHalo / 10
     );
   });
 });
@@ -541,12 +653,21 @@ async function countDesignPixels(page: Page, dataUrl: string) {
 
     let arrayFill = 0;
     let trench = 0;
+    let labelHalo = 0;
     const total = data.length / 4;
 
     for (let i = 0; i < data.length; i += 4) {
       const r = data[i];
       const g = data[i + 1];
       const b = data[i + 2];
+
+      // Trench distance label halo is #7e22ce, saturated violet: blue high,
+      // green low, and red clearly above green. Checked first because it is
+      // also blue-dominant and would otherwise be scored as array fill.
+      if (r > 85 && r < 175 && g < 80 && b > 155 && b - g > 95 && r - g > 40) {
+        labelHalo++;
+        continue;
+      }
 
       // Array fill is #1d4ed8 at 35% over imagery, plus a #bfdbfe outline: both
       // leave blue clearly dominant, which farmland never is.
@@ -556,6 +677,6 @@ async function countDesignPixels(page: Page, dataUrl: string) {
       if (r > 190 && g > 110 && g < 200 && b < 90 && r - b > 120) trench++;
     }
 
-    return { arrayFill, trench, total };
+    return { arrayFill, trench, labelHalo, total };
   }, dataUrl);
 }

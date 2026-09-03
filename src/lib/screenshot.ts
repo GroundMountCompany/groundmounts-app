@@ -32,12 +32,22 @@ export interface CaptureResult {
   reason?: 'blank' | 'error' | 'no-canvas';
 }
 
+/** Longest edge of the stored screenshot, in CSS pixels. */
+export const MAX_SCREENSHOT_EDGE_PX = 1280;
+/** JPEG quality for the stored screenshot. */
+export const SCREENSHOT_JPEG_QUALITY = 0.85;
+
 /**
- * Capture the map as a PNG data URL.
+ * Capture the map as a downscaled JPEG data URL.
  *
  * Reads the WebGL canvas directly, which only works because the array, trench
  * and their labels are real Mapbox layers rather than DOM overlays — that is
  * what let html2canvas go. Requires `preserveDrawingBuffer: true` on the map.
+ *
+ * The result is downscaled and JPEG-encoded so it is small enough to keep in
+ * persisted state: a full-resolution PNG is several megabytes, which cannot go
+ * in localStorage, so a refresh on the contact form used to lose the screenshot
+ * silently.
  *
  * Never throws: a lead without a screenshot is worth far more than a failed
  * submit.
@@ -52,20 +62,26 @@ export async function captureMap(map: mapboxgl.Map | null): Promise<CaptureResul
       return { dataUrl: null, reason: 'no-canvas' };
     }
 
-    const probe = document.createElement('canvas');
-    probe.width = canvas.width;
-    probe.height = canvas.height;
-    const ctx = probe.getContext('2d');
-    if (ctx) {
-      ctx.drawImage(canvas, 0, 0);
-      const { data } = ctx.getImageData(0, 0, probe.width, probe.height);
-      if (!looksRendered(data)) {
-        console.warn('[SCREENSHOT] canvas came back blank; submitting without it');
-        return { dataUrl: null, reason: 'blank' };
-      }
+    const scale = Math.min(1, MAX_SCREENSHOT_EDGE_PX / Math.max(canvas.width, canvas.height));
+    const out = document.createElement('canvas');
+    out.width = Math.max(1, Math.round(canvas.width * scale));
+    out.height = Math.max(1, Math.round(canvas.height * scale));
+
+    const ctx = out.getContext('2d');
+    if (!ctx) return { dataUrl: null, reason: 'error' };
+
+    // JPEG has no alpha, so fill first or transparent areas turn black.
+    ctx.fillStyle = '#000000';
+    ctx.fillRect(0, 0, out.width, out.height);
+    ctx.drawImage(canvas, 0, 0, out.width, out.height);
+
+    const { data } = ctx.getImageData(0, 0, out.width, out.height);
+    if (!looksRendered(data)) {
+      console.warn('[SCREENSHOT] canvas came back blank; submitting without it');
+      return { dataUrl: null, reason: 'blank' };
     }
 
-    return { dataUrl: canvas.toDataURL('image/png') };
+    return { dataUrl: out.toDataURL('image/jpeg', SCREENSHOT_JPEG_QUALITY) };
   } catch (error) {
     console.warn('[SCREENSHOT] capture failed', error);
     return { dataUrl: null, reason: 'error' };

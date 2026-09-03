@@ -4,6 +4,7 @@ import { getClientIp, rateLimitOk, isBotHoneypot, minTimeOk } from "@/lib/guard"
 import { getResendOrThrow } from "@/lib/resendSafe";
 import { put } from "@vercel/blob";
 import { escapeHtml, escapeOr, headerSafe } from "@/lib/escape";
+import { sniffImage } from "@/lib/imageSniff";
 
 /** Decoded screenshots above this are rejected rather than uploaded. */
 const MAX_SCREENSHOT_BYTES = 2 * 1024 * 1024;
@@ -13,9 +14,6 @@ const MAX_SCREENSHOT_BYTES = 2 * 1024 * 1024;
  * a buffer for it.
  */
 const MAX_SCREENSHOT_B64_CHARS = Math.ceil((MAX_SCREENSHOT_BYTES * 4) / 3) + 4;
-/** PNG signature: \x89 P N G \r \n \x1a \n */
-const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
-
 const NOTIFICATION_EMAIL = "bert@groundmounts.com";
 const AIRTABLE_BASE_ID = process.env.AIRTABLE_BASE_ID;
 // Airtable record deep links need the table *id* (tblXXXXXXXX), not its name.
@@ -106,9 +104,9 @@ export async function POST(req: NextRequest) {
 
     // Upload map screenshot to Vercel Blob if provided
     let mapScreenshotUrl: string | undefined;
-    if (lead.mapScreenshot && lead.mapScreenshot.startsWith('data:image/png;base64,')) {
+    if (lead.mapScreenshot && /^data:image\/(png|jpeg);base64,/.test(lead.mapScreenshot)) {
       try {
-        const base64Data = lead.mapScreenshot.replace(/^data:image\/png;base64,/, '');
+        const base64Data = lead.mapScreenshot.replace(/^data:image\/(png|jpeg);base64,/, '');
 
         // Reject on the encoded length first, before allocating the buffer.
         if (base64Data.length > MAX_SCREENSHOT_B64_CHARS) {
@@ -119,11 +117,11 @@ export async function POST(req: NextRequest) {
 
         const buffer = Buffer.from(base64Data, 'base64');
 
-        // The data: prefix is caller-controlled and proves nothing. Check the
-        // real PNG signature and cap the size before anything reaches Blob
-        // storage, so this endpoint cannot be used to host arbitrary files.
-        if (!buffer.subarray(0, PNG_MAGIC.length).equals(PNG_MAGIC)) {
-          throw new Error('screenshot is not a PNG');
+        // Cap the size and confirm the bytes really are an image before anything
+        // reaches Blob storage, so this endpoint cannot host arbitrary files.
+        const kind = sniffImage(buffer);
+        if (!kind) {
+          throw new Error('screenshot is neither PNG nor JPEG');
         }
         if (buffer.length > MAX_SCREENSHOT_BYTES) {
           throw new Error(
@@ -132,9 +130,9 @@ export async function POST(req: NextRequest) {
         }
 
         // Upload to Vercel Blob
-        const blob = await put(`map-screenshots/${lead.id}.png`, buffer, {
+        const blob = await put(`map-screenshots/${lead.id}.${kind.ext}`, buffer, {
           access: 'public',
-          contentType: 'image/png',
+          contentType: kind.contentType,
         });
         mapScreenshotUrl = blob.url;
         console.log("[MAP_SCREENSHOT_UPLOADED]", lead.id, "size:", Math.round(buffer.length / 1024), "KB");

@@ -6,10 +6,35 @@ import {
   rotateHandlePosition,
   type ArraySpec,
 } from '@/lib/geo/array';
-import { buildTrench } from '@/lib/geo/trench';
+import { buildTrench, distanceMeters } from '@/lib/geo/trench';
+import { metersToFeet } from '@/lib/geo/units';
+import { RACKING } from '@/config/pricing';
 import type { LngLat } from '@/lib/geo/units';
 
 export { rotateHandlePosition };
+
+/**
+ * Screen distance from the array edge to the centre of the rotate grip.
+ *
+ * Held constant in pixels so the grip is always a comfortable thumb's reach
+ * from the table and always clears it, at any zoom.
+ */
+export const HANDLE_SCREEN_RADIUS_PX = 64;
+
+/** HANDLE_SCREEN_RADIUS_PX expressed as a ground distance at the current view. */
+export function handleOffsetFt(map: mapboxgl.Map): number {
+  const c = map.getCenter();
+  const p = map.project(c);
+  const a = map.unproject([p.x, p.y]);
+  const b = map.unproject([p.x + HANDLE_SCREEN_RADIUS_PX, p.y]);
+  const meters = distanceMeters([a.lng, a.lat], [b.lng, b.lat]);
+  return metersToFeet(meters);
+}
+
+/** Where the grip currently sits, using the zoom-derived offset. */
+export function currentHandlePosition(map: mapboxgl.Map, spec: ArraySpec): LngLat {
+  return rotateHandlePosition(spec, RACKING, handleOffsetFt(map));
+}
 
 export const SRC = {
   panels: 'gm-array-panels',
@@ -106,8 +131,11 @@ export function installLayers(map: mapboxgl.Map) {
     },
     paint: {
       'text-color': '#ffffff',
-      'text-halo-color': '#78350f',
-      'text-halo-width': 2,
+      // Saturated violet. Deliberately a colour satellite imagery of farmland
+      // never produces, so the trench label can be counted in a captured
+      // screenshot the same way the array fill and trench line are.
+      'text-halo-color': TRENCH_LABEL_HALO,
+      'text-halo-width': 2.5,
     },
   });
 
@@ -157,6 +185,9 @@ export function installLayers(map: mapboxgl.Map) {
 }
 
 export const COMPASS_ICON = 'gm-compass';
+
+/** Halo behind the trench distance label. See the note on the layer's paint. */
+export const TRENCH_LABEL_HALO = '#7e22ce';
 
 /**
  * Draw the compass once and register it with the map.
@@ -245,7 +276,7 @@ export function renderDesign(map: mapboxgl.Map, { spec, meter }: RenderInput): R
     ensureSource(map, SRC.hit, buildArrayHitArea(spec) as Feature<Polygon>);
     ensureSource(map, SRC.panels, built.panels);
 
-    handleAt = rotateHandlePosition(spec);
+    handleAt = currentHandlePosition(map, spec);
     ensureSource(map, SRC.handle, {
       type: 'Feature',
       geometry: { type: 'Point', coordinates: handleAt },

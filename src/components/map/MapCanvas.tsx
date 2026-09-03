@@ -6,8 +6,16 @@ import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import { useQuoteStore } from '@/store/quoteStore';
 import { mapRef, mapContainerRef } from '@/store/mapRefs';
-import { installLayers, renderDesign, LAYER, installCompassIcon } from './layers';
-import { rotateHandlePosition } from '@/lib/geo/array';
+import {
+  installLayers,
+  renderDesign,
+  LAYER,
+  installCompassIcon,
+  currentHandlePosition,
+  handleOffsetFt,
+} from './layers';
+import { footprintFt } from '@/lib/geo/array';
+
 import { getMapSlot, subscribeMapSlot } from './mapStage';
 import bearing from '@turf/bearing';
 import { point } from '@turf/helpers';
@@ -197,6 +205,11 @@ export default function MapStage({ mode }: { mode: MapMode }) {
     };
     map.on('click', onClick);
 
+    // The grip's ground offset is derived from the current zoom, so it has to be
+    // rebuilt whenever the zoom changes or it drifts toward or into the array.
+    const onZoomEnd = () => syncFromStore();
+    map.on('zoomend', onZoomEnd);
+
     const unsubscribeStore = useQuoteStore.subscribe(syncFromStore);
 
     // Test hook. Interaction tests need the live map's camera and the rendered
@@ -217,7 +230,7 @@ export default function MapStage({ mode }: { mode: MapMode }) {
         handleLngLat: (): LngLat | null => {
           const st = useQuoteStore.getState();
           if (!st.arrayCenter || st.totalPanels <= 0) return null;
-          return rotateHandlePosition({
+          return currentHandlePosition(map, {
             center: st.arrayCenter,
             azimuth: st.azimuth,
             panelCount: st.totalPanels,
@@ -231,6 +244,24 @@ export default function MapStage({ mode }: { mode: MapMode }) {
           return bearing(point(st.arrayCenter), point(ll));
         },
         setZoom: (z: number) => map.setZoom(z),
+        /** Geometry needed to check the grip keeps a constant screen radius. */
+        handleGeom: () => {
+          const st = useQuoteStore.getState();
+          if (!st.arrayCenter || st.totalPanels <= 0) return null;
+          const spec = {
+            center: st.arrayCenter,
+            azimuth: st.azimuth,
+            panelCount: st.totalPanels,
+            tier: st.panelTier,
+          };
+          const c = map.project(spec.center);
+          const h = map.project(currentHandlePosition(map, spec));
+          return {
+            centreToHandlePx: Math.hypot(h.x - c.x, h.y - c.y),
+            depthFt: footprintFt(spec.panelCount, spec.tier).depthFt,
+            offsetFt: handleOffsetFt(map),
+          };
+        },
         isMoving: () => map.isMoving() || map.isZooming() || map.isEasing(),
         /** The pointer position the drag handler last acted on, in lng/lat. */
         lastPointer: (): LngLat | null =>
@@ -262,6 +293,7 @@ export default function MapStage({ mode }: { mode: MapMode }) {
       canvas.removeEventListener('pointerup', onPointerUp);
       canvas.removeEventListener('pointercancel', onPointerUp);
       map.off('click', onClick);
+      map.off('zoomend', onZoomEnd);
       // Only on funnel unmount — never between steps.
       map.remove();
       mapRef.current = null;

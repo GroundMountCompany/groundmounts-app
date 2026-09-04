@@ -6,6 +6,7 @@ import { autoPlaceArray } from './geo/place';
 import type { LngLat } from './geo/units';
 import { TRENCH } from '@/config/pricing';
 import { conduitFor } from './pricing';
+import { parseQuoteInputs, priceFromInputs } from './quoteInputs';
 
 const METER: LngLat = [-97.3208, 32.7555];
 
@@ -68,27 +69,45 @@ describe('lead payload carries the design the customer actually saw', () => {
     expect(payload.quote.trenchFeet).toBe(onMap);
   });
 
-  it('prices the trench from the same distance it reports', () => {
+  it('carries the trench distance the price will be computed from', () => {
     useQuoteStore.getState().setTrenchFeet(120);
     const payload = buildLeadPayload(useQuoteStore.getState(), contact, 1_060_000);
 
-    const trench = payload.quote.lineItems.find((i) => i.key === 'trench')!;
-    expect(payload.quote.trenchFeet).toBe(120);
+    // The payload names the design, not the money. Pricing it here is the same
+    // arithmetic the server will do when it receives this.
+    expect(payload.quote.inputs.trenchFeet).toBe(120);
+    const priced = priceFromInputs(parseQuoteInputs(payload.quote.inputs));
+    const trench = priced.quote.lineItems.find((i) => i.key === 'trench')!;
     expect(trench.detail).toContain('120 ft');
     // Base rate times the conduit multiplier the schedule picks for this system
     // size — both from pricing.ts, neither repeated here.
-    const multiplier = conduitFor(payload.quote.systemSizeKw, false).multiplier;
+    const multiplier = conduitFor(priced.systemSizeKw, false).multiplier;
     expect(trench.amount).toBe(Math.round(TRENCH.basePerFt * 120 * multiplier));
   });
 
-  it('carries a price range built from its own line items', () => {
+  it('sends no price of any kind', () => {
     useQuoteStore.getState().setTrenchFeet(113);
     const payload = buildLeadPayload(useQuoteStore.getState(), contact, 1_060_000);
 
-    const sum = payload.quote.lineItems.reduce((t, i) => t + i.amount, 0);
-    expect(payload.quote.estimate).toBe(sum);
-    expect(payload.quote.priceLow).toBeLessThan(payload.quote.estimate);
-    expect(payload.quote.priceHigh).toBeGreaterThan(payload.quote.estimate);
+    // A browser cannot be allowed to name the number the owner quotes from, so
+    // there must be nothing money-shaped in the payload at all.
+    const flat = JSON.stringify(payload.quote);
+    for (const key of [
+      'priceLow',
+      'priceHigh',
+      'estimate',
+      'lineItems',
+      'equipmentLow',
+      'trenchingLow',
+      'systemSizeKw',
+    ]) {
+      expect(flat, `payload still carries ${key}`).not.toContain(key);
+    }
+
+    // And the inputs it does carry price to something sensible.
+    const priced = priceFromInputs(parseQuoteInputs(payload.quote.inputs));
+    expect(priced.quote.low).toBeLessThan(priced.quote.estimate);
+    expect(priced.quote.high).toBeGreaterThan(priced.quote.estimate);
   });
 
   it('follows the trench as the array is dragged away', () => {
@@ -125,7 +144,7 @@ describe('lead payload carries the design the customer actually saw', () => {
     expect(payload.quote.slopePercent).toBe(6.4);
     expect(payload.quote.slopeTier).toBe('Rolling');
     expect(payload.quote.panelTier).toBe('standard');
-    expect(payload.quote.systemSizeKw).toBe(17.4);
+    expect(priceFromInputs(parseQuoteInputs(payload.quote.inputs)).systemSizeKw).toBe(17.4);
     expect(payload.quote.arrayCenter).toEqual([-97.32, 32.75]);
     expect(payload.quote.meter).toEqual(METER);
   });

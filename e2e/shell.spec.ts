@@ -2,6 +2,7 @@ import { test, expect, type Page } from '@playwright/test';
 import './gmTest';
 import { TX_FALLBACK_CURVE } from '../src/lib/production';
 import { PANELS } from '../src/config/pricing';
+import { parseQuoteInputs, priceFromInputs } from '../src/lib/quoteInputs';
 
 /**
  * The Phase 4 shell: a full-bleed map that the page never scrolls under, a
@@ -596,8 +597,8 @@ test('the email carries the same price the customer was shown', async ({ page })
     contactStepSeed('email-matches-screen')
   );
 
-  let emailBody: Record<string, number> | null = null;
-  let leadBody: { quote?: Record<string, number> } | null = null;
+  let emailBody: { inputs?: unknown } | null = null;
+  let leadBody: { quote?: { inputs?: unknown } } | null = null;
   await page.route('**/api/leads', (route) => {
     leadBody = JSON.parse(route.request().postData() ?? '{}');
     return route.fulfill({ status: 200, contentType: 'application/json', body: '{"ok":true}' });
@@ -619,19 +620,24 @@ test('the email carries the same price the customer was shown', async ({ page })
   await expect(page.getByTestId('success-screen')).toBeVisible({ timeout: 15_000 });
 
   const revealed = pricesIn(await page.getByTestId('price-revealed').innerText());
-  const sent = emailBody as Record<string, number> | null;
-  const filed = leadBody as { quote?: Record<string, number> } | null;
+  const sent = emailBody as { inputs?: unknown } | null;
+  const filed = leadBody as { quote?: { inputs?: unknown } } | null;
 
   expect(sent, 'no email was sent').not.toBeNull();
-  expect([sent!.priceLow, sent!.priceHigh]).toEqual(revealed);
-  expect([sent!.priceLow, sent!.priceHigh]).toEqual(beforeSubmit);
-  // And Airtable gets the same pair, from the same priceQuote call.
-  expect([filed!.quote!.priceLow, filed!.quote!.priceHigh]).toEqual(revealed);
+  expect(revealed).toEqual(beforeSubmit);
 
-  // The email is handed the breakdown, not the inputs to re-derive it from.
-  const items = sent!.lineItems as unknown as Array<{ amount: number }>;
-  expect(items.length).toBeGreaterThan(0);
-  expect(items.reduce((t, i) => t + i.amount, 0)).toBe(sent!.estimate);
+  // Neither request carries a price: both carry the design, and both routes
+  // price it themselves. So the check is that the inputs actually sent price to
+  // the range on screen — which is what the customer will receive.
+  for (const body of [JSON.stringify(sent), JSON.stringify(filed)]) {
+    for (const key of ['priceLow', 'priceHigh', 'estimate', 'lineItems']) {
+      expect(body, `a price was sent from the browser: ${key}`).not.toContain(key);
+    }
+  }
+
+  const priced = priceFromInputs(parseQuoteInputs(sent!.inputs));
+  expect([priced.quote.low, priced.quote.high]).toEqual(revealed);
+  expect(filed!.quote!.inputs).toEqual(sent!.inputs);
 });
 
 test('a failed email retries only the email, never re-filing the lead', async ({ page }) => {

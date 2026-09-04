@@ -5,6 +5,7 @@ import { getResendOrThrow } from "@/lib/resendSafe";
 import { put } from "@vercel/blob";
 import { escapeHtml, escapeOr, headerSafe } from "@/lib/escape";
 import { sniffImage } from "@/lib/imageSniff";
+import { parseQuoteInputs, priceFromInputs, InvalidQuoteInputs } from "@/lib/quoteInputs";
 
 /** Decoded screenshots above this are rejected rather than uploaded. */
 const MAX_SCREENSHOT_BYTES = 2 * 1024 * 1024;
@@ -15,8 +16,7 @@ const MAX_SCREENSHOT_BYTES = 2 * 1024 * 1024;
  */
 const MAX_SCREENSHOT_B64_CHARS = Math.ceil((MAX_SCREENSHOT_BYTES * 4) / 3) + 4;
 /** Midpoint of a low/high pair, for the single-value legacy columns. */
-function midpoint(low?: number, high?: number): number | undefined {
-  if (typeof low !== 'number' || typeof high !== 'number') return undefined;
+function midpoint(low: number, high: number): number {
   return Math.round((low + high) / 2);
 }
 
@@ -35,27 +35,15 @@ interface LeadPayload {
   name?: string;
   source?: string;
   quote?: {
+    /** What the price is computed from. Everything else here is context. */
+    inputs?: unknown;
     totalPanels?: number;
     /** Trench run in feet, straight from the map. */
     trenchFeet?: number;
     azimuth?: number;
-    panelTier?: string;
-    slopePercent?: number | null;
-    slopeTier?: string;
     percentage?: number;
     avgBill?: number;
     highBill?: number;
-    systemSizeKw?: number;
-    batteryUnits?: number;
-    needsClearing?: boolean;
-    priceLow?: number;
-    priceHigh?: number;
-    equipmentLow?: number;
-    equipmentHigh?: number;
-    trenchingLow?: number;
-    trenchingHigh?: number;
-    lineItemsJson?: string;
-    soilClass?: string | null;
   };
   ts: number;
   honeypot?: string;
@@ -156,6 +144,24 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // Price the design here, not on the customer's phone.
+    //
+    // The record the owner quotes from must be one this server computed. A
+    // browser can describe its design; it cannot name its own price, and a
+    // payload that tries is priced from its inputs like any other.
+    let priced;
+    let inputs;
+    try {
+      inputs = parseQuoteInputs(lead.quote?.inputs);
+      priced = priceFromInputs(inputs);
+    } catch (error) {
+      if (error instanceof InvalidQuoteInputs) {
+        console.log('[LEADS_BLOCKED] Invalid quote inputs:', error.message);
+        return NextResponse.json({ ok: false, error: 'invalid_inputs' }, { status: 400 });
+      }
+      throw error;
+    }
+
     // Parse address components
     const addressParts = lead.address ? parseAddress(lead.address) : {};
 
@@ -170,31 +176,31 @@ export async function POST(req: NextRequest) {
       City: addressParts.city,
       State: addressParts.state || lead.state,
       Zip: addressParts.zip,
-      Panels: lead.quote?.totalPanels,
-      'System Size kW': lead.quote?.systemSizeKw,
+      Panels: inputs.panelCount,
+      'System Size kW': priced.systemSizeKw,
       'Monthly Bill Avg': lead.quote?.avgBill,
       'Monthly Bill High': lead.quote?.highBill,
       'Offset Percentage': lead.quote?.percentage,
-      'Trenching Distance ft': lead.quote?.trenchFeet,
+      'Trenching Distance ft': inputs.trenchFeet,
       // Legacy columns, kept for the owner's existing views. Midpoints of the
       // same priced figures rather than a second calculation.
-      'Trenching Cost': midpoint(lead.quote?.trenchingLow, lead.quote?.trenchingHigh),
-      'Equipment Cost': midpoint(lead.quote?.equipmentLow, lead.quote?.equipmentHigh),
-      'Total Investment': midpoint(lead.quote?.priceLow, lead.quote?.priceHigh),
-      'Price Low': lead.quote?.priceLow,
-      'Price High': lead.quote?.priceHigh,
-      'Equipment Cost Low': lead.quote?.equipmentLow,
-      'Equipment Cost High': lead.quote?.equipmentHigh,
-      'Trenching Cost Low': lead.quote?.trenchingLow,
-      'Trenching Cost High': lead.quote?.trenchingHigh,
-      'Line Items JSON': lead.quote?.lineItemsJson,
-      'Panel Tier': lead.quote?.panelTier,
-      'Battery Units': lead.quote?.batteryUnits,
-      'Site Prep': lead.quote?.needsClearing,
-      'Slope %': lead.quote?.slopePercent ?? undefined,
-      'Slope Tier': lead.quote?.slopeTier,
-      'Soil Class': lead.quote?.soilClass ?? undefined,
-      Azimuth: lead.quote?.azimuth,
+      'Trenching Cost': midpoint(priced.trench.low, priced.trench.high),
+      'Equipment Cost': midpoint(priced.equipment.low, priced.equipment.high),
+      'Total Investment': midpoint(priced.quote.low, priced.quote.high),
+      'Price Low': priced.quote.low,
+      'Price High': priced.quote.high,
+      'Equipment Cost Low': priced.equipment.low,
+      'Equipment Cost High': priced.equipment.high,
+      'Trenching Cost Low': priced.trench.low,
+      'Trenching Cost High': priced.trench.high,
+      'Line Items JSON': JSON.stringify(priced.quote.lineItems),
+      'Panel Tier': inputs.tier,
+      'Battery Units': inputs.batteryUnits,
+      'Site Prep': inputs.needsClearing,
+      'Slope %': inputs.slopePercent ?? undefined,
+      'Slope Tier': priced.quote.slopeTier,
+      'Soil Class': inputs.soilClass ?? undefined,
+      Azimuth: inputs.azimuth,
       Source: lead.source || undefined,
       Status: 'New',
       'Map Screenshot': mapScreenshotUrl ? [{ url: mapScreenshotUrl }] : undefined,
@@ -219,13 +225,13 @@ export async function POST(req: NextRequest) {
       const stateDisplay = addressParts.state || lead.state || 'TX';
 
       // Everything below is attacker-controlled; escape before it enters HTML.
-      const kw = lead.quote?.systemSizeKw;
-      const panels = lead.quote?.totalPanels;
+      const kw = priced.systemSizeKw;
+      const panels = inputs.panelCount;
       const avgBill = lead.quote?.avgBill;
-      const trenchFt = lead.quote?.trenchFeet;
-      const equipment = midpoint(lead.quote?.equipmentLow, lead.quote?.equipmentHigh);
-      const trenchCost = midpoint(lead.quote?.trenchingLow, lead.quote?.trenchingHigh);
-      const total = midpoint(lead.quote?.priceLow, lead.quote?.priceHigh);
+      const trenchFt = inputs.trenchFeet;
+      const equipment = midpoint(priced.equipment.low, priced.equipment.high);
+      const trenchCost = midpoint(priced.trench.low, priced.trench.high);
+      const total = midpoint(priced.quote.low, priced.quote.high);
 
       await resend.emails.send({
         from: 'Ground Mounts <leads@groundmounts.com>',

@@ -2,6 +2,7 @@ import EmailTemplate from '@/components/common/EmailTemplate';
 import { NextRequest, NextResponse } from 'next/server';
 import { getResendOrThrow } from '@/lib/resendSafe';
 import { getClientIp, rateLimitOk, isBotHoneypot, minTimeOk } from '@/lib/guard';
+import { parseQuoteInputs, priceFromInputs, InvalidQuoteInputs } from '@/lib/quoteInputs';
 import type { ReactElement } from 'react';
 
 export async function POST(request: NextRequest) {
@@ -36,23 +37,27 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: false, error: 'too_fast' }, { status: 400 });
     }
 
-    const {
-      email,
-      address,
-      totalPanels,
-      systemSizeKw,
-      trenchFeet,
-      annualProductionKwh,
-      lineItems,
-      estimate,
-      priceLow,
-      priceHigh,
-    } = body;
+    const { email, address } = body;
 
-    // Everything the email shows was priced by priceQuote before it got here.
-    // This route derives nothing: it used to re-compute the system size from a
-    // hardcoded 435W and reverse-engineer a monthly bill from a hardcoded
-    // capacity factor and rate, which is how it drifted from the screen.
+    // The price is computed here, from the design the client described.
+    //
+    // Nothing about money is read from the request. A payload can claim a
+    // panel count and a trench length — those are the design — but the figures
+    // in the email come out of priceQuote on this server, so the quote a
+    // customer receives is one we actually calculated.
+    let priced;
+    let inputs;
+    try {
+      inputs = parseQuoteInputs(body?.inputs);
+      priced = priceFromInputs(inputs);
+    } catch (error) {
+      if (error instanceof InvalidQuoteInputs) {
+        console.log('[SEND_EMAIL_BLOCKED] Invalid quote inputs:', error.message);
+        return NextResponse.json({ ok: false, error: 'invalid_inputs' }, { status: 400 });
+      }
+      throw error;
+    }
+
     const formattedDate = new Date().toLocaleDateString('en-US', {
       day: '2-digit',
       month: 'short',
@@ -64,14 +69,14 @@ export async function POST(request: NextRequest) {
     const emailTemplate = EmailTemplate({
       client: email,
       address: address || 'Your Property',
-      totalPanels: totalPanels || 0,
-      systemSizeKw: systemSizeKw || 0,
-      trenchingDistance: trenchFeet || 0,
-      annualProductionKwh: annualProductionKwh || 0,
-      lineItems: Array.isArray(lineItems) ? lineItems : [],
-      estimate: estimate || 0,
-      priceLow: priceLow || 0,
-      priceHigh: priceHigh || 0,
+      totalPanels: inputs.panelCount,
+      systemSizeKw: priced.systemSizeKw,
+      trenchingDistance: inputs.trenchFeet,
+      annualProductionKwh: priced.annualProductionKwh,
+      lineItems: priced.quote.lineItems,
+      estimate: priced.quote.estimate,
+      priceLow: priced.quote.low,
+      priceHigh: priced.quote.high,
       date: formattedDate,
       calendlyUrl,
     }) as ReactElement;

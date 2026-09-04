@@ -99,22 +99,15 @@ export default function Step6Quote() {
         const emailRes = await fetch('/api/sendEmail', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          // The email is rendered from the same priced quote the screen shows.
-          // It used to be handed raw inputs and re-derive its own numbers with
-          // its own constants, which is how the two drifted apart.
+          // The design, not the price. The route prices these inputs itself
+          // with the same function this screen used, so the email cannot be
+          // talked into quoting a number nobody computed.
           body: JSON.stringify({
             leadId: payload.id,
             email,
             address: payload.address,
             name,
-            totalPanels: payload.quote.totalPanels,
-            systemSizeKw: payload.quote.systemSizeKw,
-            trenchFeet: payload.quote.trenchFeet,
-            annualProductionKwh: payload.quote.annualProductionKwh,
-            lineItems: payload.quote.lineItems,
-            estimate: payload.quote.estimate,
-            priceLow: payload.quote.priceLow,
-            priceHigh: payload.quote.priceHigh,
+            inputs: payload.quote.inputs,
             honeypot: company,
             ttc_ms: payload.ttc_ms,
           }),

@@ -1,11 +1,19 @@
 import { useQuoteStore } from '@/store/quoteStore';
 import { captureMap } from './screenshot';
 import { mapRef } from '@/store/mapRefs';
-import { PANELS } from '@/config/pricing';
-import { priceQuote, subtotals, spread } from './pricing';
-import { annualKwh } from './production';
+import type { QuoteInputs } from './quoteInputs';
 
 export interface LeadQuote {
+  /**
+   * Everything the price is computed from. The server prices these itself.
+   *
+   * No price of any kind is sent from the browser: whatever this page believes
+   * it costs is a display concern, and a payload that carried the money would
+   * be a payload anyone could edit.
+   */
+  inputs: QuoteInputs;
+
+  // --- Context, not money. The customer's own answers and where they are. ---
   totalPanels: number;
   /** Trench run in feet, straight from the map. The single source of truth. */
   trenchFeet: number;
@@ -17,26 +25,11 @@ export interface LeadQuote {
   percentage: number;
   avgBill: number;
   highBill: number;
-  systemSizeKw: number;
   coordinates: { latitude: number; longitude: number };
   arrayCenter: [number, number] | null;
   meter: [number, number] | null;
-
-  // --- Pricing (Phase 3) ---
   batteryUnits: number;
   needsClearing: boolean;
-  priceLow: number;
-  priceHigh: number;
-  equipmentLow: number;
-  equipmentHigh: number;
-  trenchingLow: number;
-  trenchingHigh: number;
-  /** The full breakdown, so the record shows how the number was reached. */
-  lineItemsJson: string;
-  /** The same line items, unserialised, for the email to render. */
-  lineItems: Array<{ key: string; label: string; detail?: string; amount: number }>;
-  estimate: number;
-  annualProductionKwh: number;
 }
 
 export interface LeadPayload {
@@ -78,18 +71,18 @@ export function buildLeadPayload(
   contact: LeadContact,
   now: number
 ): LeadPayload {
-  const watts = PANELS[s.panelTier].watts;
-
-  // Priced here rather than passed in, so the record and the screen cannot
-  // disagree: both derive from the same store state through the same function.
-  const quote = priceQuote(
-    { panelCount: s.totalPanels, tier: s.panelTier, trenchFeet: s.trenchFeet },
-    { batteryUnits: s.batteryUnits, needsClearing: s.needsClearing },
-    { slopePercent: s.slopePercent, slopeTier: s.slopeTier, soilClass: s.soilClass }
-  );
-  const parts = subtotals(quote);
-  const equipment = spread(parts.equipment);
-  const trenching = spread(parts.trench);
+  const inputs: QuoteInputs = {
+    panelCount: s.totalPanels,
+    tier: s.panelTier,
+    trenchFeet: s.trenchFeet,
+    batteryUnits: s.batteryUnits,
+    needsClearing: s.needsClearing,
+    slopePercent: s.slopePercent,
+    slopeTier: s.slopeTier,
+    soilClass: s.soilClass,
+    azimuth: Math.round(s.azimuth),
+    productionCurve: s.productionCurve,
+  };
 
   return {
     id: s.leadId,
@@ -100,32 +93,22 @@ export function buildLeadPayload(
     address: s.address,
     source: contact.source,
     quote: {
+      inputs,
       totalPanels: s.totalPanels,
       trenchFeet: s.trenchFeet,
       azimuth: Math.round(s.azimuth),
       panelTier: s.panelTier,
       slopePercent: s.slopePercent,
-      slopeTier: quote.slopeTier,
+      slopeTier: s.slopeTier,
       soilClass: s.soilClass,
       percentage: s.percentage,
       avgBill: s.avgValue,
       highBill: s.highestValue,
-      systemSizeKw: Number(((s.totalPanels * watts) / 1000).toFixed(2)),
       coordinates: s.coordinates,
       arrayCenter: s.arrayCenter,
       meter: s.electricalMeterPosition,
       batteryUnits: s.batteryUnits,
       needsClearing: s.needsClearing,
-      priceLow: quote.low,
-      priceHigh: quote.high,
-      equipmentLow: equipment.low,
-      equipmentHigh: equipment.high,
-      trenchingLow: trenching.low,
-      trenchingHigh: trenching.high,
-      lineItemsJson: JSON.stringify(quote.lineItems),
-      lineItems: quote.lineItems,
-      estimate: quote.estimate,
-      annualProductionKwh: annualKwh(s.productionCurve, quote.systemKw, s.azimuth),
     },
     ts: now,
     honeypot: contact.honeypot,

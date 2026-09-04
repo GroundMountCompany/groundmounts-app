@@ -53,6 +53,20 @@ export default function Step6Quote() {
   const [company, setCompany] = useState(''); // honeypot
   const [submitting, setSubmitting] = useState(false);
   const [done, setDone] = useState(false);
+  /**
+   * What the server actually filed and emailed.
+   *
+   * The blurred range before submit is this page's own arithmetic, which is
+   * fine — it is a preview. What gets revealed afterwards is the server's
+   * answer, because that is the number in the customer's inbox and in the
+   * owner's record, and showing them a fourth number would be worse than
+   * showing them nothing.
+   */
+  const [filed, setFiled] = useState<{
+    low: number;
+    high: number;
+    lineItems: Array<{ key: string; label: string; detail?: string; amount: number }>;
+  } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const curve = useQuoteStore((s) => s.productionCurve);
@@ -107,6 +121,15 @@ export default function Step6Quote() {
         return;
       }
 
+      const body = result.body;
+      if (typeof body?.priceLow === 'number' && typeof body?.priceHigh === 'number') {
+        setFiled({
+          low: body.priceLow,
+          high: body.priceHigh,
+          lineItems: body.lineItems ?? [],
+        });
+      }
+
       if (!result.body?.emailSent) {
         // The lead is safe. Say so plainly, and retry only the email.
         setError(UI.emailFailedAfterSave);
@@ -135,7 +158,7 @@ export default function Step6Quote() {
             {UI.priceRangeLabel}
           </p>
           <p data-testid="price-revealed" className="text-[26px] font-bold text-neutral-900">
-            {money(quote.low)} – {money(quote.high)}
+            {money(filed?.low ?? quote.low)} – {money(filed?.high ?? quote.high)}
           </p>
           <p className="mt-1 text-[15px] text-neutral-600">{UI.priceEstimateNote}</p>
         </div>
@@ -143,7 +166,7 @@ export default function Step6Quote() {
         <div>
           <h4 className="text-[17px] font-semibold text-neutral-900">{UI.lineItemsTitle}</h4>
           <dl data-testid="line-items" className="mt-2 space-y-1 text-[16px]">
-            {quote.lineItems.map((item) => (
+            {(filed?.lineItems.length ? filed.lineItems : quote.lineItems).map((item) => (
               <div key={item.key} className="flex justify-between gap-4">
                 <dt className="text-neutral-700">
                   {item.label}

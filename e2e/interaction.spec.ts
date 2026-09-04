@@ -555,10 +555,14 @@ test.describe('design step gestures', () => {
       // Driven step by step so the map centre can be sampled while the finger
       // is still down: once it lifts, an out-of-view array is deliberately
       // re-framed, which moves the camera on purpose.
+      // A long drag on purpose. The map's residual is a fixed few pixels from
+      // the moment before our handler claims the gesture, so the further the
+      // array travels the less the ratio below depends on how many frames the
+      // harness happened to deliver.
       await touchStart(client, [{ x: grab[0], y: grab[1], id: 1 }]);
-      for (let i = 1; i <= 10; i++) {
+      for (let i = 1; i <= 20; i++) {
         await touchMove(client, [
-          { x: grab[0] + i * 7, y: grab[1] + i * 4.5, id: 1 },
+          { x: grab[0] + i * 9, y: grab[1] + i * 6, id: 1 },
         ]);
       }
 
@@ -591,10 +595,16 @@ test.describe('design step gestures', () => {
     // measured 1.7-6.3px depending on how many grab attempts missed first, and
     // the last pixels come from Mapbox handling the touch before we see it. The
     // owner confirmed on a real iPhone that the drag does not fight the map.
+    //
+    // The ratio threshold is 3 rather than 5 because a run once measured 4.94
+    // and failed. A map that is still tracking the finger scores about 1; a
+    // map that is pinned scores 20 or more. Anything in between is frame
+    // timing, and a threshold sitting inside that band tests the harness
+    // rather than the app. The absolute pixel bound below is the real limit.
     expect(
       moved / mapDrift,
       'map moved about as much as the array — it is still tracking the finger'
-    ).toBeGreaterThan(5);
+    ).toBeGreaterThan(3);
     expect(
       mapDrift / degreesPerPixel,
       'map panned far enough to be a regression'

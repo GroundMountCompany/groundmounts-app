@@ -589,14 +589,24 @@ function pricesIn(text: string): number[] {
   return (text.match(/\$[\d,]+/g) ?? []).map((m) => Number(m.replace(/[$,]/g, '')));
 }
 
-test('the email carries the same price the customer was shown', async ({ page }) => {
-  // One priced quote, two destinations, and now one request that produces
-  // both. The browser sends the design; the route prices it and renders the
-  // email from that same quote.
+test('the revealed price is the one the server filed, not the page estimate', async ({
+  page,
+}) => {
+  // The page's own arithmetic is a preview. What the customer is shown after
+  // submitting has to be what was written to Airtable and put in their inbox —
+  // so this mocks a server that returns a deliberately different range and
+  // asserts the screen shows the server's.
   await page.addInitScript(
     (payload) => window.localStorage.setItem('gmq:v3', JSON.stringify(payload)),
-    contactStepSeed('email-matches-screen')
+    contactStepSeed('server-price-wins')
   );
+
+  const SERVER_LOW = 41_234;
+  const SERVER_HIGH = 48_765;
+  const SERVER_ITEMS = [
+    { key: 'equipment', label: 'Panels and racking', detail: 'server priced', amount: 40_000 },
+    { key: 'trench', label: 'Trench', detail: '113 ft', amount: 5_000 },
+  ];
 
   const requests: Array<{ quote?: { inputs?: unknown }; resend?: boolean }> = [];
   await page.route('**/api/leads', (route) => {
@@ -604,11 +614,16 @@ test('the email carries the same price the customer was shown', async ({ page })
     return route.fulfill({
       status: 200,
       contentType: 'application/json',
-      body: JSON.stringify({ ok: true, leadFiled: true, emailSent: true }),
+      body: JSON.stringify({
+        ok: true,
+        leadFiled: true,
+        emailSent: true,
+        priceLow: SERVER_LOW,
+        priceHigh: SERVER_HIGH,
+        lineItems: SERVER_ITEMS,
+      }),
     });
   });
-  // Nothing should be calling the old route; if anything does, fail loudly
-  // rather than let it be silently unrouted.
   let strayEmailCalls = 0;
   await page.route('**/api/sendEmail', (route) => {
     strayEmailCalls++;
@@ -619,7 +634,6 @@ test('the email carries the same price the customer was shown', async ({ page })
   await page.goto('/quote');
   await waitForHydration(page);
 
-  // What the customer sees before they hand over their details.
   const beforeSubmit = pricesIn((await page.getByTestId('price-range').innerText()) ?? '');
   expect(beforeSubmit, 'no range on screen before submit').toHaveLength(2);
 
@@ -627,22 +641,30 @@ test('the email carries the same price the customer was shown', async ({ page })
   await expect(page.getByTestId('success-screen')).toBeVisible({ timeout: 15_000 });
 
   const revealed = pricesIn(await page.getByTestId('price-revealed').innerText());
-  expect(revealed).toEqual(beforeSubmit);
+  expect(revealed, 'the page revealed its own estimate, not the filed one').toEqual([
+    SERVER_LOW,
+    SERVER_HIGH,
+  ]);
+  // The fixture is only meaningful if the two genuinely differ.
+  expect(revealed).not.toEqual(beforeSubmit);
 
-  // One request for the whole submit, and not to the route that no longer
-  // exists.
+  // The breakdown comes from the same response.
+  const items = await page.getByTestId('line-items').innerText();
+  expect(items).toContain('server priced');
+  expect(items).toContain('$40,000');
+
+  // Still one request, still no price sent from the browser.
   expect(requests, 'the submit was not a single request').toHaveLength(1);
   expect(strayEmailCalls, 'something still calls /api/sendEmail').toBe(0);
-
-  // It carries the design and no price at all: the server prices it, and the
-  // check is that what was sent prices to the range on screen.
   const body = JSON.stringify(requests[0]);
   for (const key of ['priceLow', 'priceHigh', 'estimate', 'lineItems']) {
     expect(body, `a price was sent from the browser: ${key}`).not.toContain(key);
   }
 
+  // And what was sent still prices to what the page had shown, so the preview
+  // is honest even though the reveal defers to the server.
   const priced = priceFromInputs(parseQuoteInputs(requests[0].quote!.inputs));
-  expect([priced.quote.low, priced.quote.high]).toEqual(revealed);
+  expect([priced.quote.low, priced.quote.high]).toEqual(beforeSubmit);
 });
 
 test('a failed email retries only the email, never re-filing the lead', async ({ page }) => {

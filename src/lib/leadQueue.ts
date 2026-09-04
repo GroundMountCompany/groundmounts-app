@@ -63,7 +63,13 @@ export interface SendResult {
    * customer's email, and either half can succeed alone, so the retry decision
    * is driven by these rather than by the status code.
    */
-  body?: { leadFiled?: boolean; emailSent?: boolean; priceLow?: number; priceHigh?: number };
+  body?: {
+    leadFiled?: boolean;
+    emailSent?: boolean;
+    priceLow?: number;
+    priceHigh?: number;
+    lineItems?: Array<{ key: string; label: string; detail?: string; amount: number }>;
+  };
 }
 
 /**
@@ -122,7 +128,7 @@ export function flushQueue(url = "/api/leads") {
     headers: { "Content-Type":"application/json" },
     body: JSON.stringify(next),
   })
-  .then(r => {
+  .then(async r => {
     if (!r.ok) {
       // Don't retry on 400 (bad request) - data is invalid
       if (r.status === 400) {
@@ -130,6 +136,21 @@ export function flushQueue(url = "/api/leads") {
         return;
       }
       throw new Error("net");
+    }
+
+    // A 200 does not mean the whole submit succeeded. One request files the
+    // lead and sends the customer's email, and the email can fail on its own —
+    // in which case the lead is safe and the queue must chase the email alone.
+    // Re-queuing the whole payload would file a second record.
+    const body = (await r.json().catch(() => ({}))) as {
+      leadFiled?: boolean;
+      emailSent?: boolean;
+    };
+    if (body.leadFiled && body.emailSent === false && !next.resend) {
+      console.warn("[LEAD_QUEUE] Lead filed, email did not send; queueing a resend:", next.id);
+      const cur = load();
+      cur.push({ ...next, resend: true, _retries: (next._retries ?? 0) + 1 });
+      save(cur);
     }
   })
   .catch(() => {

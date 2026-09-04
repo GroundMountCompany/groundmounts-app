@@ -223,6 +223,7 @@ export async function POST(req: NextRequest) {
           emailSent,
           priceLow: priced.quote.low,
           priceHigh: priced.quote.high,
+          lineItems: priced.quote.lineItems,
         },
         { status: emailSent ? 200 : 502 }
       );
@@ -439,8 +440,12 @@ export async function POST(req: NextRequest) {
       ok: true,
       leadFiled: true,
       emailSent,
+      // The screen reveals these, not its own arithmetic. The customer must be
+      // shown the number that was filed and emailed, even if this page has
+      // somehow computed a different one.
       priceLow: priced.quote.low,
       priceHigh: priced.quote.high,
+      lineItems: priced.quote.lineItems,
       airtableId: result.id,
     });
   } catch (e: unknown) {

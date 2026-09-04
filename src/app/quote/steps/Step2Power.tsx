@@ -12,7 +12,7 @@ import {
   RATE_CENTS_MAX,
 } from '@/store/quoteStore';
 import { dollarsPerKwhFromCents, estimateMonthlyKWh } from '@/lib/solar';
-import { sanitizeNumeric, parseIntegerField } from '@/lib/numericField';
+import { sanitizeNumeric, parseIntegerField, parseNumericField } from '@/lib/numericField';
 
 /**
  * Bill inputs.
@@ -67,13 +67,17 @@ export default function Step2Power() {
             value={billText}
             onChange={(e) => setBillText(sanitizeNumeric(e.target.value, true))}
             onBlur={() => {
-              const value = parseIntegerField(billText, 0);
+              // Parse the decimal the customer may have typed off their bill,
+              // then round: the sizing maths does not need cents, and a whole
+              // number is what they will recognise when they look again.
+              const value = Math.round(parseNumericField(billText, 0));
               setAvgValue(value);
               setBillText(value === 0 ? '' : String(value));
             }}
             className="h-14 w-full rounded-xl border border-neutral-300 pl-9 pr-4 text-[17px] outline-none focus:border-neutral-500"
           />
         </div>
+        <span className="mt-1 block text-[15px] text-neutral-500">{UI.monthlyBillHint}</span>
       </label>
 
       <label className="block">

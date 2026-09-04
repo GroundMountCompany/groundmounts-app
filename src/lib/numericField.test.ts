@@ -65,3 +65,31 @@ describe('cents to dollars', () => {
     expect(dollarsPerKwhFromCents(Number.NaN)).toBe(BILL_PER_KWH);
   });
 });
+
+describe('the bill field commits whole dollars', () => {
+  /** What Step2Power does on blur. */
+  const commitBill = (raw: string) => Math.round(parseNumericField(raw, 0));
+
+  it('rounds a decimal off the bill', () => {
+    expect(commitBill('240.75')).toBe(241);
+    expect(commitBill('240.4')).toBe(240);
+    expect(commitBill('0.6')).toBe(1);
+  });
+
+  it('leaves a whole number alone', () => {
+    expect(commitBill('240')).toBe(240);
+  });
+
+  it('never yields NaN from a partial entry', () => {
+    for (const raw of PARTIAL_ENTRIES) {
+      const value = commitBill(raw);
+      expect(Number.isNaN(value), `commitBill("${raw}")`).toBe(false);
+      expect(Number.isInteger(value), `commitBill("${raw}") is whole`).toBe(true);
+    }
+  });
+
+  it('uses parseNumericField, not parseIntegerField', () => {
+    // parseIntegerField would truncate to 240 and lose the rounding entirely.
+    expect(commitBill('240.75')).not.toBe(parseIntegerField('240.75'));
+  });
+});

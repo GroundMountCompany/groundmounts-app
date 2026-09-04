@@ -96,6 +96,8 @@ interface QuoteState {
   contactName: string;
   contactEmail: string;
   contactPhone: string;
+  /** Shown when a navigation into the design was refused after filing. */
+  designLockNotice: boolean;
 }
 
 interface QuoteActions {
@@ -131,6 +133,7 @@ interface QuoteActions {
   setLeadFiled: (leadId: string | null) => void;
   setEmailSent: (leadId: string | null) => void;
   setContact: (field: 'contactName' | 'contactEmail' | 'contactPhone', value: string) => void;
+  setDesignLockNotice: (v: boolean) => void;
 }
 
 export type QuoteStore = QuoteState & QuoteActions;
@@ -170,6 +173,7 @@ const initialState: QuoteState = {
   contactName: '',
   contactEmail: '',
   contactPhone: '',
+  designLockNotice: false,
 };
 
 /** Straight-line meter→array distance in whole feet. */
@@ -258,6 +262,7 @@ export const useQuoteStore = create<QuoteStore>()(
       setLeadFiled: (leadFiled) => set({ leadFiled }),
       setEmailSent: (emailSent) => set({ emailSent }),
       setContact: (field, value) => set({ [field]: value } as Partial<QuoteState>),
+      setDesignLockNotice: (designLockNotice) => set({ designLockNotice }),
 
       resetQuote: () => {
         set({ ...initialState, hydrated: true, leadId: uuid(), startedAt: Date.now() });

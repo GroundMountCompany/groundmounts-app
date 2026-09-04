@@ -1,5 +1,21 @@
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
+## URL parameters
+
+The funnel reads a few parameters from the query string.
+
+| Parameter | What it does |
+| --- | --- |
+| `?step=n` | Opens the funnel at step `n` (0–5). Kept in sync as the customer moves, so the phone back button steps backwards through the funnel instead of leaving the page — which, inside an iframe, means leaving the host site. |
+| `?source=` | Recorded on the lead so you can tell which landing page it came from. Falls back to the brand domain. |
+| `?zipcode=` | Geocoded on load, so a partner site can hand the customer straight to a located map. |
+| `?state=` | Two-letter state on the lead. Defaults to `TX`. |
+| `?reset=1` | **Clears the whole funnel** — store and saved progress — and lands on step 1 with a fresh lead id. The parameter is stripped afterwards, so refreshing does not wipe the new run as well. For demos and for testing on a phone, where clearing site data by hand is a nuisance. |
+
+Once a lead has been filed to Airtable, the design steps are closed: the
+progress bar, the back button and a hand-typed `?step=` all land on "Start over
+to change your design". Use `?reset=1` or that link to begin again.
+
 ## Getting Started
 
 First, run the development server:

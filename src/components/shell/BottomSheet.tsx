@@ -27,6 +27,9 @@ const DRAG_THRESHOLD_PX = 6;
 /** Rounding slack so the footer never lands a pixel below the viewport. */
 const PEEK_SLACK_PX = 8;
 
+/** Breathing room between a focused field and whatever is below it. */
+const FOCUS_MARGIN_PX = 12;
+
 interface Props {
   snap: Snap;
   onSnapChange: (snap: Snap) => void;
@@ -64,6 +67,8 @@ export default function BottomSheet({
 }: Props) {
   const [viewport, setViewport] = useState(0);
   const [isPhone, setIsPhone] = useState(false);
+  /** How much of the layout viewport the on-screen keyboard is covering. */
+  const [keyboardInset, setKeyboardInset] = useState(0);
   const [peekPx, setPeekPx] = useState(MIN_PEEK_PX);
   const headRef = useRef<HTMLDivElement>(null);
   const footRef = useRef<HTMLDivElement>(null);
@@ -77,16 +82,34 @@ export default function BottomSheet({
     // The sheet only exists below md; above it the same component is a panel
     // filling its column, and an inline snap height would fight that.
     const query = window.matchMedia('(max-width: 767px)');
+
+    // visualViewport, not innerHeight. iOS shrinks the visual viewport when the
+    // keyboard opens and leaves innerHeight alone, so innerHeight cannot tell
+    // you how much screen is actually left to lay out in.
     const measure = () => {
-      setViewport(window.innerHeight);
+      const visual = window.visualViewport;
+      setViewport(visual?.height ?? window.innerHeight);
       setIsPhone(query.matches);
+      // A fixed element is anchored to the layout viewport, which the keyboard
+      // does not change — so the sheet has to be lifted by hand or its footer
+      // sits behind the keys.
+      setKeyboardInset(
+        visual ? Math.max(0, window.innerHeight - (visual.offsetTop + visual.height)) : 0
+      );
     };
     measure();
+
     window.addEventListener('resize', measure);
     query.addEventListener('change', measure);
+    window.visualViewport?.addEventListener('resize', measure);
+    // The keyboard also scrolls the visual viewport without resizing it.
+    window.visualViewport?.addEventListener('scroll', measure);
+
     return () => {
       window.removeEventListener('resize', measure);
       query.removeEventListener('change', measure);
+      window.visualViewport?.removeEventListener('resize', measure);
+      window.visualViewport?.removeEventListener('scroll', measure);
     };
   }, []);
 
@@ -191,9 +214,20 @@ export default function BottomSheet({
     const onFocusIn = (e: FocusEvent) => {
       const target = e.target as HTMLElement | null;
       if (!target?.matches('input, textarea, select')) return;
-      // A frame's delay: the keyboard has to resize the viewport first.
+
+      // A beat's delay: the keyboard has to resize the visual viewport first.
       setTimeout(() => {
-        target.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        const visual = window.visualViewport;
+        const bottomLimit =
+          (visual ? visual.offsetTop + visual.height : window.innerHeight) -
+          (footRef.current?.offsetHeight ?? 0);
+
+        const field = target.getBoundingClientRect();
+        // Only move if the field is actually hidden behind the keyboard or the
+        // footer; scrolling a field that is already visible is just jitter.
+        if (field.bottom <= bottomLimit && field.top >= 0) return;
+
+        el.scrollTop += field.bottom - bottomLimit + FOCUS_MARGIN_PX;
       }, 150);
     };
 
@@ -223,10 +257,15 @@ export default function BottomSheet({
         fullHeight ? 'top-0 rounded-none' : 'rounded-t-2xl'
       }`}
       style={
-        isPhone && !fullHeight
+        isPhone
           ? {
-              height: viewport ? height : undefined,
-              transition: dragPx === null ? 'height 220ms ease' : 'none',
+              bottom: keyboardInset,
+              ...(fullHeight
+                ? { height: viewport ? viewport : undefined }
+                : {
+                    height: viewport ? height : undefined,
+                    transition: dragPx === null ? 'height 220ms ease' : 'none',
+                  }),
             }
           : undefined
       }

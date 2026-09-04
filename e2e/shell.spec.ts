@@ -438,69 +438,79 @@ test('a failed lead write sends no email at all', async ({ page }) => {
   await expect(page.getByTestId('success-screen')).toHaveCount(0);
 });
 
-test('inputs and the button stay visible with a keyboard up', async ({ page }, testInfo) => {
+test('a focused field and the button are both visible with a keyboard up', async ({
+  page,
+}, testInfo) => {
   test.skip(!testInfo.project.name.startsWith('mobile'), 'phone layout');
 
-  // The owner's finding: the primary button sat at the top of the sheet
-  // content, covering the fields, so with the keyboard up you had to scroll
-  // around hunting for the inputs.
-  const KEYBOARD_PX = 300;
-  await page.setViewportSize({ width: 390, height: 844 - KEYBOARD_PX });
+  // The owner's finding: with the keyboard up you had to scroll around hunting
+  // for the inputs, because the button sat on top of them.
+  const KEYBOARD_PX = 336;
 
   await page.addInitScript(() => {
     const pending = window.sessionStorage.getItem('e2e:seed');
     if (pending) window.localStorage.setItem('gmq:v3', pending);
   });
 
-  const seed = JSON.stringify({
-    state: {
-      currentStepIndex: 1,
-      address: '123 Main St, Fort Worth, TX 76131',
-      coordinates: { latitude: 32.7555, longitude: -97.3208 },
-      electricalMeterPosition: [-97.3208, 32.7556],
-      arrayCenter: [-97.3208, 32.7553],
-      avgValue: 240,
-      percentage: 100,
-      totalPanels: 31,
-      trenchFeet: 42,
-      leadId: 'keyboard-test',
-      startedAt: Date.now() - 600_000,
-    },
-    version: 1,
-  });
+  // Stand in for the on-screen keyboard: iOS shrinks visualViewport and leaves
+  // innerHeight alone, which is exactly the case the handler reads.
+  await page.addInitScript((px) => {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    Object.defineProperty(vv, 'height', {
+      get: () => window.innerHeight - px,
+      configurable: true,
+    });
+  }, KEYBOARD_PX);
 
   await mockGeocoding(page);
   await page.goto('/quote');
-  await page.evaluate((v) => window.sessionStorage.setItem('e2e:seed', v), seed);
+  await page.evaluate(
+    (v) => window.sessionStorage.setItem('e2e:seed', v),
+    JSON.stringify(contactStepSeed('keyboard-test'))
+  );
 
-  const visibleInViewport = async (selector: string) => {
+  /** Is the element inside the space the keyboard leaves? */
+  const visibleAboveKeyboard = async (selector: string) => {
     const box = await page.locator(selector).boundingBox();
-    const size = page.viewportSize()!;
     if (!box) return false;
-    return box.y >= 0 && box.y + box.height <= size.height;
+    const limit = page.viewportSize()!.height - KEYBOARD_PX;
+    return box.y >= 0 && box.y + box.height <= limit + 1;
   };
 
-  // Step 2: both bill fields and the button, without scrolling.
+  // Step 2: focus each bill field in turn.
   await page.goto('/quote?step=1');
   await waitForHydration(page);
-  await expect(page.getByRole('heading', { name: 'Your power use' })).toBeVisible();
+  await page.evaluate(() => window.visualViewport?.dispatchEvent(new Event('resize')));
 
-  expect(await visibleInViewport('#avg-bill'), 'bill field hidden').toBe(true);
-  expect(await visibleInViewport('#rate-kwh'), 'rate field hidden').toBe(true);
-  expect(await visibleInViewport('[data-testid="primary-cta"]'), 'button hidden').toBe(true);
+  for (const field of ['#avg-bill', '#rate-kwh']) {
+    // .focus() so the production focusin handler runs, rather than the test
+    // scrolling the field into view itself.
+    await page.locator(field).focus();
+    await page.waitForTimeout(400);
+
+    expect(await visibleAboveKeyboard(field), `${field} hidden by the keyboard`).toBe(true);
+    expect(
+      await visibleAboveKeyboard('[data-testid="primary-cta"]'),
+      `button hidden while ${field} focused`
+    ).toBe(true);
+  }
 
   // Step 6: the three contact fields and the submit button.
   await page.goto('/quote?step=5');
   await waitForHydration(page);
-  await expect(page.getByRole('heading', { name: 'Get your number' })).toBeVisible();
+  await page.evaluate(() => window.visualViewport?.dispatchEvent(new Event('resize')));
 
   for (const field of ['#name', '#email', '#phone']) {
-    // The contact fields scroll within the sheet, so bring each into view the
-    // way focusing it does, then check it cleared the keyboard.
-    await page.locator(field).scrollIntoViewIfNeeded();
-    expect(await visibleInViewport(field), `${field} hidden`).toBe(true);
+    await page.locator(field).focus();
+    await page.waitForTimeout(400);
+
+    expect(await visibleAboveKeyboard(field), `${field} hidden by the keyboard`).toBe(true);
+    expect(
+      await visibleAboveKeyboard('[data-testid="submit-lead"]'),
+      `submit hidden while ${field} focused`
+    ).toBe(true);
   }
-  expect(await visibleInViewport('[data-testid="submit-lead"]'), 'submit hidden').toBe(true);
 });
 
 test('no stray text renders outside the sheet on a map-less step', async ({ page }, testInfo) => {
@@ -619,4 +629,108 @@ test('a filed lead restores read-only contact details, and Start over clears the
     () => JSON.parse(window.localStorage.getItem('gmq:v3') ?? '{}').state?.leadId ?? null
   );
   expect(after, 'Start over did not issue a new leadId').not.toBe(before);
+});
+
+test('a filed lead blocks the design from every route in', async ({ page }) => {
+  await page.addInitScript(() => {
+    const pending = window.sessionStorage.getItem('e2e:seed');
+    if (pending) window.localStorage.setItem('gmq:v3', pending);
+  });
+
+  await page.route('**/api/leads', (route) =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: '{"ok":true}' })
+  );
+  await page.route('**/api/sendEmail', (route) =>
+    route.fulfill({ status: 500, contentType: 'application/json', body: '{"error":"boom"}' })
+  );
+
+  await mockGeocoding(page);
+  await page.goto('/quote');
+  await page.evaluate(
+    (v) => window.sessionStorage.setItem('e2e:seed', v),
+    JSON.stringify(contactStepSeed('lock-routes'))
+  );
+  // Arrive at the contact step the way a customer does — from Options — so the
+  // history behind it holds a design step for the back button to return to.
+  await page.goto('/quote?step=4');
+  await waitForHydration(page);
+  await page.evaluate(() => window.sessionStorage.removeItem('e2e:seed'));
+  await page.getByTestId('primary-cta').click();
+  await expect(page.getByRole('heading', { name: 'Get your number' })).toBeVisible();
+
+  await page.locator('#name').fill('Bert Ortiz');
+  await page.locator('#email').fill('bert@example.com');
+  await page.locator('#phone').fill('(469) 555-0100');
+  await page.getByTestId('submit-lead').click();
+  await expect(page.getByTestId('contact-locked')).toBeVisible();
+
+  const designHeading = page.getByRole('heading', { name: 'Design your array' });
+
+  // Route 1: the browser back button.
+  await page.goBack();
+  await expect(designHeading).toHaveCount(0);
+  await expect(page.getByTestId('design-locked')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Options' })).toHaveCount(0);
+
+  // Route 2: a hand-typed ?step=.
+  await page.goto('/quote?step=3');
+  await waitForHydration(page);
+  await expect(designHeading).toHaveCount(0);
+  await expect(page.getByTestId('design-locked')).toBeVisible();
+
+  // Route 3: the progress bar.
+  await page.getByTestId('progress-step-3').click();
+  await expect(designHeading).toHaveCount(0);
+  await expect(page.getByTestId('design-locked')).toBeVisible();
+});
+
+test('?reset=1 clears the funnel and starts over', async ({ page }) => {
+  await page.addInitScript(() => {
+    const pending = window.sessionStorage.getItem('e2e:seed');
+    if (pending) window.localStorage.setItem('gmq:v3', pending);
+  });
+
+  await mockGeocoding(page);
+  await page.goto('/quote');
+  await page.evaluate(
+    (v) => window.sessionStorage.setItem('e2e:seed', v),
+    JSON.stringify(contactStepSeed('reset-test'))
+  );
+  await page.goto('/quote?step=5');
+  await waitForHydration(page);
+  await page.evaluate(() => window.sessionStorage.removeItem('e2e:seed'));
+  await expect(page.getByRole('heading', { name: 'Get your number' })).toBeVisible();
+
+  await page.goto('/quote?reset=1');
+  await waitForHydration(page);
+
+  // Back at the start, with the design gone and the parameter stripped so a
+  // refresh does not wipe the new run too.
+  await expect(page.getByRole('heading', { name: 'Find your property' })).toBeVisible();
+  expect(page.url()).not.toContain('reset=1');
+  expect(page.url()).toContain('step=0');
+
+  const state = await page.evaluate(() => {
+    const raw = window.localStorage.getItem('gmq:v3');
+    return raw ? JSON.parse(raw).state : null;
+  });
+  expect(state?.leadId, 'reset kept the old leadId').not.toBe('reset-test');
+  expect(state?.trenchFeet ?? 0, 'reset kept the old design').toBe(0);
+});
+
+test('the bill field rounds to whole dollars on blur', async ({ page }) => {
+  await mockGeocoding(page);
+  await page.goto('/quote?step=1');
+  await waitForHydration(page);
+
+  const bill = page.locator('#avg-bill');
+  await bill.fill('240.75');
+  await bill.blur();
+  await expect(bill).toHaveValue('241');
+
+  // And a half-typed entry never becomes NaN on screen.
+  await bill.fill('0.');
+  await bill.blur();
+  await expect(bill).toHaveValue('');
+  await expect(page.getByText('NaN')).toHaveCount(0);
 });

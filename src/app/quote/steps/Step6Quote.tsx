@@ -232,17 +232,21 @@ export default function Step6Quote() {
 
       {error && <p className="text-[17px] text-red-700">{error}</p>}
 
-      <button
-        type="button"
-        data-testid="submit-lead"
-        onClick={submit}
-        disabled={!ready || submitting}
-        className="h-14 w-full rounded-xl bg-green-700 text-[17px] font-semibold text-white disabled:opacity-50"
-      >
-        {submitting ? UI.submitting : STEPS[5].cta}
-      </button>
-
       <EducationCard copy={STEPS[5].education} />
+
+      {/* Sticky, so it stays reachable while the contact fields scroll — the
+          shell's own footer is empty on the last step. */}
+      <div className="sticky bottom-0 -mx-5 bg-white px-5 pb-2 pt-3">
+        <button
+          type="button"
+          data-testid="submit-lead"
+          onClick={submit}
+          disabled={!ready || submitting}
+          className="h-14 w-full rounded-xl bg-green-700 text-[17px] font-semibold text-white disabled:opacity-50"
+        >
+          {submitting ? UI.submitting : STEPS[5].cta}
+        </button>
+      </div>
     </div>
   );
 }

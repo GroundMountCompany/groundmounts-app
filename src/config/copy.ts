@@ -139,6 +139,7 @@ export const UI = {
   billUploadStub: 'Upload a photo of your bill',
   billUploadNote: 'Coming next. Type your numbers in for now.',
   monthlyBill: 'Average monthly bill',
+  monthlyBillHint: 'Whole dollars is fine.',
   ratePerKwh: 'Your rate (cents per kWh)',
   offset: 'How much of your power should solar cover?',
   panels: 'Panels',

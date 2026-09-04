@@ -262,46 +262,76 @@ test.describe('map pins', () => {
   });
 
   /**
-   * Probe the real grabbable radius by touching just inside and just outside
-   * it, rather than asking the app to report its own constant back.
+   * Drag from `point` and report how far the marker and the camera each moved,
+   * in screen pixels.
+   *
+   * Pixels, not degrees: a degree means different distances at different zooms,
+   * and the question is whether a person would see the thing move.
    */
-  async function grabbableAt(page: Page, point: Pt): Promise<boolean> {
+  async function probeDrag(
+    page: Page,
+    point: Pt,
+    marker: 'pin' | 'meter'
+  ): Promise<{ markerPx: number; mapPx: number }> {
     const client = await page.context().newCDPSession(page);
-    const before = await page.evaluate(() => window.__gmTest.mapCenter());
+
+    const read = () =>
+      page.evaluate((which) => {
+        const t = window.__gmTest;
+        const s = t.state();
+        const m =
+          which === 'pin'
+            ? ([s.coordinates.longitude, s.coordinates.latitude] as [number, number])
+            : s.electricalMeterPosition;
+        return { marker: m, map: t.mapCenter() };
+      }, marker);
+
+    const before = await read();
 
     await touchStart(client, [{ x: point[0], y: point[1], id: 1 }]);
-    for (let i = 1; i <= 6; i++) {
-      await touchMove(client, [{ x: point[0] + i * 6, y: point[1] + i * 4, id: 1 }]);
+    for (let i = 1; i <= 10; i++) {
+      await touchMove(client, [{ x: point[0] + i * 7, y: point[1] + i * 5, id: 1 }]);
     }
-    const during = await page.evaluate(() => ({
-      coords: window.__gmTest.state().coordinates,
-      meter: window.__gmTest.state().electricalMeterPosition,
-      map: window.__gmTest.mapCenter(),
-    }));
+    const during = await read();
     await touchEnd(client);
-    await page.waitForTimeout(200);
+    await page.waitForTimeout(150);
 
-    // A grab moved the marker; a miss let Mapbox pan the map instead.
-    const mapMoved = Math.hypot(during.map[0] - before[0], during.map[1] - before[1]);
-    return mapMoved < 1e-9;
+    const degreesPerPixel = await page.evaluate(() => {
+      const a = window.__gmTest.unproject([0, 0]);
+      const b = window.__gmTest.unproject([1, 0]);
+      return Math.hypot(a[0] - b[0], a[1] - b[1]);
+    });
+
+    const dist = (a: [number, number] | null, b: [number, number] | null) =>
+      a && b ? Math.hypot(a[0] - b[0], a[1] - b[1]) : 0;
+
+    return {
+      markerPx: dist(during.marker, before.marker) / degreesPerPixel,
+      mapPx: dist(during.map, before.map) / degreesPerPixel,
+    };
   }
 
-  test('the pin hit target really is thumb-sized', async ({ page }) => {
-    await page.addInitScript(() => {
+  /** Screen position of the marker being probed. */
+  async function markerScreenPoint(page: Page, marker: 'pin' | 'meter'): Promise<Pt> {
+    return page.evaluate((which) => {
+      const t = window.__gmTest;
+      const r = t.canvasRect();
+      const s = t.state();
+      const ll =
+        which === 'pin'
+          ? ([s.coordinates.longitude, s.coordinates.latitude] as [number, number])
+          : s.electricalMeterPosition!;
+      const p = t.project(ll);
+      return [r.left + p[0], r.top + p[1]] as [number, number];
+    }, marker);
+  }
+
+  /** Open the funnel at a step with the map settled. */
+  async function openWithMap(page: Page, seed: object) {
+    await page.addInitScript((payload) => {
       if (window.localStorage.getItem('gmq:v3')) return;
-      window.localStorage.setItem(
-        'gmq:v3',
-        JSON.stringify({
-          state: {
-            currentStepIndex: 0,
-            address: 'County Road 1004, Rural, TX',
-            coordinates: { latitude: 32.1183, longitude: -97.9425 },
-            leadId: 'pin-radius-test',
-          },
-          version: 1,
-        })
-      );
-    });
+      window.localStorage.setItem('gmq:v3', JSON.stringify(payload));
+    }, seed);
     await page.goto('/quote');
     await page.waitForFunction(() => typeof window.__gmTest !== 'undefined', null, {
       timeout: 30_000,
@@ -311,42 +341,63 @@ test.describe('map pins', () => {
     });
     await page.waitForFunction(() => !window.__gmTest.isMoving(), null, { timeout: 15_000 });
     await page.waitForTimeout(600);
+  }
 
-    const centre = await page.evaluate(() => {
-      const t = window.__gmTest;
-      const r = t.canvasRect();
-      const c = t.state().coordinates;
-      const p = t.project([c.longitude, c.latitude]);
-      return [r.left + p[0], r.top + p[1]] as [number, number];
+  /**
+   * The padded hit circle is 26px in radius, so 24px from the centre is inside
+   * it and 28px is outside. Probing either side of that edge is what proves the
+   * padding is real rather than reading a constant back out of the app.
+   */
+  const INSIDE_PX = 24;
+  const OUTSIDE_PX = 28;
+  /** A drag of ~86px should move a grabbed marker most of that distance. */
+  const MIN_MARKER_MOVE_PX = 40;
+
+  for (const marker of ['pin', 'meter'] as const) {
+    const step = marker === 'pin' ? 0 : 2;
+    const seedFor = (leadId: string) => ({
+      state: {
+        currentStepIndex: step,
+        address: 'County Road 1004, Rural, TX',
+        coordinates: { latitude: 32.1183, longitude: -97.9425 },
+        electricalMeterPosition: [-97.9425, 32.1183],
+        leadId,
+      },
+      version: 1,
     });
 
-    // 22px from centre is inside a 44px target; 30px is outside the 52px one.
-    expect(
-      await grabbableAt(page, [centre[0] + 22, centre[1]]),
-      'pin was not grabbable 22px from its centre'
-    ).toBe(true);
+    test(`${marker}: a touch inside the padded edge drags the marker`, async ({ page }) => {
+      await openWithMap(page, seedFor(`${marker}-inside`));
 
-    // Reload so the second probe starts from a clean camera.
-    await page.reload();
-    await page.waitForFunction(() => window.__gmTest?.state().mapReady === true, null, {
-      timeout: 30_000,
-    });
-    await page.waitForFunction(() => !window.__gmTest.isMoving(), null, { timeout: 15_000 });
-    await page.waitForTimeout(600);
+      const centre = await markerScreenPoint(page, marker);
+      const { markerPx, mapPx } = await probeDrag(
+        page,
+        [centre[0] + INSIDE_PX, centre[1]],
+        marker
+      );
 
-    const centre2 = await page.evaluate(() => {
-      const t = window.__gmTest;
-      const r = t.canvasRect();
-      const c = t.state().coordinates;
-      const p = t.project([c.longitude, c.latitude]);
-      return [r.left + p[0], r.top + p[1]] as [number, number];
+      expect(markerPx, `${marker} did not move when grabbed inside its hit area`).toBeGreaterThan(
+        MIN_MARKER_MOVE_PX
+      );
+      expect(mapPx, `map panned while the ${marker} was being dragged`).toBeLessThan(3);
     });
 
-    expect(
-      await grabbableAt(page, [centre2[0] + 70, centre2[1]]),
-      'pin was grabbable 70px away, so the hit area is larger than intended'
-    ).toBe(false);
-  });
+    test(`${marker}: a touch outside the padded edge pans the map instead`, async ({ page }) => {
+      await openWithMap(page, seedFor(`${marker}-outside`));
+
+      const centre = await markerScreenPoint(page, marker);
+      const { markerPx, mapPx } = await probeDrag(
+        page,
+        [centre[0] + OUTSIDE_PX, centre[1]],
+        marker
+      );
+
+      expect(markerPx, `${marker} moved from a touch outside its hit area`).toBeLessThan(1);
+      expect(mapPx, 'the map should have panned instead').toBeGreaterThan(
+        MIN_MARKER_MOVE_PX
+      );
+    });
+  }
 
   test('the meter is draggable on its own step', async ({ page }) => {
     await page.addInitScript(() => {

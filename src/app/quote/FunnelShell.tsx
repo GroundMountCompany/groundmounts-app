@@ -7,7 +7,7 @@ import BottomSheet, { type Snap } from '@/components/shell/BottomSheet';
 import PrimaryButton from '@/components/shell/PrimaryButton';
 import { STEPS, UI } from '@/config/copy';
 import { useQuoteStore, clearPersistedQuote } from '@/store/quoteStore';
-import { useStepUrl, MAX_STEP } from '@/lib/useStepUrl';
+import { useStepUrl, MAX_STEP, allowedStep } from '@/lib/useStepUrl';
 import { captureAndAdvance } from '@/lib/leadPayload';
 import { useSizing } from './steps/useSizing';
 import { fitDesignView, rearmDesignFraming } from '@/components/map/MapCanvas';
@@ -46,17 +46,12 @@ export default function FunnelShell() {
   const meter = useQuoteStore((s) => s.electricalMeterPosition);
   const totalPanels = useQuoteStore((s) => s.totalPanels);
   const hydrated = useQuoteStore((s) => s.hydrated);
-  const leadFiled = useQuoteStore((s) => s.leadFiled);
-  const leadId = useQuoteStore((s) => s.leadId);
   const resetQuote = useQuoteStore((s) => s.resetQuote);
 
-  /**
-   * Once the lead is in Airtable the design behind it is fixed. Editing the
-   * meter or the array afterwards would leave the record describing something
-   * the customer no longer sees. Phase 7's server-side upsert relaxes this.
-   */
-  const designLocked = leadFiled !== null && leadFiled === leadId;
-  const [lockNotice, setLockNotice] = useState(false);
+  // Raised by useStepUrl too, so a refused back-button or ?step= navigation
+  // shows the same notice a refused progress tap does. See allowedStep().
+  const lockNotice = useQuoteStore((s) => s.designLockNotice);
+  const setLockNotice = useQuoteStore((s) => s.setDesignLockNotice);
 
   const [snap, setSnap] = useState<Snap>('peek');
 
@@ -94,15 +89,16 @@ export default function FunnelShell() {
   const goToStep = useCallback(
     (index: number) => {
       if (index >= step) return; // forward only ever happens via Continue
-      // Steps 2 to 4 are the design; those are settled once the lead is filed.
-      if (designLocked && index >= 2) {
+      // One rule, shared with the back button and ?step=.
+      const target = allowedStep(index);
+      if (target !== index) {
         setLockNotice(true);
         return;
       }
       setLockNotice(false);
       setStep(index);
     },
-    [step, designLocked, setStep]
+    [step, setStep, setLockNotice]
   );
 
   const advance = useCallback(() => {

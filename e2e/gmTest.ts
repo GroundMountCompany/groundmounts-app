@@ -32,7 +32,6 @@ export interface GmTest {
   renderedHandles: () => number;
   canvasRect: () => { left: number; top: number; width: number; height: number };
   hitAt: (pt: Pt) => { handle: number; hull: number; pin: number; meter: number };
-  hitTargetSizes: () => Record<string, number>;
   renderedGeom: () => { handlePx: Pt; hullPx: Pt[] } | null;
   handleLngLat: () => Pt | null;
   bearingFromCenter: (ll: Pt) => number | null;

@@ -78,6 +78,13 @@ interface QuoteState {
    */
   leadFiled: string | null;
   emailSent: string | null;
+  /**
+   * Contact details, kept so a reload does not lose them and so the email
+   * cannot be sent to a different address than the one already filed.
+   */
+  contactName: string;
+  contactEmail: string;
+  contactPhone: string;
 }
 
 interface QuoteActions {
@@ -112,6 +119,7 @@ interface QuoteActions {
   setMapReady: (v: boolean) => void;
   setLeadFiled: (leadId: string | null) => void;
   setEmailSent: (leadId: string | null) => void;
+  setContact: (field: 'contactName' | 'contactEmail' | 'contactPhone', value: string) => void;
 }
 
 export type QuoteStore = QuoteState & QuoteActions;
@@ -148,6 +156,9 @@ const initialState: QuoteState = {
   mapReady: false,
   leadFiled: null,
   emailSent: null,
+  contactName: '',
+  contactEmail: '',
+  contactPhone: '',
 };
 
 /** Straight-line meter→array distance in whole feet. */
@@ -235,6 +246,7 @@ export const useQuoteStore = create<QuoteStore>()(
       setMapReady: (mapReady) => set({ mapReady }),
       setLeadFiled: (leadFiled) => set({ leadFiled }),
       setEmailSent: (emailSent) => set({ emailSent }),
+      setContact: (field, value) => set({ [field]: value } as Partial<QuoteState>),
 
       resetQuote: () => {
         set({ ...initialState, hydrated: true, leadId: uuid(), startedAt: Date.now() });
@@ -276,6 +288,9 @@ export const useQuoteStore = create<QuoteStore>()(
         panelAdjust: state.panelAdjust,
         leadFiled: state.leadFiled,
         emailSent: state.emailSent,
+        contactName: state.contactName,
+        contactEmail: state.contactEmail,
+        contactPhone: state.contactPhone,
         // Downscaled JPEG, so it is small enough to persist. Without this a
         // refresh on the contact form dropped the screenshot silently.
         mapScreenshot: state.mapScreenshot,

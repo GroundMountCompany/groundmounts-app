@@ -13,7 +13,6 @@ import {
   LAYER,
   installCompassIcon,
   currentHandlePosition,
-  POINT_HIT_RADIUS_PX,
   fitDesign,
   arrayOutOfView,
 } from './layers';
@@ -383,52 +382,6 @@ export default function MapStage({ mode }: { mode: MapMode }) {
         },
         renderedHulls: () => map.queryRenderedFeatures({ layers: [LAYER.hullFill] }).length,
         renderedHitPads: () => map.queryRenderedFeatures({ layers: [LAYER.hitPad] }).length,
-        /**
-         * Screen size of each map hit target, for the touch-target audit.
-         * Mapbox layers are not DOM nodes, so they cannot be walked with
-         * querySelectorAll; this projects their geometry instead.
-         */
-        hitTargetSizes: () => {
-          const out: Record<string, number> = {};
-          const circle = (layer: string, radiusPx: number) => {
-            try {
-              if (map.queryRenderedFeatures({ layers: [layer] }).length) {
-                out[layer] = radiusPx * 2;
-              }
-            } catch {
-              /* layer not installed */
-            }
-          };
-          circle(LAYER.pinHit, POINT_HIT_RADIUS_PX);
-          circle(LAYER.meterHit, POINT_HIT_RADIUS_PX);
-
-          try {
-            const pads = map.queryRenderedFeatures({ layers: [LAYER.hitPad] });
-            if (pads.length && pads[0].geometry.type === 'Polygon') {
-              const ring = pads[0].geometry.coordinates[0] as Array<[number, number]>;
-              const pts = ring.map((c) => map.project(c));
-              const xs = pts.map((p) => p.x);
-              const ys = pts.map((p) => p.y);
-              out[LAYER.hitPad] = Math.min(
-                Math.max(...xs) - Math.min(...xs),
-                Math.max(...ys) - Math.min(...ys)
-              );
-            }
-          } catch {
-            /* no array yet */
-          }
-
-          try {
-            if (map.queryRenderedFeatures({ layers: [LAYER.handle] }).length) {
-              // 88px icon drawn at icon-size 0.5.
-              out[LAYER.handle] = 44;
-            }
-          } catch {
-            /* no handle yet */
-          }
-          return out;
-        },
-        /** Where the compass grip currently sits, in lng/lat. */
         handleLngLat: (): LngLat | null => {
           const st = useQuoteStore.getState();
           if (!st.arrayCenter || st.totalPanels <= 0) return null;

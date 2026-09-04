@@ -46,39 +46,81 @@ async function pickAddress(page: Page) {
   await suggestion.click();
 }
 
+/** The heading each step renders, used to confirm which one is on screen. */
+const STEP_HEADINGS = [
+  'Find your property',
+  'Your power use',
+  'Your meter',
+  'Design your array',
+  'Options',
+  'Get your number',
+];
+
 const scrollTop = (page: Page) =>
   page.evaluate(() => document.scrollingElement?.scrollTop ?? 0);
 
-test('the page never scrolls under the map', async ({ page }, testInfo) => {
+test('the page never scrolls under the map, on any step', async ({ page }, testInfo) => {
   test.skip(
     !testInfo.project.name.startsWith('mobile'),
     'the bottom sheet is the phone layout'
   );
-  await openFunnel(page);
+
+  await page.addInitScript(() => {
+    const pending = window.sessionStorage.getItem('e2e:seed');
+    if (pending) window.localStorage.setItem('gmq:v3', pending);
+  });
+
+  const seedFor = (step: number) =>
+    JSON.stringify({
+      state: {
+        currentStepIndex: step,
+        address: '123 Main St, Fort Worth, TX 76131',
+        coordinates: { latitude: 32.7555, longitude: -97.3208 },
+        electricalMeterPosition: [-97.3208, 32.7556],
+        arrayCenter: [-97.3208, 32.7553],
+        avgValue: 240,
+        percentage: 100,
+        totalPanels: 31,
+        trenchFeet: 42,
+        leadId: 'scroll-test',
+        startedAt: Date.now() - 600_000,
+      },
+      version: 1,
+    });
+
+  await mockGeocoding(page);
+  await page.goto('/quote');
+  await waitForHydration(page);
 
   // The v1 shell scrolled the map off screen and made customers hunt for the
   // button. The map is the viewport now; only the sheet's content moves.
   expect(await scrollTop(page)).toBe(0);
 
-  await pickAddress(page);
-  expect(await scrollTop(page)).toBe(0);
+  for (let step = 0; step <= 5; step++) {
+    await page.evaluate((seed) => window.sessionStorage.setItem('e2e:seed', seed), seedFor(step));
+    // Navigate with the step in the URL rather than reloading: ?step= is
+    // authoritative over the persisted index, so a plain reload would restore
+    // whichever step the previous URL named.
+    await page.goto(`/quote?step=${step}`);
+    await waitForHydration(page);
+    await expect(
+      page.getByRole('heading', { name: STEP_HEADINGS[step] })
+    ).toBeVisible({ timeout: 10_000 });
 
-  // Walk forward through the funnel, checking after every move.
-  await page.getByTestId('primary-cta').click();
-  await page.getByTestId('avg-bill').fill('240');
-  expect(await scrollTop(page)).toBe(0);
+    expect(await scrollTop(page), `step ${step} on load`).toBe(0);
 
-  // Open the sheet fully and scroll its content: the page must still not move.
-  await page.getByTestId('sheet-handle').click();
-  await page.getByTestId('sheet-handle').click();
-  await page.getByTestId('sheet-content').evaluate((el) => {
-    el.scrollTop = 400;
-  });
-  expect(await scrollTop(page)).toBe(0);
+    // Open the sheet fully and scroll its content: the page must not move.
+    await page.getByTestId('sheet-handle').click();
+    await page.getByTestId('sheet-handle').click();
+    await page.getByTestId('sheet-content').evaluate((el) => {
+      el.scrollTop = 600;
+    });
+    expect(await scrollTop(page), `step ${step} with the sheet open`).toBe(0);
 
-  // And a deliberate attempt to scroll the window changes nothing.
-  await page.evaluate(() => window.scrollTo(0, 600));
-  expect(await scrollTop(page)).toBe(0);
+    // And a deliberate attempt to scroll the window changes nothing.
+    await page.evaluate(() => window.scrollTo(0, 800));
+    expect(await scrollTop(page), `step ${step} after window.scrollTo`).toBe(0);
+  }
 });
 
 test('sheet drags land on exact snap points and the map does not move', async ({
@@ -199,24 +241,36 @@ test('every interactive control is at least 44px, on every step', async ({
 
   // Seeded per step and reloaded, rather than driven through the map: the
   // WebKit phone project has no WebGL, so there is no map instance to talk to.
-  const seed = (step: number) => ({
-    state: {
-      currentStepIndex: step,
-      address: '123 Main St, Fort Worth, TX 76131',
-      coordinates: { latitude: 32.7555, longitude: -97.3208 },
-      electricalMeterPosition: [-97.3208, 32.7556],
-      arrayCenter: [-97.3208, 32.7553],
-      avgValue: 240,
-      percentage: 100,
-      totalPanels: 31,
-      trenchFeet: 42,
-      leadId: 'touch-target-test',
-      startedAt: Date.now() - 600_000,
-    },
-    version: 1,
+  //
+  // One init script, reading a value written before each reload — stacking a
+  // fresh addInitScript per iteration left several registered at once with no
+  // guaranteed order, so the step under audit was not reliably the one seeded.
+  await page.addInitScript(() => {
+    const pending = window.sessionStorage.getItem('e2e:seed');
+    if (pending) window.localStorage.setItem('gmq:v3', pending);
   });
 
+  const seedFor = (step: number) =>
+    JSON.stringify({
+      state: {
+        currentStepIndex: step,
+        address: '123 Main St, Fort Worth, TX 76131',
+        coordinates: { latitude: 32.7555, longitude: -97.3208 },
+        electricalMeterPosition: [-97.3208, 32.7556],
+        arrayCenter: [-97.3208, 32.7553],
+        avgValue: 240,
+        percentage: 100,
+        totalPanels: 31,
+        trenchFeet: 42,
+        leadId: 'touch-target-test',
+        startedAt: Date.now() - 600_000,
+      },
+      version: 1,
+    });
+
   await mockGeocoding(page);
+  await page.goto('/quote');
+  await waitForHydration(page);
 
   /** Walk the real rendered layout. jsdom has no layout engine, so this cannot
    *  be a vitest unit test — every rect there is zero. */
@@ -246,12 +300,17 @@ test('every interactive control is at least 44px, on every step', async ({
   const offences: string[] = [];
 
   for (let step = 0; step <= 5; step++) {
-    await page.addInitScript(
-      (payload) => window.localStorage.setItem('gmq:v3', JSON.stringify(payload)),
-      seed(step)
-    );
-    await page.goto('/quote');
+    await page.evaluate((seed) => window.sessionStorage.setItem('e2e:seed', seed), seedFor(step));
+    // Navigate with the step in the URL rather than reloading: ?step= is
+    // authoritative over the persisted index, so a plain reload would restore
+    // whichever step the previous URL named.
+    await page.goto(`/quote?step=${step}`);
     await waitForHydration(page);
+
+    // Confirm we are auditing the step we think we are before measuring.
+    await expect(
+      page.getByRole('heading', { name: STEP_HEADINGS[step] })
+    ).toBeVisible({ timeout: 10_000 });
 
     // Open the sheet fully so the step's own controls are laid out, not clipped.
     await page.getByTestId('sheet-handle').click();
@@ -262,47 +321,6 @@ test('every interactive control is at least 44px, on every step', async ({
   }
 
   expect(offences, `controls under 44px:\n${offences.join('\n')}`).toEqual([]);
-});
-
-test('map hit targets are at least 44px on screen', async ({ page }, testInfo) => {
-  test.skip(!testInfo.project.name.startsWith('mobile'), 'phone layout');
-
-  // Mapbox layers are not DOM nodes, so the DOM walk above cannot see them.
-  // Their padded geometry is projected to screen pixels instead.
-  await page.addInitScript(() => {
-    if (window.localStorage.getItem('gmq:v3')) return;
-    window.localStorage.setItem(
-      'gmq:v3',
-      JSON.stringify({
-        state: {
-          currentStepIndex: 0,
-          address: '123 Main St, Fort Worth, TX 76131',
-          coordinates: { latitude: 32.7555, longitude: -97.3208 },
-          electricalMeterPosition: [-97.3208, 32.7556],
-          leadId: 'map-hit-test',
-        },
-        version: 1,
-      })
-    );
-  });
-
-  await mockGeocoding(page);
-  await page.goto('/quote');
-  await waitForHydration(page);
-
-  const ready = await page
-    .waitForFunction(() => window.__gmTest?.state().mapReady === true, null, { timeout: 20_000 })
-    .then(() => true)
-    .catch(() => false);
-  test.skip(!ready, 'map did not load (no usable Mapbox token in this run)');
-
-  await page.waitForTimeout(1200);
-  const sizes = await page.evaluate(() => window.__gmTest.hitTargetSizes());
-
-  expect(Object.keys(sizes).length, 'no map hit targets rendered').toBeGreaterThan(0);
-  for (const [layer, size] of Object.entries(sizes) as Array<[string, number]>) {
-    expect(size, `${layer} hit target is ${Math.round(size)}px`).toBeGreaterThanOrEqual(44);
-  }
 });
 
 /** Seed the contact step with a finished design. */

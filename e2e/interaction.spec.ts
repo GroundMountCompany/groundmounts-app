@@ -261,6 +261,93 @@ test.describe('map pins', () => {
     expect(coordMoved / Math.max(mapMoved, 1e-12), 'map panned with the pin').toBeGreaterThan(5);
   });
 
+  /**
+   * Probe the real grabbable radius by touching just inside and just outside
+   * it, rather than asking the app to report its own constant back.
+   */
+  async function grabbableAt(page: Page, point: Pt): Promise<boolean> {
+    const client = await page.context().newCDPSession(page);
+    const before = await page.evaluate(() => window.__gmTest.mapCenter());
+
+    await touchStart(client, [{ x: point[0], y: point[1], id: 1 }]);
+    for (let i = 1; i <= 6; i++) {
+      await touchMove(client, [{ x: point[0] + i * 6, y: point[1] + i * 4, id: 1 }]);
+    }
+    const during = await page.evaluate(() => ({
+      coords: window.__gmTest.state().coordinates,
+      meter: window.__gmTest.state().electricalMeterPosition,
+      map: window.__gmTest.mapCenter(),
+    }));
+    await touchEnd(client);
+    await page.waitForTimeout(200);
+
+    // A grab moved the marker; a miss let Mapbox pan the map instead.
+    const mapMoved = Math.hypot(during.map[0] - before[0], during.map[1] - before[1]);
+    return mapMoved < 1e-9;
+  }
+
+  test('the pin hit target really is thumb-sized', async ({ page }) => {
+    await page.addInitScript(() => {
+      if (window.localStorage.getItem('gmq:v3')) return;
+      window.localStorage.setItem(
+        'gmq:v3',
+        JSON.stringify({
+          state: {
+            currentStepIndex: 0,
+            address: 'County Road 1004, Rural, TX',
+            coordinates: { latitude: 32.1183, longitude: -97.9425 },
+            leadId: 'pin-radius-test',
+          },
+          version: 1,
+        })
+      );
+    });
+    await page.goto('/quote');
+    await page.waitForFunction(() => typeof window.__gmTest !== 'undefined', null, {
+      timeout: 30_000,
+    });
+    await page.waitForFunction(() => window.__gmTest.state().mapReady === true, null, {
+      timeout: 30_000,
+    });
+    await page.waitForFunction(() => !window.__gmTest.isMoving(), null, { timeout: 15_000 });
+    await page.waitForTimeout(600);
+
+    const centre = await page.evaluate(() => {
+      const t = window.__gmTest;
+      const r = t.canvasRect();
+      const c = t.state().coordinates;
+      const p = t.project([c.longitude, c.latitude]);
+      return [r.left + p[0], r.top + p[1]] as [number, number];
+    });
+
+    // 22px from centre is inside a 44px target; 30px is outside the 52px one.
+    expect(
+      await grabbableAt(page, [centre[0] + 22, centre[1]]),
+      'pin was not grabbable 22px from its centre'
+    ).toBe(true);
+
+    // Reload so the second probe starts from a clean camera.
+    await page.reload();
+    await page.waitForFunction(() => window.__gmTest?.state().mapReady === true, null, {
+      timeout: 30_000,
+    });
+    await page.waitForFunction(() => !window.__gmTest.isMoving(), null, { timeout: 15_000 });
+    await page.waitForTimeout(600);
+
+    const centre2 = await page.evaluate(() => {
+      const t = window.__gmTest;
+      const r = t.canvasRect();
+      const c = t.state().coordinates;
+      const p = t.project([c.longitude, c.latitude]);
+      return [r.left + p[0], r.top + p[1]] as [number, number];
+    });
+
+    expect(
+      await grabbableAt(page, [centre2[0] + 70, centre2[1]]),
+      'pin was grabbable 70px away, so the hit area is larger than intended'
+    ).toBe(false);
+  });
+
   test('the meter is draggable on its own step', async ({ page }) => {
     await page.addInitScript(() => {
       if (window.localStorage.getItem('gmq:v3')) return;

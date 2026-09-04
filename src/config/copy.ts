@@ -160,6 +160,8 @@ export const UI = {
   annualTargetPrefix: 'That is about',
   annualTargetSuffix: 'a year to cover.',
   offsetSliderLabel: 'Offset percentage',
+  /** An ordinary Texas bill, shown greyed so the box does not look empty. */
+  billPlaceholder: '240',
 
   // Step 3
   meterTapPrompt: 'Tap the map where your meter sits.',
@@ -184,6 +186,8 @@ export const UI = {
   submitting: 'Sending',
   submitFailed: 'Did not go through. Try again.',
   emailFailedAfterSave: 'Your design is saved. The email did not send — try again.',
+  lockedContactNote: 'These are on file with your design.',
+  startOver: 'Not you? Start over',
 
   // Shell
   sheetLabel: 'Controls',

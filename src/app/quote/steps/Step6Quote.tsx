@@ -24,9 +24,21 @@ export default function Step6Quote() {
   const azimuth = useQuoteStore((s) => s.azimuth);
   const trenchFeet = useQuoteStore((s) => s.trenchFeet);
 
-  const [name, setName] = useState('');
-  const [email, setEmail] = useState('');
-  const [phone, setPhone] = useState('');
+  // Contact details live in the store so a reload keeps them, and so the email
+  // is guaranteed to go to the address that was filed with the lead.
+  const name = useQuoteStore((s) => s.contactName);
+  const email = useQuoteStore((s) => s.contactEmail);
+  const phone = useQuoteStore((s) => s.contactPhone);
+  const setContact = useQuoteStore((s) => s.setContact);
+  const leadFiled = useQuoteStore((s) => s.leadFiled);
+  const leadId = useQuoteStore((s) => s.leadId);
+  const setStep = useQuoteStore((s) => s.setCurrentStepIndex);
+  const resetQuote = useQuoteStore((s) => s.resetQuote);
+
+  // Once the lead is filed those three fields are locked: changing the address
+  // afterwards would email a different person than the Airtable record names.
+  const locked = leadFiled !== null && leadFiled === leadId;
+
   const [company, setCompany] = useState(''); // honeypot
   const [submitting, setSubmitting] = useState(false);
   const [done, setDone] = useState(false);
@@ -167,7 +179,8 @@ export default function Step6Quote() {
         <input
           id="name"
           value={name}
-          onChange={(e) => setName(e.target.value)}
+          onChange={(e) => setContact('contactName', e.target.value)}
+          readOnly={locked}
           placeholder={UI.namePlaceholder}
           className="mt-1 h-14 w-full rounded-xl border border-neutral-300 px-4 text-[17px] outline-none focus:border-neutral-500"
         />
@@ -179,7 +192,8 @@ export default function Step6Quote() {
           type="email"
           inputMode="email"
           value={email}
-          onChange={(e) => setEmail(e.target.value)}
+          onChange={(e) => setContact('contactEmail', e.target.value)}
+          readOnly={locked}
           placeholder={UI.emailPlaceholder}
           className="mt-1 h-14 w-full rounded-xl border border-neutral-300 px-4 text-[17px] outline-none focus:border-neutral-500"
         />
@@ -191,11 +205,30 @@ export default function Step6Quote() {
           type="tel"
           inputMode="tel"
           value={phone}
-          onChange={(e) => setPhone(e.target.value)}
+          onChange={(e) => setContact('contactPhone', e.target.value)}
+          readOnly={locked}
           placeholder={UI.phonePlaceholder}
           className="mt-1 h-14 w-full rounded-xl border border-neutral-300 px-4 text-[17px] outline-none focus:border-neutral-500"
         />
       </label>
+
+      {locked && (
+        <div data-testid="contact-locked" className="space-y-2">
+          <p className="text-[16px] text-neutral-600">{UI.lockedContactNote}</p>
+          <button
+            type="button"
+            data-testid="start-over"
+            onClick={() => {
+              resetQuote();
+              clearPersistedQuote();
+              setStep(0);
+            }}
+            className="min-h-[48px] text-[17px] font-semibold text-blue-700 underline underline-offset-2"
+          >
+            {UI.startOver}
+          </button>
+        </div>
+      )}
 
       {error && <p className="text-[17px] text-red-700">{error}</p>}
 

@@ -50,7 +50,7 @@ export default function Step2Power() {
             type="text"
             inputMode="decimal"
             autoComplete="off"
-            placeholder="240"
+            placeholder={UI.billPlaceholder}
             value={avgValue === 0 ? '' : String(avgValue)}
             onChange={(e) => {
               const digits = e.target.value.replace(/[^0-9.]/g, '');

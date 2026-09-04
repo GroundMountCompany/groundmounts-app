@@ -5,7 +5,7 @@ import EducationCard from '@/components/shell/EducationCard';
 import { STEPS, UI } from '@/config/copy';
 import { useQuoteStore } from '@/store/quoteStore';
 import { footprintFt } from '@/lib/geo/array';
-import { annualKwh, percentOfSouth, TX_FALLBACK_CURVE } from '@/lib/production';
+import { annualKwh, percentOfSouth } from '@/lib/production';
 import { PANELS } from '@/config/pricing';
 import { useDesignSetup } from './useDesignSetup';
 
@@ -33,11 +33,19 @@ export default function Step4Design() {
   const panelAdjust = useQuoteStore((s) => s.panelAdjust);
   const soilClass = useQuoteStore((s) => s.soilClass);
   const setPanelAdjust = useQuoteStore((s) => s.setPanelAdjust);
+  const slopeSource = useQuoteStore((s) => s.slopeSource);
+  const chooseSlopeTier = useQuoteStore((s) => s.chooseSlopeTier);
+  // The site's own PVWatts curve when /api/site answered, the Texas fallback
+  // when it did not. Same source as the sizing that chose the panel count and
+  // as the production figure on the quote — this screen used to read the
+  // fallback unconditionally, so a customer with a real curve saw one number
+  // here and a different one two steps later.
+  const curve = useQuoteStore((s) => s.productionCurve);
 
   const footprint = useMemo(() => footprintFt(totalPanels, panelTier), [totalPanels, panelTier]);
   const kw = (totalPanels * PANELS[panelTier].watts) / 1000;
-  const southPct = percentOfSouth(TX_FALLBACK_CURVE, azimuth);
-  const production = annualKwh(TX_FALLBACK_CURVE, kw, azimuth);
+  const southPct = percentOfSouth(curve, azimuth);
+  const production = annualKwh(curve, kw, azimuth);
 
   return (
     <div className="space-y-4">
@@ -61,6 +69,40 @@ export default function Step4Design() {
           testId="stat-facing"
         />
       </div>
+
+      {/*
+        Both terrain lookups failed, so ask. An unknown slope prices at no adder
+        at all, which quietly under-quotes every steep parcel in the hill
+        country; three taps is a better answer than a silent guess.
+      */}
+      {(slopeSource === 'unavailable' || slopeSource === 'chosen') && (
+        <div data-testid="slope-picker" className="space-y-2 rounded-xl border border-neutral-200 p-3">
+          <p className="text-[16px] font-medium text-neutral-900">{UI.slopeAsk}</p>
+          <div className="flex gap-2">
+            {([
+              { tier: 'Flat', label: UI.slopeFlat },
+              { tier: 'Rolling', label: UI.slopeRolling },
+              { tier: 'Steep', label: UI.slopeSteep },
+            ] as const).map((o) => (
+              <button
+                key={o.tier}
+                type="button"
+                data-testid={`slope-${o.tier.toLowerCase()}`}
+                aria-pressed={slopeTier === o.tier}
+                onClick={() => chooseSlopeTier(o.tier)}
+                className={`min-h-[56px] flex-1 rounded-xl border px-2 text-[17px] font-semibold ${
+                  slopeTier === o.tier
+                    ? 'border-neutral-900 bg-neutral-900 text-white'
+                    : 'border-neutral-300 bg-white text-neutral-900'
+                }`}
+              >
+                {o.label}
+              </button>
+            ))}
+          </div>
+          <p className="text-[15px] text-neutral-500">{UI.slopeAskHint}</p>
+        </div>
+      )}
 
       <div className="flex items-center justify-between rounded-xl border border-neutral-200 px-3 py-2">
         <span className="text-[17px] font-medium text-neutral-900">{UI.panels}</span>

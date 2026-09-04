@@ -39,38 +39,39 @@ export async function POST(request: NextRequest) {
     const {
       email,
       address,
-      quotation,
       totalPanels,
-      additionalCost,
+      systemSizeKw,
       trenchFeet,
-      percentage
+      annualProductionKwh,
+      lineItems,
+      estimate,
+      priceLow,
+      priceHigh,
     } = body;
 
-    // Calculate values for email
-    const systemCostRaw = quotation || 0;
-    const trenchingCostRaw = additionalCost || 0;
-    const trenchingDistance = trenchFeet || 0;
-    const totalCostRaw = systemCostRaw + trenchingCostRaw;
-    const systemSizeKw = (totalPanels * 435) / 1000;
-
-    // Estimate monthly bill from the quote (reverse calculation)
-    // If percentage is the offset and we know panels, we can estimate the original bill
-    const monthlyBill = body.avgBill || Math.round((totalPanels * 435 * 0.18 * 30 * 24 / 1000) * 0.14 / (percentage / 100));
-
-    const formattedDate = new Date().toLocaleDateString('en-US', { day: '2-digit', month: 'short', year: 'numeric' });
-    const calendlyUrl = process.env.NEXT_PUBLIC_CALENDLY_URL || 'https://calendly.com/groundmounts/consultation';
+    // Everything the email shows was priced by priceQuote before it got here.
+    // This route derives nothing: it used to re-compute the system size from a
+    // hardcoded 435W and reverse-engineer a monthly bill from a hardcoded
+    // capacity factor and rate, which is how it drifted from the screen.
+    const formattedDate = new Date().toLocaleDateString('en-US', {
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+    });
+    const calendlyUrl =
+      process.env.NEXT_PUBLIC_CALENDLY_URL || 'https://calendly.com/groundmounts/consultation';
 
     const emailTemplate = EmailTemplate({
       client: email,
       address: address || 'Your Property',
-      systemCostRaw,
-      trenchingCostRaw,
-      trenchingDistance,
-      totalCostRaw,
       totalPanels: totalPanels || 0,
-      systemSizeKw,
-      monthlyBill,
-      offsetPercentage: percentage || 100,
+      systemSizeKw: systemSizeKw || 0,
+      trenchingDistance: trenchFeet || 0,
+      annualProductionKwh: annualProductionKwh || 0,
+      lineItems: Array.isArray(lineItems) ? lineItems : [],
+      estimate: estimate || 0,
+      priceLow: priceLow || 0,
+      priceHigh: priceHigh || 0,
       date: formattedDate,
       calendlyUrl,
     }) as ReactElement;

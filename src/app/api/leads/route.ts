@@ -14,6 +14,12 @@ const MAX_SCREENSHOT_BYTES = 2 * 1024 * 1024;
  * a buffer for it.
  */
 const MAX_SCREENSHOT_B64_CHARS = Math.ceil((MAX_SCREENSHOT_BYTES * 4) / 3) + 4;
+/** Midpoint of a low/high pair, for the single-value legacy columns. */
+function midpoint(low?: number, high?: number): number | undefined {
+  if (typeof low !== 'number' || typeof high !== 'number') return undefined;
+  return Math.round((low + high) / 2);
+}
+
 const NOTIFICATION_EMAIL = "bert@groundmounts.com";
 const AIRTABLE_BASE_ID = process.env.AIRTABLE_BASE_ID;
 // Airtable record deep links need the table *id* (tblXXXXXXXX), not its name.
@@ -29,9 +35,7 @@ interface LeadPayload {
   name?: string;
   source?: string;
   quote?: {
-    quotation?: number;
     totalPanels?: number;
-    additionalCost?: number;
     /** Trench run in feet, straight from the map. */
     trenchFeet?: number;
     azimuth?: number;
@@ -172,9 +176,11 @@ export async function POST(req: NextRequest) {
       'Monthly Bill High': lead.quote?.highBill,
       'Offset Percentage': lead.quote?.percentage,
       'Trenching Distance ft': lead.quote?.trenchFeet,
-      'Trenching Cost': lead.quote?.additionalCost,
-      'Equipment Cost': lead.quote?.quotation,
-      'Total Investment': lead.quote?.quotation ? (lead.quote.quotation + (lead.quote.additionalCost || 0)) : undefined,
+      // Legacy columns, kept for the owner's existing views. Midpoints of the
+      // same priced figures rather than a second calculation.
+      'Trenching Cost': midpoint(lead.quote?.trenchingLow, lead.quote?.trenchingHigh),
+      'Equipment Cost': midpoint(lead.quote?.equipmentLow, lead.quote?.equipmentHigh),
+      'Total Investment': midpoint(lead.quote?.priceLow, lead.quote?.priceHigh),
       'Price Low': lead.quote?.priceLow,
       'Price High': lead.quote?.priceHigh,
       'Equipment Cost Low': lead.quote?.equipmentLow,
@@ -217,9 +223,9 @@ export async function POST(req: NextRequest) {
       const panels = lead.quote?.totalPanels;
       const avgBill = lead.quote?.avgBill;
       const trenchFt = lead.quote?.trenchFeet;
-      const equipment = lead.quote?.quotation;
-      const trenchCost = lead.quote?.additionalCost;
-      const total = equipment ? equipment + (trenchCost || 0) : undefined;
+      const equipment = midpoint(lead.quote?.equipmentLow, lead.quote?.equipmentHigh);
+      const trenchCost = midpoint(lead.quote?.trenchingLow, lead.quote?.trenchingHigh);
+      const total = midpoint(lead.quote?.priceLow, lead.quote?.priceHigh);
 
       await resend.emails.send({
         from: 'Ground Mounts <leads@groundmounts.com>',

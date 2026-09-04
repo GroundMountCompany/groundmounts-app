@@ -34,6 +34,11 @@ export interface PricingOptions {
  */
 export interface PricingSite {
   slopePercent: number | null;
+  /**
+   * The tier the customer picked when the terrain lookup failed. Takes
+   * precedence: an answer from somebody standing on the land beats no answer.
+   */
+  slopeTier?: SlopeTierName | null;
   /** SSURGO texture description, or null when the lookup failed. */
   soilClass: string | null;
 }
@@ -75,11 +80,18 @@ export function conduitFor(systemKw: number, hasBattery: boolean) {
 }
 
 /** The slope tier a measured grade falls into. */
-export function slopeTierFor(slopePercent: number | null): {
+export function slopeTierFor(
+  slopePercent: number | null,
+  chosenTier?: SlopeTierName | null
+): {
   name: SlopeTierName;
   adderPct: number;
 } {
-  if (slopePercent === null) return { name: 'Unknown', adderPct: 0 };
+  if (slopePercent === null) {
+    if (!chosenTier || chosenTier === 'Unknown') return { name: 'Unknown', adderPct: 0 };
+    const picked = SITE.slopeTiers.find((t) => t.name === chosenTier);
+    return { name: chosenTier, adderPct: picked?.adderPct ?? 0 };
+  }
   const tier =
     SITE.slopeTiers.find((t) => slopePercent < t.maxPercent) ??
     SITE.slopeTiers[SITE.slopeTiers.length - 1];
@@ -166,7 +178,7 @@ export function priceQuote(
   // slope does not make the battery cost more.
   const groundwork = equipment + trench;
 
-  const slope = slopeTierFor(site.slopePercent);
+  const slope = slopeTierFor(site.slopePercent, site.slopeTier);
   if (slope.adderPct > 0) {
     lineItems.push({
       key: 'slope',

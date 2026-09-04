@@ -99,16 +99,22 @@ export default function Step6Quote() {
         const emailRes = await fetch('/api/sendEmail', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
+          // The email is rendered from the same priced quote the screen shows.
+          // It used to be handed raw inputs and re-derive its own numbers with
+          // its own constants, which is how the two drifted apart.
           body: JSON.stringify({
             leadId: payload.id,
             email,
             address: payload.address,
-            quotation: payload.quote.quotation,
+            name,
             totalPanels: payload.quote.totalPanels,
-            additionalCost: payload.quote.additionalCost,
+            systemSizeKw: payload.quote.systemSizeKw,
             trenchFeet: payload.quote.trenchFeet,
-            percentage: payload.quote.percentage,
-            avgBill: payload.quote.avgBill,
+            annualProductionKwh: payload.quote.annualProductionKwh,
+            lineItems: payload.quote.lineItems,
+            estimate: payload.quote.estimate,
+            priceLow: payload.quote.priceLow,
+            priceHigh: payload.quote.priceHigh,
             honeypot: company,
             ttc_ms: payload.ttc_ms,
           }),
@@ -187,7 +193,9 @@ export default function Step6Quote() {
           <dt className="text-neutral-500">{UI.summarySystem}</dt>
           <dd className="text-right font-semibold">{kw.toFixed(1)} kW</dd>
           <dt className="text-neutral-500">{UI.summaryProduction}</dt>
-          <dd className="text-right font-semibold">{production.toLocaleString()} kWh/yr</dd>
+          <dd data-testid="summary-production" className="text-right font-semibold">
+            {production.toLocaleString()} kWh/yr
+          </dd>
           <dt className="text-neutral-500">{UI.summaryTrench}</dt>
           <dd className="text-right font-semibold">{trenchFeet} ft</dd>
         </dl>

@@ -29,13 +29,16 @@ export interface SchedulerOptions {
  * bounded wait expires. An empty obstacle list is a valid answer, not a reason
  * to hang. Returns a cancel function.
  */
+/** How long placement waits for building tiles before going ahead without them. */
+export const PLACEMENT_WAIT_MS = 1500;
+
 export function scheduleAutoPlacement(
   host: PlacementHost,
   commit: (obstacles: Array<Feature<Polygon>>) => void,
   options: SchedulerOptions = {}
 ): () => void {
   const {
-    timeoutMs = 1500,
+    timeoutMs = PLACEMENT_WAIT_MS,
     setTimeoutFn = ((fn: () => void, ms: number) => setTimeout(fn, ms)) as NonNullable<
       SchedulerOptions['setTimeoutFn']
     >,

@@ -11,7 +11,8 @@ import {
   RATE_CENTS_MIN,
   RATE_CENTS_MAX,
 } from '@/store/quoteStore';
-import { dollarsPerKwhFromCents, estimateMonthlyKWh } from '@/lib/solar';
+import { dollarsPerKwhFromCents } from '@/lib/rate';
+import { annualTargetKwh } from '@/lib/sizing';
 import { sanitizeNumeric, parseIntegerField, parseNumericField } from '@/lib/numericField';
 
 /**
@@ -33,8 +34,9 @@ export default function Step2Power() {
   const [billText, setBillText] = useState(avgValue === 0 ? '' : String(avgValue));
   const [rateText, setRateText] = useState(String(rateCents));
 
-  const monthlyKwh = estimateMonthlyKWh(avgValue, dollarsPerKwhFromCents(rateCents));
-  const annualTarget = Math.round(monthlyKwh * 12 * (percentage / 100));
+  const annualTarget = Math.round(
+    annualTargetKwh(avgValue, dollarsPerKwhFromCents(rateCents), percentage)
+  );
   const rateLooksOdd = rateCents < RATE_CENTS_MIN || rateCents > RATE_CENTS_MAX;
 
   return (

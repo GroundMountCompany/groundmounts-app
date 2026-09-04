@@ -22,6 +22,7 @@ import bearing from '@turf/bearing';
 import { point } from '@turf/helpers';
 import { buildTrench } from '@/lib/geo/trench';
 import { slopeAt } from '@/lib/slope';
+import { refreshSiteIntel } from '@/lib/siteIntel';
 import { captureMap } from '@/lib/screenshot';
 import type { ArraySpec } from '@/lib/geo/array';
 import type { LngLat } from '@/lib/geo/units';
@@ -48,7 +49,7 @@ async function loadMapbox() {
 
 export type MapMode = 'address' | 'place-meter' | 'design' | 'hidden';
 
-/** Debounce for the slope lookup after the array settles. */
+/** Debounce for the slope and site lookups after the array settles. */
 const SLOPE_DEBOUNCE_MS = 600;
 
 type GrabKind = 'array' | 'rotate' | 'pin' | 'meter';
@@ -269,7 +270,7 @@ export default function MapStage({ mode }: { mode: MapMode }) {
       // for an array that had not moved, and a re-fit on a step with no array.
       if (kind !== 'array' && kind !== 'rotate') return;
 
-      scheduleSlope();
+      scheduleSiteRefresh();
 
       // If the array has been dragged half out of the window, bring it back
       // rather than leaving the customer to hunt for it.
@@ -484,14 +485,23 @@ export default function MapStage({ mode }: { mode: MapMode }) {
     }
   }, [mounted]);
 
-  /** Re-run the slope lookup once the array has settled. */
-  function scheduleSlope() {
+  /**
+   * Re-read the ground once the array has settled.
+   *
+   * Slope and site intel share one timer: both describe the same patch of
+   * ground and both are triggered by the same gesture, so firing them
+   * separately would mean two debounces racing over one drag.
+   */
+  function scheduleSiteRefresh() {
     if (slopeTimer.current) clearTimeout(slopeTimer.current);
     slopeTimer.current = setTimeout(async () => {
       const { arrayCenter, setSlope } = useQuoteStore.getState();
       if (!arrayCenter) return;
+      // Fire the network lookup first; it is skipped unless the array left its
+      // ~100 m cell, so an adjustment of a few feet costs nothing.
+      void refreshSiteIntel(arrayCenter);
       const r = await slopeAt(mapRef.current, arrayCenter);
-      setSlope(r.percent, r.tier);
+      setSlope(r.percent, r.tier, r.source);
     }, SLOPE_DEBOUNCE_MS);
   }
 

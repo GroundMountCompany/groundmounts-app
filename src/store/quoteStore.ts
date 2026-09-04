@@ -4,7 +4,7 @@ import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import * as turf from '@turf/turf';
 import { v4 as uuid } from 'uuid';
-import { TRENCHING_COST_PER_FT } from '@/lib/solar';
+import { TRENCH } from '@/config/pricing';
 import type { PanelTier } from '@/config/pricing';
 import type { SlopeTier } from '@/lib/slope';
 import { TX_FALLBACK_CURVE, type ProductionCurve } from '@/lib/production';
@@ -69,6 +69,12 @@ interface QuoteState {
   slopePercent: number | null;
   slopeTier: SlopeTier;
   /**
+   * Where the slope answer came from. `null` means nothing has looked yet;
+   * 'unavailable' means both lookups failed and the customer has to be asked;
+   * 'chosen' means they answered.
+   */
+  slopeSource: 'terrain' | 'tilequery' | 'unavailable' | 'chosen' | null;
+  /**
    * The customer's rate in whole cents per kWh.
    *
    * Cents, not dollars: a dollars field means typing "0." mid-entry, which
@@ -77,6 +83,13 @@ interface QuoteState {
   rateCentsPerKwh: number;
   /** Manual panel adjustment on the design step, added to the sized count. */
   panelAdjust: number;
+  /**
+   * The count sizing produced, before any manual adjustment. Kept so the ±
+   * control and a tier change can both work from the same baseline.
+   */
+  sizedPanels: number;
+  /** The azimuth sizing was done at. Rotation must not re-size the array. */
+  sizedAzimuth: number;
   /**
    * True once the map instance exists and its style has loaded. mapbox-gl is
    * imported lazily now, so anything that needs the map has to wait for this
@@ -135,9 +148,16 @@ interface QuoteActions {
   setAzimuth: (v: number) => void;
   setPanelTier: (v: PanelTier) => void;
   setTrenchFeet: (v: number) => void;
-  setSlope: (percent: number | null, tier: SlopeTier) => void;
+  setSlope: (
+    percent: number | null,
+    tier: SlopeTier,
+    source?: 'terrain' | 'tilequery' | 'unavailable'
+  ) => void;
+  /** The customer's own answer when the terrain lookup could not give one. */
+  chooseSlopeTier: (tier: SlopeTier) => void;
   setRateCentsPerKwh: (v: number) => void;
   setPanelAdjust: (v: number) => void;
+  setSized: (panels: number, azimuth: number) => void;
   setMapReady: (v: boolean) => void;
   setLeadFiled: (leadId: string | null) => void;
   setEmailSent: (leadId: string | null) => void;
@@ -165,7 +185,9 @@ const initialState: QuoteState = {
   totalPanels: 0,
   avgValue: 0,
   highestValue: 0,
-  percentage: 50,
+  // Covering all of your use is the common choice, so it is where the slider
+  // starts. Anything else is a deliberate decision the customer makes.
+  percentage: 100,
   paymentMethod: 'unselected',
   quoteId: '',
   leadId: '',
@@ -181,8 +203,11 @@ const initialState: QuoteState = {
   trenchFeet: 0,
   slopePercent: null,
   slopeTier: 'Unknown',
+  slopeSource: null,
   rateCentsPerKwh: DEFAULT_RATE_CENTS,
   panelAdjust: 0,
+  sizedPanels: 0,
+  sizedAzimuth: 180,
   mapReady: false,
   leadFiled: null,
   emailSent: null,
@@ -258,7 +283,7 @@ export const useQuoteStore = create<QuoteStore>()(
             coordinates: { latitude: meter[1], longitude: meter[0] },
             distanceInFeet: feet,
           },
-          additionalCost: Math.max(0, feet * TRENCHING_COST_PER_FT),
+          additionalCost: Math.max(0, feet * TRENCH.basePerFt),
         });
       },
 
@@ -275,11 +300,16 @@ export const useQuoteStore = create<QuoteStore>()(
       setTrenchFeet: (trenchFeet) =>
         set({
           trenchFeet,
-          additionalCost: Math.max(0, Math.round(trenchFeet) * TRENCHING_COST_PER_FT),
+          additionalCost: Math.max(0, Math.round(trenchFeet) * TRENCH.basePerFt),
         }),
-      setSlope: (slopePercent, slopeTier) => set({ slopePercent, slopeTier }),
+      setSlope: (slopePercent, slopeTier, source) =>
+        set({ slopePercent, slopeTier, slopeSource: source ?? null }),
+
+      chooseSlopeTier: (slopeTier) =>
+        set({ slopeTier, slopePercent: null, slopeSource: 'chosen' }),
       setRateCentsPerKwh: (rateCentsPerKwh) => set({ rateCentsPerKwh }),
       setPanelAdjust: (panelAdjust) => set({ panelAdjust }),
+      setSized: (sizedPanels, sizedAzimuth) => set({ sizedPanels, sizedAzimuth }),
       setMapReady: (mapReady) => set({ mapReady }),
       setLeadFiled: (leadFiled) => set({ leadFiled }),
       setEmailSent: (emailSent) => set({ emailSent }),
@@ -326,8 +356,11 @@ export const useQuoteStore = create<QuoteStore>()(
         trenchFeet: state.trenchFeet,
         slopePercent: state.slopePercent,
         slopeTier: state.slopeTier,
+        slopeSource: state.slopeSource,
         rateCentsPerKwh: state.rateCentsPerKwh,
         panelAdjust: state.panelAdjust,
+        sizedPanels: state.sizedPanels,
+        sizedAzimuth: state.sizedAzimuth,
         leadFiled: state.leadFiled,
         emailSent: state.emailSent,
         contactName: state.contactName,

@@ -171,6 +171,11 @@ export const UI = {
   meterPlaced: 'Meter placed. Drag it if it is off.',
 
   // Step 4
+  slopeAsk: 'We could not read the ground here. Which is closest?',
+  slopeFlat: 'Flat',
+  slopeRolling: 'Rolling',
+  slopeSteep: 'Steep',
+  slopeAskHint: 'Steeper ground takes more grading and longer piles.',
   tierStandard: 'Standard',
   tierPremium: 'Premium',
   batteryNone: 'None',

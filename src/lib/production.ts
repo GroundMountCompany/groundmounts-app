@@ -7,7 +7,9 @@
  * frame as the gesture. No debounce, no request per drag frame.
  */
 
-export const REFERENCE_AZIMUTHS = [90, 135, 180, 225, 270] as const;
+import { DEFAULTS } from '@/config/pricing';
+
+export const REFERENCE_AZIMUTHS = DEFAULTS.pvwatts.referenceAzimuths;
 
 /** kWh per installed kW per year, sampled at REFERENCE_AZIMUTHS. */
 export type ProductionCurve = Record<number, number>;
@@ -16,13 +18,24 @@ export type ProductionCurve = Record<number, number>;
  * Fallback curve for Texas when PVWatts is unreachable, shaped like a real
  * north-hemisphere response: south best, east/west materially worse.
  */
-export const TX_FALLBACK_CURVE: ProductionCurve = {
-  90: 1255,
-  135: 1425,
-  180: 1500,
-  225: 1420,
-  270: 1245,
+const SOUTH_YIELD = DEFAULTS.fallbackKwhPerKwYear;
+
+/**
+ * Shape of the fallback response, as a fraction of the south-facing yield.
+ * The peak itself is the configured figure, so changing it in pricing.ts moves
+ * the whole curve instead of leaving the shoulders behind.
+ */
+const FALLBACK_SHAPE: Record<number, number> = {
+  90: 0.8367,
+  135: 0.95,
+  180: 1,
+  225: 0.9467,
+  270: 0.83,
 };
+
+export const TX_FALLBACK_CURVE: ProductionCurve = Object.fromEntries(
+  REFERENCE_AZIMUTHS.map((az) => [az, Math.round(SOUTH_YIELD * FALLBACK_SHAPE[az])])
+);
 
 function normalizeAzimuth(azimuth: number): number {
   return ((azimuth % 360) + 360) % 360;

@@ -45,3 +45,32 @@ export function resizeForTier(
 ): number {
   return panelsForTarget(curve, targetAnnualKwh, azimuth, tier);
 }
+
+/**
+ * The customer's own +/- adjustment on top of a sized count.
+ *
+ * Shared so the design step, the option deltas and the sizing effect cannot
+ * disagree about what "31 panels, minus two" means.
+ */
+export function applyAdjust(sizedPanels: number, panelAdjust: number): number {
+  return Math.max(1, sizedPanels + panelAdjust);
+}
+
+/**
+ * How many panels this design would have if it were built with `tier`.
+ *
+ * Switching tier re-sizes: a 460 W panel covers the same bill with fewer of
+ * them. The option card has to price that, not the current count with a
+ * different price per watt, or the quoted delta is not the change the customer
+ * gets when they tap it.
+ */
+export function sizedCountForTier(
+  curve: ProductionCurve,
+  targetAnnualKwh: number,
+  azimuth: number,
+  tier: PanelTier,
+  panelAdjust: number
+): number {
+  const sized = resizeForTier(curve, targetAnnualKwh, azimuth, tier);
+  return sized <= 0 ? 0 : applyAdjust(sized, panelAdjust);
+}

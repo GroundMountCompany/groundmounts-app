@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { sanitizeNumeric, parseNumericField, parseIntegerField } from './numericField';
-import { dollarsPerKwhFromCents, estimateMonthlyKWh, BILL_PER_KWH } from './solar';
+import { dollarsPerKwhFromCents } from './rate';
+import { annualTargetKwh } from './sizing';
+import { DEFAULTS } from '@/config/pricing';
 
 /**
  * The reported bug: typing "0." into a number-backed rate field produced NaN,
@@ -24,7 +26,7 @@ describe('numeric fields never produce NaN', () => {
 
   it('keeps real values intact', () => {
     expect(parseNumericField('240')).toBe(240);
-    expect(parseNumericField('0.14')).toBeCloseTo(0.14, 5);
+    expect(parseNumericField('0.17')).toBeCloseTo(0.17, 5);
     expect(parseIntegerField('14')).toBe(14);
   });
 
@@ -33,7 +35,7 @@ describe('numeric fields never produce NaN', () => {
     for (const raw of PARTIAL_ENTRIES) {
       const cents = parseIntegerField(raw, 0);
       const rate = dollarsPerKwhFromCents(cents);
-      const kwh = estimateMonthlyKWh(parseNumericField(raw, 0), rate);
+      const kwh = annualTargetKwh(parseNumericField(raw, 0), rate, 100);
       expect(Number.isNaN(rate), `rate from "${raw}"`).toBe(false);
       expect(Number.isNaN(kwh), `kwh from "${raw}"`).toBe(false);
     }
@@ -55,14 +57,14 @@ describe('sanitizeNumeric', () => {
 
 describe('cents to dollars', () => {
   it('converts whole cents', () => {
-    expect(dollarsPerKwhFromCents(14)).toBeCloseTo(0.14, 6);
+    expect(dollarsPerKwhFromCents(17)).toBeCloseTo(0.17, 6);
     expect(dollarsPerKwhFromCents(9)).toBeCloseTo(0.09, 6);
   });
 
   it('falls back for zero, negative and non-finite input', () => {
-    expect(dollarsPerKwhFromCents(0)).toBe(BILL_PER_KWH);
-    expect(dollarsPerKwhFromCents(-3)).toBe(BILL_PER_KWH);
-    expect(dollarsPerKwhFromCents(Number.NaN)).toBe(BILL_PER_KWH);
+    expect(dollarsPerKwhFromCents(0)).toBe(DEFAULTS.ratePerKwh);
+    expect(dollarsPerKwhFromCents(-3)).toBe(DEFAULTS.ratePerKwh);
+    expect(dollarsPerKwhFromCents(Number.NaN)).toBe(DEFAULTS.ratePerKwh);
   });
 });
 

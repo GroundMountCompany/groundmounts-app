@@ -17,6 +17,7 @@ export function useQuote(): Quote {
   const batteryUnits = useQuoteStore((s) => s.batteryUnits);
   const needsClearing = useQuoteStore((s) => s.needsClearing);
   const slopePercent = useQuoteStore((s) => s.slopePercent);
+  const slopeTier = useQuoteStore((s) => s.slopeTier);
   const soilClass = useQuoteStore((s) => s.soilClass);
 
   return useMemo(
@@ -24,8 +25,8 @@ export function useQuote(): Quote {
       priceQuote(
         { panelCount, tier, trenchFeet },
         { batteryUnits, needsClearing },
-        { slopePercent, soilClass }
+        { slopePercent, slopeTier, soilClass }
       ),
-    [panelCount, tier, trenchFeet, batteryUnits, needsClearing, slopePercent, soilClass]
+    [panelCount, tier, trenchFeet, batteryUnits, needsClearing, slopePercent, slopeTier, soilClass]
   );
 }

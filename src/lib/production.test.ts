@@ -18,12 +18,15 @@ describe('azimuth interpolation', () => {
   });
 
   it('stays within the surrounding samples between them (no overshoot)', () => {
-    // A non-monotone spline would bulge above 1500 near south and show
+    // A non-monotone spline would bulge above the south sample and show
     // production rising as the user rotates away from it.
+    const samples = Object.values(TX_FALLBACK_CURVE);
+    const lowest = Math.min(...samples);
+    const highest = Math.max(...samples);
     for (let az = 90; az <= 270; az += 1) {
       const v = productionAt(TX_FALLBACK_CURVE, az);
-      expect(v).toBeGreaterThanOrEqual(1245 - 1e-6);
-      expect(v).toBeLessThanOrEqual(1500 + 1e-6);
+      expect(v).toBeGreaterThanOrEqual(lowest - 1e-6);
+      expect(v).toBeLessThanOrEqual(highest + 1e-6);
     }
   });
 

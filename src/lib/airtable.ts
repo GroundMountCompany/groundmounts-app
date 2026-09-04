@@ -2,41 +2,9 @@ const AIRTABLE_API_KEY = process.env.AIRTABLE_API_KEY;
 const AIRTABLE_BASE_ID = process.env.AIRTABLE_BASE_ID;
 const AIRTABLE_TABLE_NAME = 'Leads';
 
-export interface LeadFields {
-  Name?: string;
-  Email?: string;
-  Phone?: string;
-  Address?: string;
-  City?: string;
-  State?: string;
-  Zip?: string;
-  Panels?: number;
-  'System Size kW'?: number;
-  'Monthly Bill Avg'?: number;
-  'Monthly Bill High'?: number;
-  'Offset Percentage'?: number;
-  'Trenching Distance ft'?: number;
-  'Trenching Cost'?: number;
-  'Equipment Cost'?: number;
-  'Total Investment'?: number;
-  'Price Low'?: number;
-  'Price High'?: number;
-  'Equipment Cost Low'?: number;
-  'Equipment Cost High'?: number;
-  'Trenching Cost Low'?: number;
-  'Trenching Cost High'?: number;
-  'Line Items JSON'?: string;
-  'Panel Tier'?: string;
-  'Battery Units'?: number;
-  'Site Prep'?: boolean;
-  'Slope %'?: number;
-  'Slope Tier'?: string;
-  'Soil Class'?: string;
-  Azimuth?: number;
-  Source?: string;
-  Status?: string;
-  'Map Screenshot'?: Array<{ url: string }>;
-}
+import type { LeadFields } from './airtableSchema';
+
+export type { LeadFields };
 
 /**
  * Extract Airtable's machine-readable error reason without echoing the request.

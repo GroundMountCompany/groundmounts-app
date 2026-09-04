@@ -121,7 +121,7 @@ describe('hull dimensions per axis (an axis swap must fail here)', () => {
     expect(axes.widthFt).toBeLessThan(58);
     // 14.96 ft of slant at the owner's 30 degree tilt is 12.96 ft of ground.
     expect(axes.depthFt).toBeGreaterThan(12.5);
-    expect(axes.depthFt).toBeLessThan(13.5);
+    expect(axes.depthFt).toBeLessThan(13.2);
     // The table is much wider than it is deep; a swap would invert this.
     expect(axes.widthFt).toBeGreaterThan(axes.depthFt * 3);
   });

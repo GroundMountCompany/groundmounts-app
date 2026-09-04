@@ -1,5 +1,7 @@
 import { test, expect, type Page } from '@playwright/test';
 import './gmTest';
+import { TX_FALLBACK_CURVE } from '../src/lib/production';
+import { PANELS } from '../src/config/pricing';
 
 /**
  * The Phase 4 shell: a full-bleed map that the page never scrolls under, a
@@ -374,6 +376,187 @@ test('every interactive control is at least 44px, on every step', async ({
 });
 
 /** Seed the contact step with a finished design. */
+/**
+ * A curve that is nothing like the Texas fallback, so a screen reading the
+ * fallback instead of the site's own answer is visibly wrong rather than
+ * plausibly close.
+ */
+const MOCK_CURVE = { 90: 900, 135: 1000, 180: 1100, 225: 1000, 270: 900 };
+
+function siteCurveSeed(step: number) {
+  return {
+    state: {
+      currentStepIndex: step,
+      address: '123 Main St, Fort Worth, TX 76131',
+      coordinates: { latitude: 32.7555, longitude: -97.3208 },
+      electricalMeterPosition: [-97.3208, 32.7556],
+      arrayCenter: [-97.3208, 32.7553],
+      avgValue: 240,
+      percentage: 100,
+      totalPanels: 31,
+      sizedPanels: 31,
+      sizedAzimuth: 180,
+      azimuth: 180,
+      trenchFeet: 42,
+      productionCurve: MOCK_CURVE,
+      curveSource: 'pvwatts',
+      leadId: 'curve-agreement',
+      startedAt: Date.now() - 600_000,
+    },
+    version: 1,
+  };
+}
+
+test('the design step and the quote report the same production', async ({ page }) => {
+  // Both screens must read the curve /api/site returned for this address.
+  // The design step used to read the Texas fallback unconditionally, so a
+  // customer whose site had a real curve was shown two different numbers for
+  // the same array two steps apart.
+  await page.addInitScript((payload) => {
+    if (window.localStorage.getItem('gmq:v3')) return;
+    window.localStorage.setItem('gmq:v3', JSON.stringify(payload));
+  }, siteCurveSeed(3));
+
+  // The design step asks /api/site for this address on arrival. Answering with
+  // the mock is what puts a non-fallback curve in the store, exactly as a real
+  // PVWatts response would.
+  await page.route('**/api/site*', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        ok: true,
+        curve: MOCK_CURVE,
+        curveSource: 'pvwatts',
+        soilClass: 'clay loam',
+        soilSource: 'ssurgo',
+      }),
+    })
+  );
+
+  await mockGeocoding(page);
+  await gotoStep(page, 3);
+  // textContent, not innerText: the stats live in the sheet's scroll region,
+  // which is clipped at this viewport, and innerText reports clipped text as
+  // empty even though the customer scrolls to it.
+  const onDesign = await page.getByTestId('stat-production').textContent();
+  const panels = Number((await page.getByTestId('stat-panels').textContent()) ?? '0');
+
+  await gotoStep(page, 5);
+  const onQuote = await page.getByTestId('summary-production').textContent();
+
+  expect(onQuote).toBe(onDesign);
+
+  // And it is the mocked curve, not the fallback. Sizing solves for the bill,
+  // so the kWh figure alone barely moves between curves — the honest check is
+  // against the panel count actually on screen.
+  const kw = (panels * PANELS.standard.watts) / 1000;
+  const kwh = Number((onDesign ?? '').replace(/[^\d]/g, ''));
+
+  expect(panels).toBeGreaterThan(0);
+  expect(kwh).toBeCloseTo(Math.round(kw * MOCK_CURVE[180]), -1);
+  // The fallback would put the same array somewhere else entirely.
+  expect(Math.abs(kwh - kw * TX_FALLBACK_CURVE[180])).toBeGreaterThan(1_000);
+});
+
+test('the premium delta is the change the customer actually gets', async ({ page }) => {
+  // Choosing premium re-sizes the array: fewer, stronger panels for the same
+  // bill. The card used to price the current count at the premium rate, which
+  // quoted an increase nobody was ever charged.
+  await page.addInitScript((payload) => {
+    if (window.localStorage.getItem('gmq:v3')) return;
+    window.localStorage.setItem('gmq:v3', JSON.stringify(payload));
+  }, siteCurveSeed(4));
+
+  await page.route('**/api/site*', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        ok: true,
+        curve: MOCK_CURVE,
+        curveSource: 'pvwatts',
+        soilClass: 'clay loam',
+        soilSource: 'ssurgo',
+      }),
+    })
+  );
+  await mockGeocoding(page);
+
+  /** Midpoint of the range on the quote step, which is the estimate itself. */
+  const estimateOnQuote = async () => {
+    await gotoStep(page, 5);
+    const prices = pricesIn((await page.getByTestId('price-range').textContent()) ?? '');
+    expect(prices, 'no price range on the quote step').toHaveLength(2);
+    return (prices[0] + prices[1]) / 2;
+  };
+
+  await gotoStep(page, 4);
+  const quoted = (await page.getByTestId('tier-premium').textContent()) ?? '';
+  const delta = Number(quoted.replace(/[^\d]/g, '')) * (quoted.includes('−') ? -1 : 1);
+  expect(Math.abs(delta), 'premium was quoted as no change at all').toBeGreaterThan(0);
+
+  const before = await estimateOnQuote();
+
+  await gotoStep(page, 4);
+  await page.getByTestId('tier-premium').click();
+  await expect(page.getByTestId('tier-premium')).toHaveAttribute('aria-pressed', 'true');
+
+  const after = await estimateOnQuote();
+
+  // Within a dollar or two of rounding on each end of the range.
+  expect(Math.abs(after - before - delta), 'the quoted delta was not the change').toBeLessThan(3);
+});
+
+test('asks for the slope when the ground cannot be read, and prices the answer', async ({
+  page,
+}) => {
+  // Both terrain lookups can fail — no DEM tiles, no Tilequery. An unknown
+  // slope prices at no adder at all, so a steep hill-country parcel was quietly
+  // quoted as if it were flat.
+  await page.addInitScript((payload) => {
+    if (window.localStorage.getItem('gmq:v3')) return;
+    window.localStorage.setItem('gmq:v3', JSON.stringify(payload));
+  }, { ...siteCurveSeed(3), state: { ...siteCurveSeed(3).state, slopeSource: 'unavailable' } });
+
+  await page.route('**/api/site*', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        ok: true,
+        curve: MOCK_CURVE,
+        curveSource: 'pvwatts',
+        soilClass: 'clay loam',
+        soilSource: 'ssurgo',
+      }),
+    })
+  );
+  await mockGeocoding(page);
+
+  const estimateOnQuote = async () => {
+    await gotoStep(page, 5);
+    const prices = pricesIn((await page.getByTestId('price-range').textContent()) ?? '');
+    return (prices[0] + prices[1]) / 2;
+  };
+
+  await gotoStep(page, 3);
+  await expect(page.getByTestId('slope-picker')).toBeAttached();
+
+  const unanswered = await estimateOnQuote();
+
+  await gotoStep(page, 3);
+  await page.getByTestId('slope-steep').click();
+  await expect(page.getByTestId('slope-steep')).toHaveAttribute('aria-pressed', 'true');
+
+  const steep = await estimateOnQuote();
+  expect(steep, 'answering steep changed nothing').toBeGreaterThan(unanswered);
+
+  // And the answer survives a reload, so nobody is asked twice.
+  await gotoStep(page, 3);
+  await expect(page.getByTestId('slope-steep')).toHaveAttribute('aria-pressed', 'true');
+});
+
 function contactStepSeed(leadId: string) {
   return {
     state: {
@@ -399,6 +582,57 @@ async function fillAndSubmit(page: Page) {
   await page.locator('#phone').fill('(469) 555-0100');
   await page.getByTestId('submit-lead').click();
 }
+
+/** "$12,345 – $67,890" -> [12345, 67890]. */
+function pricesIn(text: string): number[] {
+  return (text.match(/\$[\d,]+/g) ?? []).map((m) => Number(m.replace(/[$,]/g, '')));
+}
+
+test('the email carries the same price the customer was shown', async ({ page }) => {
+  // The whole point of Phase 3.1 item 1: one priced quote, two destinations.
+  // The email route used to re-derive its own figures from its own constants.
+  await page.addInitScript(
+    (payload) => window.localStorage.setItem('gmq:v3', JSON.stringify(payload)),
+    contactStepSeed('email-matches-screen')
+  );
+
+  let emailBody: Record<string, number> | null = null;
+  let leadBody: { quote?: Record<string, number> } | null = null;
+  await page.route('**/api/leads', (route) => {
+    leadBody = JSON.parse(route.request().postData() ?? '{}');
+    return route.fulfill({ status: 200, contentType: 'application/json', body: '{"ok":true}' });
+  });
+  await page.route('**/api/sendEmail', (route) => {
+    emailBody = JSON.parse(route.request().postData() ?? '{}');
+    return route.fulfill({ status: 200, contentType: 'application/json', body: '{"ok":true}' });
+  });
+
+  await mockGeocoding(page);
+  await page.goto('/quote');
+  await waitForHydration(page);
+
+  // What the customer sees before they hand over their details.
+  const beforeSubmit = pricesIn((await page.getByTestId('price-range').innerText()) ?? '');
+  expect(beforeSubmit, 'no range on screen before submit').toHaveLength(2);
+
+  await fillAndSubmit(page);
+  await expect(page.getByTestId('success-screen')).toBeVisible({ timeout: 15_000 });
+
+  const revealed = pricesIn(await page.getByTestId('price-revealed').innerText());
+  const sent = emailBody as Record<string, number> | null;
+  const filed = leadBody as { quote?: Record<string, number> } | null;
+
+  expect(sent, 'no email was sent').not.toBeNull();
+  expect([sent!.priceLow, sent!.priceHigh]).toEqual(revealed);
+  expect([sent!.priceLow, sent!.priceHigh]).toEqual(beforeSubmit);
+  // And Airtable gets the same pair, from the same priceQuote call.
+  expect([filed!.quote!.priceLow, filed!.quote!.priceHigh]).toEqual(revealed);
+
+  // The email is handed the breakdown, not the inputs to re-derive it from.
+  const items = sent!.lineItems as unknown as Array<{ amount: number }>;
+  expect(items.length).toBeGreaterThan(0);
+  expect(items.reduce((t, i) => t + i.amount, 0)).toBe(sent!.estimate);
+});
 
 test('a failed email retries only the email, never re-filing the lead', async ({ page }) => {
   await page.addInitScript(

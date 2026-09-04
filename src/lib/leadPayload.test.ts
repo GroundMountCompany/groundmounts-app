@@ -4,6 +4,8 @@ import { buildLeadPayload } from './leadPayload';
 import { buildTrench } from './geo/trench';
 import { autoPlaceArray } from './geo/place';
 import type { LngLat } from './geo/units';
+import { TRENCH } from '@/config/pricing';
+import { conduitFor } from './pricing';
 
 const METER: LngLat = [-97.3208, 32.7555];
 
@@ -66,12 +68,27 @@ describe('lead payload carries the design the customer actually saw', () => {
     expect(payload.quote.trenchFeet).toBe(onMap);
   });
 
-  it('keeps trench cost in step with the distance', () => {
+  it('prices the trench from the same distance it reports', () => {
     useQuoteStore.getState().setTrenchFeet(120);
     const payload = buildLeadPayload(useQuoteStore.getState(), contact, 1_060_000);
 
+    const trench = payload.quote.lineItems.find((i) => i.key === 'trench')!;
     expect(payload.quote.trenchFeet).toBe(120);
-    expect(payload.quote.additionalCost).toBe(120 * 45);
+    expect(trench.detail).toContain('120 ft');
+    // Base rate times the conduit multiplier the schedule picks for this system
+    // size — both from pricing.ts, neither repeated here.
+    const multiplier = conduitFor(payload.quote.systemSizeKw, false).multiplier;
+    expect(trench.amount).toBe(Math.round(TRENCH.basePerFt * 120 * multiplier));
+  });
+
+  it('carries a price range built from its own line items', () => {
+    useQuoteStore.getState().setTrenchFeet(113);
+    const payload = buildLeadPayload(useQuoteStore.getState(), contact, 1_060_000);
+
+    const sum = payload.quote.lineItems.reduce((t, i) => t + i.amount, 0);
+    expect(payload.quote.estimate).toBe(sum);
+    expect(payload.quote.priceLow).toBeLessThan(payload.quote.estimate);
+    expect(payload.quote.priceHigh).toBeGreaterThan(payload.quote.estimate);
   });
 
   it('follows the trench as the array is dragged away', () => {

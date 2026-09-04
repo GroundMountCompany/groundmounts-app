@@ -227,3 +227,51 @@ describe('edge cases', () => {
     expect(spread(1000)).toEqual({ low: 920, high: 1080 });
   });
 });
+
+describe('a slope the customer told us about', () => {
+  const design = { panelCount: 40, tier: 'standard' as const, trenchFeet: 100 };
+  const options = { batteryUnits: 0, needsClearing: false };
+
+  it('prices a chosen tier exactly like a measured one', () => {
+    const measured = priceQuote(design, options, { slopePercent: 8, soilClass: null });
+    const chosen = priceQuote(design, options, {
+      slopePercent: null,
+      slopeTier: 'Rolling',
+      soilClass: null,
+    });
+
+    expect(measured.slopeTier).toBe('Rolling');
+    expect(chosen.slopeTier).toBe('Rolling');
+    expect(chosen.estimate).toBe(measured.estimate);
+  });
+
+  it('costs more on steep ground than on flat, which is the point of asking', () => {
+    const flat = priceQuote(design, options, {
+      slopePercent: null,
+      slopeTier: 'Flat',
+      soilClass: null,
+    });
+    const steep = priceQuote(design, options, {
+      slopePercent: null,
+      slopeTier: 'Steep',
+      soilClass: null,
+    });
+    const unanswered = priceQuote(design, options, { slopePercent: null, soilClass: null });
+
+    expect(steep.estimate).toBeGreaterThan(flat.estimate);
+    // No answer prices as no adder, so an unanswered steep site under-quotes —
+    // which is exactly why the picker exists.
+    expect(unanswered.slopeTier).toBe('Unknown');
+    expect(unanswered.estimate).toBe(flat.estimate);
+  });
+
+  it('ignores a measured grade being present, since there is none to ignore', () => {
+    // A measurement always wins: the picker only appears when there is none.
+    const q = priceQuote(design, options, {
+      slopePercent: 2,
+      slopeTier: 'Steep',
+      soilClass: null,
+    });
+    expect(q.slopeTier).toBe('Flat');
+  });
+});

@@ -3,11 +3,10 @@ import { captureMap } from './screenshot';
 import { mapRef } from '@/store/mapRefs';
 import { PANELS } from '@/config/pricing';
 import { priceQuote, subtotals, spread } from './pricing';
+import { annualKwh } from './production';
 
 export interface LeadQuote {
-  quotation: number;
   totalPanels: number;
-  additionalCost: number;
   /** Trench run in feet, straight from the map. The single source of truth. */
   trenchFeet: number;
   azimuth: number;
@@ -34,6 +33,10 @@ export interface LeadQuote {
   trenchingHigh: number;
   /** The full breakdown, so the record shows how the number was reached. */
   lineItemsJson: string;
+  /** The same line items, unserialised, for the email to render. */
+  lineItems: Array<{ key: string; label: string; detail?: string; amount: number }>;
+  estimate: number;
+  annualProductionKwh: number;
 }
 
 export interface LeadPayload {
@@ -82,7 +85,7 @@ export function buildLeadPayload(
   const quote = priceQuote(
     { panelCount: s.totalPanels, tier: s.panelTier, trenchFeet: s.trenchFeet },
     { batteryUnits: s.batteryUnits, needsClearing: s.needsClearing },
-    { slopePercent: s.slopePercent, soilClass: s.soilClass }
+    { slopePercent: s.slopePercent, slopeTier: s.slopeTier, soilClass: s.soilClass }
   );
   const parts = subtotals(quote);
   const equipment = spread(parts.equipment);
@@ -97,9 +100,7 @@ export function buildLeadPayload(
     address: s.address,
     source: contact.source,
     quote: {
-      quotation: s.quotation,
       totalPanels: s.totalPanels,
-      additionalCost: s.additionalCost,
       trenchFeet: s.trenchFeet,
       azimuth: Math.round(s.azimuth),
       panelTier: s.panelTier,
@@ -122,6 +123,9 @@ export function buildLeadPayload(
       trenchingLow: trenching.low,
       trenchingHigh: trenching.high,
       lineItemsJson: JSON.stringify(quote.lineItems),
+      lineItems: quote.lineItems,
+      estimate: quote.estimate,
+      annualProductionKwh: annualKwh(s.productionCurve, quote.systemKw, s.azimuth),
     },
     ts: now,
     honeypot: contact.honeypot,

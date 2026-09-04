@@ -6,6 +6,8 @@ import { useQuoteStore } from '@/store/quoteStore';
 import { useQuote } from './useQuote';
 import { priceQuote } from '@/lib/pricing';
 import { BATTERY, type PanelTier } from '@/config/pricing';
+import { annualTargetKwh, sizedCountForTier } from '@/lib/sizing';
+import { dollarsPerKwhFromCents } from '@/lib/rate';
 
 /** Signed money, so a choice that saves money reads as a saving. */
 function delta(amount: number): string {
@@ -65,20 +67,45 @@ export default function Step5Options() {
 
   const totalPanels = useQuoteStore((s) => s.totalPanels);
   const trenchFeet = useQuoteStore((s) => s.trenchFeet);
+  const avgValue = useQuoteStore((s) => s.avgValue);
+  const rateCents = useQuoteStore((s) => s.rateCentsPerKwh);
+  const percentage = useQuoteStore((s) => s.percentage);
+  const panelAdjust = useQuoteStore((s) => s.panelAdjust);
+  const curve = useQuoteStore((s) => s.productionCurve);
+  const sizedAzimuth = useQuoteStore((s) => s.sizedAzimuth);
   const slopePercent = useQuoteStore((s) => s.slopePercent);
+  const slopeTier = useQuoteStore((s) => s.slopeTier);
   const soilClass = useQuoteStore((s) => s.soilClass);
+
+  const target = annualTargetKwh(avgValue, dollarsPerKwhFromCents(rateCents), percentage);
+
+  /**
+   * The panel count this design would have on a given tier.
+   *
+   * Choosing a tier re-sizes the array, so pricing the current count with the
+   * other tier's price per watt quoted a delta the customer never got.
+   */
+  const countFor = (tier: PanelTier) => {
+    if (tier === panelTier) return totalPanels;
+    const resized = sizedCountForTier(curve, target, sizedAzimuth, tier, panelAdjust);
+    return resized > 0 ? resized : totalPanels;
+  };
 
   /** What the total would be with one thing changed. */
   const priceWith = (
     over: Partial<{ tier: PanelTier; batteryUnits: number; needsClearing: boolean }>
   ) =>
     priceQuote(
-      { panelCount: totalPanels, tier: over.tier ?? panelTier, trenchFeet },
+      {
+        panelCount: over.tier ? countFor(over.tier) : totalPanels,
+        tier: over.tier ?? panelTier,
+        trenchFeet,
+      },
       {
         batteryUnits: over.batteryUnits ?? batteryUnits,
         needsClearing: over.needsClearing ?? needsClearing,
       },
-      { slopePercent, soilClass }
+      { slopePercent, slopeTier, soilClass }
     ).estimate;
 
   const against = (over: Parameters<typeof priceWith>[0]) => priceWith(over) - current.estimate;

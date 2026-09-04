@@ -142,6 +142,72 @@ async function findArrayGrab(page: Page): Promise<Pt | null> {
 }
 
 /**
+ * Drag the grip around the array to a target bearing, keeping the finger on
+ * the circle the handle actually rides so "is the icon under the finger?"
+ * is a fair question.
+ */
+async function swingCompassTo(page: Page, client: CDPSession, targetBearing: number) {
+  const geom = await page.evaluate((target) => {
+    const t = window.__gmTest;
+    const r = t.canvasRect();
+    const centre = t.state().arrayCenter!;
+    const handle = t.handleLngLat()!;
+    const c = t.project(centre);
+    const h = t.project(handle);
+    const radius = Math.hypot(h[0] - c[0], h[1] - c[1]);
+    // Screen y grows downward, so bearing 180 (south) is +y.
+    const rad = (target * Math.PI) / 180;
+    const to: [number, number] = [
+      c[0] + radius * Math.sin(rad),
+      c[1] - radius * Math.cos(rad),
+    ];
+    return {
+      from: [r.left + h[0], r.top + h[1]] as Pt,
+      to: [r.left + to[0], r.top + to[1]] as Pt,
+      // Both ends must be inside the canvas or the touch never reaches the
+      // grip and Mapbox pans the map instead.
+      onScreen:
+        h[0] > 0 && h[0] < r.width && h[1] > 0 && h[1] < r.height &&
+        to[0] > 0 && to[0] < r.width && to[1] > 0 && to[1] < r.height,
+      radius,
+      // Canvas-space target, so the bearing check never depends on the
+      // canvas rect and cannot be skewed by late layout shifts.
+      toCanvas: to as Pt,
+    };
+  }, targetBearing);
+
+  expect(
+    geom.onScreen,
+    `grip or target off-screen (radius ${Math.round(geom.radius)}px)`
+  ).toBe(true);
+
+  await touchStart(client, [{ x: geom.from[0], y: geom.from[1], id: 1 }]);
+  const steps = 12;
+  for (let i = 1; i <= steps; i++) {
+    const t = i / steps;
+    await touchMove(client, [
+      {
+        x: geom.from[0] + (geom.to[0] - geom.from[0]) * t,
+        y: geom.from[1] + (geom.to[1] - geom.from[1]) * t,
+        id: 1,
+      },
+    ]);
+  }
+  await touchEnd(client);
+  // The last pointermove can still be queued when touchEnd returns; read
+  // azimuth only once it has stopped changing.
+  let stable = 0;
+  let last = Number.NaN;
+  for (let i = 0; i < 25 && stable < 3; i++) {
+    const az = await page.evaluate(() => window.__gmTest.state().azimuth);
+    stable = az === last ? stable + 1 : 0;
+    last = az;
+    await page.waitForTimeout(80);
+  }
+  return geom;
+}
+
+/**
  * Wait until the grip's projected position stops moving.
  *
  * Camera animations and late layout both shift it, and under parallel load a
@@ -614,74 +680,9 @@ test.describe('design step gestures', () => {
 
     const client = await page.context().newCDPSession(page);
 
-    /**
-     * Drag the grip around the array to a target bearing, keeping the finger on
-     * the circle the handle actually rides so "is the icon under the finger?"
-     * is a fair question.
-     */
-    async function swingTo(targetBearing: number) {
-      const geom = await page.evaluate((target) => {
-        const t = window.__gmTest;
-        const r = t.canvasRect();
-        const centre = t.state().arrayCenter!;
-        const handle = t.handleLngLat()!;
-        const c = t.project(centre);
-        const h = t.project(handle);
-        const radius = Math.hypot(h[0] - c[0], h[1] - c[1]);
-        // Screen y grows downward, so bearing 180 (south) is +y.
-        const rad = (target * Math.PI) / 180;
-        const to: [number, number] = [
-          c[0] + radius * Math.sin(rad),
-          c[1] - radius * Math.cos(rad),
-        ];
-        return {
-          from: [r.left + h[0], r.top + h[1]] as Pt,
-          to: [r.left + to[0], r.top + to[1]] as Pt,
-          // Both ends must be inside the canvas or the touch never reaches the
-          // grip and Mapbox pans the map instead.
-          onScreen:
-            h[0] > 0 && h[0] < r.width && h[1] > 0 && h[1] < r.height &&
-            to[0] > 0 && to[0] < r.width && to[1] > 0 && to[1] < r.height,
-          radius,
-          // Canvas-space target, so the bearing check never depends on the
-          // canvas rect and cannot be skewed by late layout shifts.
-          toCanvas: to as Pt,
-        };
-      }, targetBearing);
-
-      expect(
-        geom.onScreen,
-        `grip or target off-screen (radius ${Math.round(geom.radius)}px)`
-      ).toBe(true);
-
-      await touchStart(client, [{ x: geom.from[0], y: geom.from[1], id: 1 }]);
-      const steps = 12;
-      for (let i = 1; i <= steps; i++) {
-        const t = i / steps;
-        await touchMove(client, [
-          {
-            x: geom.from[0] + (geom.to[0] - geom.from[0]) * t,
-            y: geom.from[1] + (geom.to[1] - geom.from[1]) * t,
-            id: 1,
-          },
-        ]);
-      }
-      await touchEnd(client);
-      // The last pointermove can still be queued when touchEnd returns; read
-      // azimuth only once it has stopped changing.
-      let stable = 0;
-      let last = Number.NaN;
-      for (let i = 0; i < 25 && stable < 3; i++) {
-        const az = await page.evaluate(() => window.__gmTest.state().azimuth);
-        stable = az === last ? stable + 1 : 0;
-        last = az;
-        await page.waitForTimeout(80);
-      }
-      return geom;
-    }
 
     // First swing: south to roughly due east.
-    await swingTo(90);
+    await swingCompassTo(page, client, 90);
     await expect
       .poll(async () => {
         const az = await page.evaluate(() => window.__gmTest.state().azimuth);
@@ -694,7 +695,7 @@ test.describe('design step gestures', () => {
     // Re-grab at the new position and swing again. This is where a fixed
     // screen-space icon offset shows up: the grip drifts off the finger once
     // the azimuth leaves 180.
-    const swing = await swingTo(135);
+    const swing = await swingCompassTo(page, client, 135);
     await waitForStableHandle(page);
 
     const result = await page.evaluate((f) => {
@@ -721,6 +722,44 @@ test.describe('design step gestures', () => {
     const norm = (a: number) => ((a % 360) + 360) % 360;
     const delta = Math.abs(norm(result.azimuth) - norm(result.pointerBearing));
     expect(Math.min(delta, 360 - delta), 'azimuth does not match pointer bearing').toBeLessThan(2);
+  });
+
+  test('rotating the array never changes the panel count', async ({ page }) => {
+    // Sizing answers "how many panels for this bill", and the answer is fixed
+    // at the default azimuth when the design step opens. Rotation is a siting
+    // decision, not a resizing one: watching the count tick up and down while
+    // you turn the array is how a customer stops trusting the number.
+    await openDesignStep(page);
+    await waitForArray(page, 15_000);
+    await bringMapIntoView(page);
+    await page.waitForFunction(() => window.__gmTest.renderedHandles() > 0, null, {
+      timeout: 10_000,
+    });
+    await page.evaluate(() => window.__gmTest.setZoom(18.8));
+    await waitForStableHandle(page);
+
+    const before = await page.evaluate(() => ({
+      panels: window.__gmTest.state().totalPanels,
+      azimuth: window.__gmTest.state().azimuth,
+    }));
+    expect(before.panels, 'nothing was sized to begin with').toBeGreaterThan(0);
+
+    const client = await page.context().newCDPSession(page);
+    await swingCompassTo(page, client, 90);
+    await waitForStableHandle(page);
+
+    const after = await page.evaluate(() => ({
+      panels: window.__gmTest.state().totalPanels,
+      azimuth: window.__gmTest.state().azimuth,
+    }));
+
+    const norm = (a: number) => ((a % 360) + 360) % 360;
+    const turned = Math.abs(norm(after.azimuth) - norm(before.azimuth));
+    expect(
+      Math.min(turned, 360 - turned),
+      'the array did not actually rotate, so the count proves nothing'
+    ).toBeGreaterThan(80);
+    expect(after.panels, 'rotation re-sized the array').toBe(before.panels);
   });
 
   test('screenshot survives a reload on the contact form and reaches the lead', async ({
@@ -960,7 +999,8 @@ async function countDesignPixels(page: Page, dataUrl: string) {
 
       // Array fill is #1d4ed8 at 35% over imagery, plus a #bfdbfe outline: both
       // leave blue clearly dominant, which farmland never is.
-      if (b > 90 && b - r > 45 && b - g > 30) arrayFill++;
+      const blueOverRedChannel = b - r;
+      if (b > 90 && blueOverRedChannel > 45 && b - g > 30) arrayFill++;
 
       // Trench line is #f59e0b, opaque: strong red, mid green, almost no blue.
       if (r > 190 && g > 110 && g < 200 && b < 90 && r - b > 120) trench++;

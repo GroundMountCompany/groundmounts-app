@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import type { Feature, Polygon } from 'geojson';
-import { scheduleAutoPlacement, type PlacementHost } from './placementScheduler';
+import { PLACEMENT_WAIT_MS, scheduleAutoPlacement, type PlacementHost } from './placementScheduler';
 
 const building = (): Feature<Polygon> => ({
   type: 'Feature',
@@ -74,7 +74,7 @@ describe('auto-placement scheduling', () => {
     h.emitIdle();
     expect(commit).not.toHaveBeenCalled();
 
-    h.advance(1500);
+    h.advance(PLACEMENT_WAIT_MS);
 
     expect(commit).toHaveBeenCalledOnce();
     expect(commit.mock.calls[0][0]).toEqual([]);
@@ -98,7 +98,7 @@ describe('auto-placement scheduling', () => {
     scheduleAutoPlacement(h.host, commit, h.options);
     expect(commit).not.toHaveBeenCalled();
 
-    h.advance(1500);
+    h.advance(PLACEMENT_WAIT_MS);
     expect(commit).toHaveBeenCalledWith([]);
   });
 

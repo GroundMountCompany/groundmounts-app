@@ -6,6 +6,7 @@ import { put } from "@vercel/blob";
 import { escapeHtml, escapeOr, headerSafe } from "@/lib/escape";
 import { sniffImage } from "@/lib/imageSniff";
 import { parseQuoteInputs, priceFromInputs, InvalidQuoteInputs } from "@/lib/quoteInputs";
+import { curveForArray } from "@/lib/server/siteLookup";
 
 /** Decoded screenshots above this are rejected rather than uploaded. */
 const MAX_SCREENSHOT_BYTES = 2 * 1024 * 1024;
@@ -151,9 +152,15 @@ export async function POST(req: NextRequest) {
     // payload that tries is priced from its inputs like any other.
     let priced;
     let inputs;
+    let curveSource: 'pvwatts' | 'fallback' = 'fallback';
     try {
       inputs = parseQuoteInputs(lead.quote?.inputs);
-      priced = priceFromInputs(inputs);
+      // Derived here from the array's own coordinates. A curve in the request
+      // body is ignored: it decides the production figure the owner quotes
+      // from, so it cannot be something the browser chose.
+      const derived = await curveForArray(inputs.arrayCenter);
+      curveSource = derived.curveSource;
+      priced = priceFromInputs(inputs, derived.curve);
     } catch (error) {
       if (error instanceof InvalidQuoteInputs) {
         console.log('[LEADS_BLOCKED] Invalid quote inputs:', error.message);
@@ -200,6 +207,10 @@ export async function POST(req: NextRequest) {
       'Slope %': inputs.slopePercent ?? undefined,
       'Slope Tier': priced.quote.slopeTier,
       'Soil Class': inputs.soilClass ?? undefined,
+      'Est Annual Production kWh': priced.annualProductionKwh,
+      // Whether that production figure came from the site's own PVWatts curve
+      // or the Texas reference, so a quote can be read in context later.
+      'Curve Source': curveSource,
       Azimuth: inputs.azimuth,
       Source: lead.source || undefined,
       Status: 'New',

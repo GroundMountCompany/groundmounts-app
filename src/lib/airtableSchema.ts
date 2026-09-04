@@ -49,6 +49,8 @@ export const LEAD_SCHEMA = {
   'Slope %': 'number',
   'Slope Tier': 'select',
   'Soil Class': 'text',
+  'Est Annual Production kWh': 'number',
+  'Curve Source': 'select',
   Azimuth: 'number',
   Source: 'text',
   Status: 'select',
@@ -90,11 +92,22 @@ export const ACCEPTABLE_AIRTABLE_TYPES: Record<FieldKind, string[]> = {
 export interface LiveField {
   name: string;
   type: string;
+  /** Present on single-selects. Airtable gives each choice a stable id. */
+  options?: { choices?: Array<{ id?: string; name: string; color?: string }> };
 }
 
 export interface SchemaDiff {
   missing: Array<{ name: string; kind: FieldKind; nearMiss: string[] }>;
   mistyped: Array<{ name: string; kind: FieldKind; actual: string; acceptable: string[] }>;
+  /**
+   * Selects that exist but cannot accept a value the app writes.
+   *
+   * A single-select rejects any option it has never heard of, so a Status
+   * column without "Partial" fails every partial save with the same 422 a
+   * missing column gives — and the column is right there in the UI, which is
+   * why this was worth checking separately.
+   */
+  missingChoices: Array<{ name: string; missing: string[]; present: string[] }>;
   /** Columns the owner keeps that the app never writes. Not a problem. */
   unused: string[];
 }
@@ -109,7 +122,7 @@ const squash = (name: string) => name.toLowerCase().replace(/\s+/g, '');
  */
 export function diffLeadSchema(live: LiveField[]): SchemaDiff {
   const byName = new Map(live.map((f) => [f.name, f]));
-  const diff: SchemaDiff = { missing: [], mistyped: [], unused: [] };
+  const diff: SchemaDiff = { missing: [], mistyped: [], missingChoices: [], unused: [] };
 
   for (const [name, kind] of Object.entries(LEAD_SCHEMA) as Array<[LeadFieldName, FieldKind]>) {
     const field = byName.get(name);
@@ -126,6 +139,16 @@ export function diffLeadSchema(live: LiveField[]): SchemaDiff {
     const acceptable = ACCEPTABLE_AIRTABLE_TYPES[kind];
     if (!acceptable.includes(field.type)) {
       diff.mistyped.push({ name, kind, actual: field.type, acceptable });
+      continue;
+    }
+
+    // Only a real single-select constrains its values. A select we declared
+    // that the owner made a text column takes anything, and is reported above.
+    const wanted = SELECT_CHOICES[name];
+    if (kind === 'select' && field.type === 'singleSelect' && wanted?.length) {
+      const present = (field.options?.choices ?? []).map((c) => c.name);
+      const missing = wanted.filter((choice) => !present.includes(choice));
+      if (missing.length) diff.missingChoices.push({ name, missing, present });
     }
   }
 
@@ -138,7 +161,29 @@ export function diffLeadSchema(live: LiveField[]): SchemaDiff {
 }
 
 export function schemaMatches(diff: SchemaDiff): boolean {
-  return diff.missing.length === 0 && diff.mistyped.length === 0;
+  return (
+    diff.missing.length === 0 && diff.mistyped.length === 0 && diff.missingChoices.length === 0
+  );
+}
+
+/**
+ * The choice list to PATCH onto an existing select: everything it already has,
+ * unchanged and with its ids, plus the ones it is missing.
+ *
+ * Additive by construction. Existing choices are passed through by id so
+ * Airtable keeps them exactly as they are — no rename, no removal, and no way
+ * for this function to express either.
+ */
+export function additiveChoices(
+  field: LiveField,
+  wanted: string[]
+): Array<{ id?: string; name: string }> {
+  const present = field.options?.choices ?? [];
+  const presentNames = present.map((c) => c.name);
+  return [
+    ...present.map((c) => (c.id ? { id: c.id, name: c.name } : { name: c.name })),
+    ...wanted.filter((c) => !presentNames.includes(c)).map((name) => ({ name })),
+  ];
 }
 
 /**
@@ -153,6 +198,8 @@ export const SELECT_CHOICES: Partial<Record<LeadFieldName, string[]>> = {
   // writes; Airtable select options are case-sensitive.
   'Panel Tier': ['standard', 'premium'],
   'Slope Tier': ['Flat', 'Rolling', 'Steep', 'Unknown'],
+  // Matches SiteResponse.curveSource exactly; deliberately not renamed.
+  'Curve Source': ['pvwatts', 'fallback'],
   Status: ['Partial', 'New', 'Contacted', 'Quoted', 'Won', 'Lost'],
 };
 

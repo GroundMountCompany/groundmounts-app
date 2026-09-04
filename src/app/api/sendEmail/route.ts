@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getResendOrThrow } from '@/lib/resendSafe';
 import { getClientIp, rateLimitOk, isBotHoneypot, minTimeOk } from '@/lib/guard';
 import { parseQuoteInputs, priceFromInputs, InvalidQuoteInputs } from '@/lib/quoteInputs';
+import { curveForArray } from '@/lib/server/siteLookup';
 import type { ReactElement } from 'react';
 
 export async function POST(request: NextRequest) {
@@ -49,7 +50,11 @@ export async function POST(request: NextRequest) {
     let inputs;
     try {
       inputs = parseQuoteInputs(body?.inputs);
-      priced = priceFromInputs(inputs);
+      // The curve comes from the site lookup for these coordinates, not from
+      // the payload. Five samples of 9,999 kWh/kW turned a 16-panel array into
+      // 69,593 kWh a year when this was trusted.
+      const { curve } = await curveForArray(inputs.arrayCenter);
+      priced = priceFromInputs(inputs, curve);
     } catch (error) {
       if (error instanceof InvalidQuoteInputs) {
         console.log('[SEND_EMAIL_BLOCKED] Invalid quote inputs:', error.message);

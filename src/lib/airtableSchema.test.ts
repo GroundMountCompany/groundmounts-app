@@ -6,16 +6,21 @@ import {
   createSpecFor,
   diffLeadSchema,
   schemaMatches,
+  additiveChoices,
   type LeadFieldName,
   type LiveField,
 } from './airtableSchema';
 
 /** A base that matches, built from the declaration itself. */
 function healthyBase(): LiveField[] {
-  return Object.entries(LEAD_SCHEMA).map(([name, kind]) => ({
-    name,
-    type: ACCEPTABLE_AIRTABLE_TYPES[kind][0],
-  }));
+  return Object.entries(LEAD_SCHEMA).map(([name, kind]) => {
+    const field: LiveField = { name, type: ACCEPTABLE_AIRTABLE_TYPES[kind][0] };
+    const choices = SELECT_CHOICES[name as LeadFieldName];
+    if (kind === 'select' && choices) {
+      field.options = { choices: choices.map((c, i) => ({ id: `sel${i}`, name: c })) };
+    }
+    return field;
+  });
 }
 
 describe('the Airtable schema check', () => {
@@ -105,7 +110,17 @@ describe('creating a field the base is missing', () => {
     // Round trip: create every field from the spec, diff the result, no news.
     const created: LiveField[] = (Object.keys(LEAD_SCHEMA) as LeadFieldName[]).map((name) => {
       const spec = createSpecFor(name);
-      return { name: spec.name, type: spec.type };
+      // Modelled on what Airtable returns after a create: the choices we asked
+      // for, each with an id. A select created without them would fail the
+      // check below, which is the point of running the round trip.
+      const choices = (spec.options?.choices ?? []) as Array<{ name: string }>;
+      return {
+        name: spec.name,
+        type: spec.type,
+        ...(choices.length
+          ? { options: { choices: choices.map((c, i) => ({ id: `sel${i}`, name: c.name })) } }
+          : {}),
+      };
     });
     expect(schemaMatches(diffLeadSchema(created))).toBe(true);
   });
@@ -147,5 +162,89 @@ describe('creating a field the base is missing', () => {
     expect(spec.type).toBe('checkbox');
     expect(spec.options).toHaveProperty('icon');
     expect(spec.options).toHaveProperty('color');
+  });
+});
+
+describe('single-select options', () => {
+  it('reports a select that cannot accept a value the app writes', () => {
+    // The real case: a Status column that predates partial saves.
+    const base = healthyBase().map((f) =>
+      f.name === 'Status'
+        ? { ...f, options: { choices: [{ id: 'a', name: 'New' }, { id: 'b', name: 'Contacted' }] } }
+        : f
+    );
+    const diff = diffLeadSchema(base);
+
+    expect(schemaMatches(diff), 'a select missing options is not a match').toBe(false);
+    expect(diff.missingChoices).toHaveLength(1);
+    expect(diff.missingChoices[0].name).toBe('Status');
+    expect(diff.missingChoices[0].missing).toContain('Partial');
+    expect(diff.missingChoices[0].missing).not.toContain('New');
+    expect(diff.missingChoices[0].present).toEqual(['New', 'Contacted']);
+  });
+
+  it('is satisfied by a select that has everything and more', () => {
+    // The owner's own extra options are their business.
+    const base = healthyBase().map((f) =>
+      f.name === 'Slope Tier'
+        ? {
+            ...f,
+            options: {
+              choices: [
+                ...(f.options?.choices ?? []),
+                { id: 'extra', name: 'Terraced' },
+              ],
+            },
+          }
+        : f
+    );
+    expect(schemaMatches(diffLeadSchema(base))).toBe(true);
+  });
+
+  it('does not confuse a missing option with a missing column', () => {
+    const diff = diffLeadSchema(
+      healthyBase().map((f) => (f.name === 'Panel Tier' ? { ...f, options: { choices: [] } } : f))
+    );
+    expect(diff.missing).toEqual([]);
+    expect(diff.missingChoices[0].missing).toEqual(['standard', 'premium']);
+  });
+
+  it('builds an additive choice list that keeps every existing option by id', () => {
+    const live: LiveField = {
+      name: 'Status',
+      type: 'singleSelect',
+      options: {
+        choices: [
+          { id: 'selNew', name: 'New', color: 'blueLight2' },
+          { id: 'selWon', name: 'Won' },
+        ],
+      },
+    };
+
+    const patch = additiveChoices(live, ['Partial', 'New', 'Won']);
+
+    // Existing choices come back first, by id, with their names unchanged —
+    // which is what makes this a rename-proof, delete-proof update.
+    expect(patch).toEqual([
+      { id: 'selNew', name: 'New' },
+      { id: 'selWon', name: 'Won' },
+      { name: 'Partial' },
+    ]);
+    // Nothing the field already had can go missing from the patch.
+    for (const existing of live.options!.choices!) {
+      expect(patch.some((c) => c.id === existing.id && c.name === existing.name)).toBe(true);
+    }
+  });
+
+  it('adds nothing when the select is already complete', () => {
+    const live: LiveField = {
+      name: 'Panel Tier',
+      type: 'singleSelect',
+      options: { choices: [{ id: 'a', name: 'standard' }, { id: 'b', name: 'premium' }] },
+    };
+    expect(additiveChoices(live, ['standard', 'premium'])).toEqual([
+      { id: 'a', name: 'standard' },
+      { id: 'b', name: 'premium' },
+    ]);
   });
 });

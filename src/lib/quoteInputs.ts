@@ -5,20 +5,19 @@ import {
   type SlopeTierName,
 } from '@/config/pricing';
 import { priceQuote, subtotals, spread, type Quote } from './pricing';
-import {
-  REFERENCE_AZIMUTHS,
-  TX_FALLBACK_CURVE,
-  annualKwh,
-  type ProductionCurve,
-} from './production';
+import { TX_FALLBACK_CURVE, annualKwh, type ProductionCurve } from './production';
 
 /**
  * The inputs a quote is computed from, and nothing else.
  *
  * Prices are never accepted from a browser. The client describes the design it
- * drew — panels, tier, trench, options, what we know about the ground — and the
+ * drew — panels, tier, trench, options, where on the earth it sits — and the
  * server prices it. Anything else means the number in the customer's email and
  * the number in the owner's Airtable are whatever the page was told to say.
+ *
+ * The production curve is not in here either, for the same reason. It used to
+ * be, and five samples of 9,999 kWh/kW made a 16-panel array produce 69,593
+ * kWh a year. The server looks the curve up itself from `arrayCenter`.
  */
 export interface QuoteInputs {
   panelCount: number;
@@ -30,7 +29,8 @@ export interface QuoteInputs {
   slopeTier: SlopeTierName | null;
   soilClass: string | null;
   azimuth: number;
-  productionCurve: ProductionCurve;
+  /** [lng, lat] of the array, so the server can look up its own curve. */
+  arrayCenter: [number, number] | null;
 }
 
 export interface PricedQuote {
@@ -71,22 +71,17 @@ function requireCount(value: unknown, name: string, max: number): number {
 }
 
 /**
- * A curve is only usable if it has a finite positive sample at every reference
- * azimuth. A partial or hostile one falls back to the Texas reference rather
- * than failing the request: it affects the production figure, not the price,
- * and the customer should still get their quote.
+ * Where the array sits, if the payload says anything usable.
+ *
+ * Null rather than an error: a design with no coordinates still has a price,
+ * it just gets the reference curve for its production figure.
  */
-function parseCurve(value: unknown): ProductionCurve {
-  if (!value || typeof value !== 'object') return TX_FALLBACK_CURVE;
-  const raw = value as Record<string, unknown>;
-  const curve: ProductionCurve = {};
-
-  for (const azimuth of REFERENCE_AZIMUTHS) {
-    const sample = Number(raw[String(azimuth)]);
-    if (!Number.isFinite(sample) || sample <= 0 || sample > 10_000) return TX_FALLBACK_CURVE;
-    curve[azimuth] = sample;
-  }
-  return curve;
+function parseArrayCenter(value: unknown): [number, number] | null {
+  if (!Array.isArray(value) || value.length !== 2) return null;
+  const [lng, lat] = value.map(Number);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  if (Math.abs(lat) > 90 || Math.abs(lng) > 180) return null;
+  return [lng, lat];
 }
 
 /** Validate a client payload into inputs the pricing engine will accept. */
@@ -136,12 +131,22 @@ export function parseQuoteInputs(raw: unknown): QuoteInputs {
     slopeTier,
     soilClass,
     azimuth,
-    productionCurve: parseCurve(obj.productionCurve),
+    arrayCenter: parseArrayCenter(obj.arrayCenter),
   };
 }
 
-/** Price a validated design. The only place a server-side quote comes from. */
-export function priceFromInputs(inputs: QuoteInputs): PricedQuote {
+/**
+ * Price a validated design.
+ *
+ * The curve is a parameter, and on the server it always comes from the site
+ * lookup rather than the request. It defaults to the Texas reference so the
+ * price — which does not depend on the curve at all — can be computed without
+ * a network call.
+ */
+export function priceFromInputs(
+  inputs: QuoteInputs,
+  curve: ProductionCurve = TX_FALLBACK_CURVE
+): PricedQuote {
   const quote = priceQuote(
     { panelCount: inputs.panelCount, tier: inputs.tier, trenchFeet: inputs.trenchFeet },
     { batteryUnits: inputs.batteryUnits, needsClearing: inputs.needsClearing },
@@ -157,7 +162,7 @@ export function priceFromInputs(inputs: QuoteInputs): PricedQuote {
   return {
     quote,
     systemSizeKw: Number(((inputs.panelCount * PANELS[inputs.tier].watts) / 1000).toFixed(2)),
-    annualProductionKwh: annualKwh(inputs.productionCurve, quote.systemKw, inputs.azimuth),
+    annualProductionKwh: annualKwh(curve, quote.systemKw, inputs.azimuth),
     equipment: spread(parts.equipment),
     trench: spread(parts.trench),
   };

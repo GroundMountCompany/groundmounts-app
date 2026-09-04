@@ -38,6 +38,23 @@ vi.mock('@/lib/resendSafe', () => ({
   }),
 }));
 
+/**
+ * The site lookup, stubbed with a curve that is nothing like the fallback and
+ * nothing like anything a payload could claim. Production computed from this
+ * is the only production the routes may produce.
+ */
+const SITE_CURVE = { 90: 1010, 135: 1110, 180: 1210, 225: 1110, 270: 1010 };
+const curveCalls: Array<[number, number] | null> = [];
+
+vi.mock('@/lib/server/siteLookup', () => ({
+  curveForArray: async (arrayCenter: [number, number] | null) => {
+    curveCalls.push(arrayCenter);
+    return arrayCenter
+      ? { curve: SITE_CURVE, curveSource: 'pvwatts' as const }
+      : { curve: TX_FALLBACK_CURVE, curveSource: 'fallback' as const };
+  },
+}));
+
 const { POST } = await import('./route');
 
 const INPUTS = {
@@ -50,8 +67,10 @@ const INPUTS = {
   slopeTier: 'Flat',
   soilClass: 'clay loam',
   azimuth: 180,
-  productionCurve: TX_FALLBACK_CURVE,
+  arrayCenter: [-97.3208, 32.7555] as [number, number],
 };
+
+const HOSTILE_CURVE = { 90: 9999, 135: 9999, 180: 9999, 225: 9999, 270: 9999 };
 
 const validLead = (quoteExtra: Record<string, unknown> = {}) => ({
   id: 'lead-1234-5678',
@@ -86,6 +105,7 @@ function post(body: Record<string, unknown>): NextRequest {
 
 beforeEach(() => {
   written.length = 0;
+  curveCalls.length = 0;
   notifications.length = 0;
   __resetRateLimits();
   vi.stubEnv('AIRTABLE_API_KEY', 'test-key');
@@ -102,7 +122,7 @@ describe('POST /api/leads', () => {
     expect(res.status).toBe(200);
     expect(written).toHaveLength(1);
 
-    const expected = priceFromInputs(parseQuoteInputs(INPUTS));
+    const expected = priceFromInputs(parseQuoteInputs(INPUTS), SITE_CURVE);
     const fields = written[0];
 
     expect(fields['Price Low']).toBe(expected.quote.low);
@@ -115,6 +135,9 @@ describe('POST /api/leads', () => {
     expect(fields['System Size kW']).toBe(expected.systemSizeKw);
     expect(fields['Slope Tier']).toBe(expected.quote.slopeTier);
     expect(fields.Panels).toBe(16);
+    expect(fields['Est Annual Production kWh']).toBe(expected.annualProductionKwh);
+    expect(fields['Curve Source']).toBe('pvwatts');
+    expect(curveCalls).toEqual([INPUTS.arrayCenter]);
     // Legacy single-value columns are midpoints of the same pair.
     expect(fields['Total Investment']).toBe(
       Math.round((expected.quote.low + expected.quote.high) / 2)
@@ -139,7 +162,7 @@ describe('POST /api/leads', () => {
     );
     expect(res.status).toBe(200);
 
-    const expected = priceFromInputs(parseQuoteInputs(INPUTS));
+    const expected = priceFromInputs(parseQuoteInputs(INPUTS), SITE_CURVE);
     const fields = written[0];
 
     expect(fields['Price Low']).toBe(expected.quote.low);
@@ -154,6 +177,25 @@ describe('POST /api/leads', () => {
       Math.round((expected.quote.low + expected.quote.high) / 2).toLocaleString()
     );
     expect(notifications[0].html).not.toContain('>$1<');
+  });
+
+  it('ignores a production curve in the payload', async () => {
+    const res = await POST(
+      post(validLead({ inputs: { ...INPUTS, productionCurve: HOSTILE_CURVE } }))
+    );
+    expect(res.status).toBe(200);
+
+    const expected = priceFromInputs(parseQuoteInputs(INPUTS), SITE_CURVE);
+    expect(written[0]['Est Annual Production kWh']).toBe(expected.annualProductionKwh);
+    expect(written[0]['Est Annual Production kWh']).toBeLessThan(30_000);
+  });
+
+  it('records the Texas fallback as the fallback when there are no coordinates', async () => {
+    await POST(post(validLead({ inputs: { ...INPUTS, arrayCenter: null } })));
+
+    const fallback = priceFromInputs(parseQuoteInputs({ ...INPUTS, arrayCenter: null }));
+    expect(written[0]['Curve Source']).toBe('fallback');
+    expect(written[0]['Est Annual Production kWh']).toBe(fallback.annualProductionKwh);
   });
 
   it('refuses a lead whose design is not a design', async () => {

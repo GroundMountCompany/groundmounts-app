@@ -81,7 +81,7 @@ export function buildLeadPayload(
     slopeTier: s.slopeTier,
     soilClass: s.soilClass,
     azimuth: Math.round(s.azimuth),
-    productionCurve: s.productionCurve,
+    arrayCenter: s.arrayCenter,
   };
 
   return {

@@ -27,6 +27,23 @@ vi.mock('@/lib/resendSafe', () => ({
   }),
 }));
 
+/**
+ * The site lookup, stubbed with a curve that is nothing like the fallback and
+ * nothing like anything a payload could claim. Production computed from this
+ * is the only production the routes may produce.
+ */
+const SITE_CURVE = { 90: 1010, 135: 1110, 180: 1210, 225: 1110, 270: 1010 };
+const curveCalls: Array<[number, number] | null> = [];
+
+vi.mock('@/lib/server/siteLookup', () => ({
+  curveForArray: async (arrayCenter: [number, number] | null) => {
+    curveCalls.push(arrayCenter);
+    return arrayCenter
+      ? { curve: SITE_CURVE, curveSource: 'pvwatts' as const }
+      : { curve: TX_FALLBACK_CURVE, curveSource: 'fallback' as const };
+  },
+}));
+
 const { POST } = await import('./route');
 
 /** The design from the brief's worked example, as the client would send it. */
@@ -40,7 +57,7 @@ const INPUTS = {
   slopeTier: 'Flat',
   soilClass: 'clay loam',
   azimuth: 180,
-  productionCurve: TX_FALLBACK_CURVE,
+  arrayCenter: [-97.3208, 32.7555] as [number, number],
 };
 
 function post(body: Record<string, unknown>): NextRequest {
@@ -50,6 +67,8 @@ function post(body: Record<string, unknown>): NextRequest {
     body: JSON.stringify(body),
   });
 }
+
+const HOSTILE_CURVE = { 90: 9999, 135: 9999, 180: 9999, 225: 9999, 270: 9999 };
 
 const validBody = (extra: Record<string, unknown> = {}) => ({
   email: 'bert@example.com',
@@ -65,6 +84,7 @@ const money = (n: number) => n.toLocaleString('en-US');
 
 beforeEach(() => {
   sent.length = 0;
+  curveCalls.length = 0;
   __resetRateLimits();
   vi.stubEnv('RESEND_API_KEY', 'test-key');
 });
@@ -80,7 +100,7 @@ describe('POST /api/sendEmail', () => {
     expect(sent).toHaveLength(1);
 
     const html = renderToStaticMarkup(sent[0].react);
-    const expected = priceFromInputs(parseQuoteInputs(INPUTS));
+    const expected = priceFromInputs(parseQuoteInputs(INPUTS), SITE_CURVE);
 
     // The range the customer reads.
     expect(html).toContain(money(expected.quote.low));
@@ -107,6 +127,8 @@ describe('POST /api/sendEmail', () => {
     expect(html).toContain(`${INPUTS.trenchFeet} ft`);
     expect(html).toContain(expected.annualProductionKwh.toLocaleString());
     expect(sent[0].to).toEqual(['bert@example.com']);
+    // Derived from the array's own coordinates, not from anything sent.
+    expect(curveCalls).toEqual([INPUTS.arrayCenter]);
   });
 
   it('ignores a price the client tried to name', async () => {
@@ -125,7 +147,7 @@ describe('POST /api/sendEmail', () => {
     expect(res.status).toBe(200);
 
     const html = renderToStaticMarkup(sent[0].react);
-    const expected = priceFromInputs(parseQuoteInputs(INPUTS));
+    const expected = priceFromInputs(parseQuoteInputs(INPUTS), SITE_CURVE);
 
     expect(html).toContain(money(expected.quote.low));
     expect(html).toContain(money(expected.quote.high));
@@ -167,13 +189,27 @@ describe('POST /api/sendEmail', () => {
     expect(sent, 'a guarded request still sent mail').toHaveLength(0);
   });
 
-  it('falls back to the reference curve when the curve is nonsense', async () => {
-    // Production is display-only, but it must not be a number the client made
-    // up either: an unusable curve is replaced, not trusted.
-    await POST(post(validBody({ inputs: { ...INPUTS, productionCurve: { 180: 1e9 } } })));
+  it('ignores a production curve in the payload', async () => {
+    // Codex's reproduction: five samples of 9,999 kWh/kW/yr made a 16-panel
+    // array produce 69,593 kWh a year in the customer's email.
+    await POST(post(validBody({ inputs: { ...INPUTS, productionCurve: HOSTILE_CURVE } })));
 
     const html = renderToStaticMarkup(sent[0].react);
-    const expected = priceFromInputs(parseQuoteInputs(INPUTS));
+    const expected = priceFromInputs(parseQuoteInputs(INPUTS), SITE_CURVE);
+
     expect(html).toContain(expected.annualProductionKwh.toLocaleString());
+    expect(html).not.toContain('69,593');
+    // Sanity on the fixture: the hostile curve would have produced something
+    // several times larger, so this is a real difference and not a near miss.
+    expect(expected.annualProductionKwh).toBeLessThan(30_000);
+  });
+
+  it('uses the Texas reference when the design has no coordinates', async () => {
+    await POST(post(validBody({ inputs: { ...INPUTS, arrayCenter: null } })));
+
+    const html = renderToStaticMarkup(sent[0].react);
+    const fallback = priceFromInputs(parseQuoteInputs({ ...INPUTS, arrayCenter: null }));
+    expect(html).toContain(fallback.annualProductionKwh.toLocaleString());
+    expect(curveCalls).toEqual([null]);
   });
 });

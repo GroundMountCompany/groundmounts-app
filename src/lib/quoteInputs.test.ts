@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { parseQuoteInputs, priceFromInputs, InvalidQuoteInputs } from './quoteInputs';
-import { TX_FALLBACK_CURVE, REFERENCE_AZIMUTHS } from './production';
+import { TX_FALLBACK_CURVE, annualKwh } from './production';
 import { BATTERY, PANELS } from '@/config/pricing';
 
 const GOOD = {
@@ -13,7 +13,7 @@ const GOOD = {
   slopeTier: 'Flat',
   soilClass: 'clay loam',
   azimuth: 180,
-  productionCurve: TX_FALLBACK_CURVE,
+  arrayCenter: [-97.3208, 32.7555],
 };
 
 describe('parsing what a browser claims its design is', () => {
@@ -60,23 +60,32 @@ describe('parsing what a browser claims its design is', () => {
     expect(parseQuoteInputs({ ...GOOD, soilClass: long }).soilClass!.length).toBeLessThan(200);
   });
 
-  it('replaces a curve it cannot use instead of trusting it', () => {
-    const unusable = [
-      { 180: 1500 }, // incomplete
-      Object.fromEntries(REFERENCE_AZIMUTHS.map((a) => [a, -5])), // negative
-      Object.fromEntries(REFERENCE_AZIMUTHS.map((a) => [a, 1e9])), // absurd
-      'not a curve',
-      null,
-    ];
-    for (const curve of unusable) {
-      expect(parseQuoteInputs({ ...GOOD, productionCurve: curve }).productionCurve).toEqual(
-        TX_FALLBACK_CURVE
-      );
-    }
+  it('ignores a curve in the payload entirely', () => {
+    // The reported attack: five samples of 9,999 kWh/kW/yr. There is nowhere
+    // for it to land any more — the server looks the curve up itself.
+    const parsed = parseQuoteInputs({
+      ...GOOD,
+      productionCurve: { 90: 9999, 135: 9999, 180: 9999, 225: 9999, 270: 9999 },
+    });
+    expect(parsed).not.toHaveProperty('productionCurve');
+    expect(JSON.stringify(parsed)).not.toContain('9999');
 
-    // A genuine PVWatts-shaped answer is kept.
-    const real = Object.fromEntries(REFERENCE_AZIMUTHS.map((a) => [a, 1600]));
-    expect(parseQuoteInputs({ ...GOOD, productionCurve: real }).productionCurve).toEqual(real);
+    // And with no curve to hand, pricing falls back to the reference rather
+    // than to anything the caller said.
+    const priced = priceFromInputs(parsed);
+    expect(priced.annualProductionKwh).toBe(
+      annualKwh(TX_FALLBACK_CURVE, priced.quote.systemKw, 180)
+    );
+  });
+
+  it('keeps the array coordinates the curve will be looked up from', () => {
+    expect(parseQuoteInputs(GOOD).arrayCenter).toEqual([-97.3208, 32.7555]);
+
+    // Anything that is not a coordinate pair is simply absent, not an error:
+    // the design still has a price, it just gets the reference curve.
+    for (const bad of [undefined, null, 'somewhere', [1], [0, 200], ['a', 'b'], [200, 0]]) {
+      expect(parseQuoteInputs({ ...GOOD, arrayCenter: bad }).arrayCenter, String(bad)).toBeNull();
+    }
   });
 
   it('prices from the parsed inputs and nothing else', () => {
@@ -90,5 +99,12 @@ describe('parsing what a browser claims its design is', () => {
     expect(priced.quote.high).toBeGreaterThan(priced.quote.estimate);
     expect(priced.equipment.low).toBeLessThan(priced.equipment.high);
     expect(priced.annualProductionKwh).toBeGreaterThan(0);
+    // The curve is a parameter, so a different one gives a different figure.
+    const sunnier = Object.fromEntries(
+      Object.entries(TX_FALLBACK_CURVE).map(([az, v]) => [az, v * 2])
+    );
+    expect(priceFromInputs(parseQuoteInputs(GOOD), sunnier).annualProductionKwh).toBeGreaterThan(
+      priced.annualProductionKwh
+    );
   });
 });

@@ -10,10 +10,13 @@
  *
  * With --create-missing it also creates the columns the app needs and the base
  * does not have, with the names, types and select options declared in
- * airtableSchema.ts. It only ever POSTs new fields. Nothing in this script can
- * edit or delete an existing column: a field that is present but the wrong type
- * is reported for the owner to decide about, never retyped, because the data in
- * it is theirs and a conversion can lose it.
+ * airtableSchema.ts, and adds any missing option to an existing single-select.
+ *
+ * Both are additive. New columns are POSTed; a select is PATCHed with its own
+ * existing choices passed back by id plus the new ones, so nothing is renamed
+ * or removed. A field that exists with the wrong type is reported for the owner
+ * to decide about and never retyped, because the data in it is theirs and a
+ * conversion can lose it.
  *
  * Exit codes: 0 the base matches, 1 the base does not, 2 it could not be
  * checked (missing key, network, no such table) — which is not the same thing
@@ -23,6 +26,8 @@
 import { readFileSync } from 'node:fs';
 import {
   LEAD_SCHEMA,
+  SELECT_CHOICES,
+  additiveChoices,
   createSpecFor,
   diffLeadSchema,
   schemaMatches,
@@ -35,6 +40,7 @@ interface MetaField {
   id: string;
   name: string;
   type: string;
+  options?: { choices?: Array<{ id?: string; name: string; color?: string }> };
 }
 
 interface MetaTable {
@@ -137,6 +143,53 @@ async function createField(
   }
 }
 
+/**
+ * Add missing options to an existing single-select.
+ *
+ * Additive only: `additiveChoices` returns the field's current choices with
+ * their ids, so Airtable treats them as unchanged, plus the new names.
+ */
+async function addChoices(
+  apiKey: string,
+  baseId: string,
+  tableId: string,
+  field: MetaField,
+  wanted: string[]
+): Promise<{ ok: true } | { ok: false; reason: string }> {
+  try {
+    const res = await fetch(
+      `https://api.airtable.com/v0/meta/bases/${baseId}/tables/${tableId}/fields/${field.id}`,
+      {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ options: { choices: additiveChoices(field, wanted) } }),
+      }
+    );
+    if (!res.ok) {
+      const body = await res.text();
+      // Airtable currently refuses any `options` payload on an existing field
+      // and reports it as a type change, whatever the payload actually says.
+      // A description-only PATCH on the same field succeeds, so this is the
+      // API's limit rather than a scope or a malformed request — and it is
+      // worth saying so, because the message on its own is misleading.
+      const unsupported = body.includes("Changing a field's type");
+      return {
+        ok: false,
+        reason: unsupported
+          ? `${res.status} the Meta API will not edit select options; add them in the Airtable UI ` +
+            `(Leads > ${field.name} > Edit field > Add option)`
+          : `${res.status} ${body.slice(0, 200)}`,
+      };
+    }
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, reason: String(error) };
+  }
+}
+
 async function main(): Promise<void> {
   loadEnvLocal();
 
@@ -176,8 +229,34 @@ async function main(): Promise<void> {
     if (failures.length) {
       console.error(`\n${failures.length} field(s) could not be created: ${failures.join(', ')}`);
     }
-  } else if (createMissing) {
+  } else if (createMissing && !diff.missingChoices.length) {
     console.log('Nothing to create: every field the app writes already exists.');
+  }
+
+  if (createMissing && diff.missingChoices.length) {
+    console.log(`Adding option(s) to ${diff.missingChoices.length} existing select(s)...`);
+    const failures: string[] = [];
+
+    for (const { name, missing } of diff.missingChoices) {
+      const field = table.fields.find((f) => f.name === name);
+      const wanted = SELECT_CHOICES[name as LeadFieldName] ?? [];
+      if (!field) continue;
+
+      const result = await addChoices(apiKey, baseId, table.id, field, wanted);
+      if (result.ok) {
+        console.log(`  added    ${missing.join(', ')} to ${name}`);
+      } else {
+        console.error(`  FAILED   ${missing.join(', ')} on ${name} - ${result.reason}`);
+        failures.push(name);
+      }
+    }
+
+    table = await fetchTable(apiKey, baseId);
+    diff = diffLeadSchema(table.fields);
+
+    if (failures.length) {
+      console.error(`\n${failures.length} select(s) could not be updated: ${failures.join(', ')}`);
+    }
   }
 
   if (diff.mistyped.length) {
@@ -212,6 +291,19 @@ async function main(): Promise<void> {
               (m.nearMiss.length ? ` — did you mean "${m.nearMiss.join('", "')}"?` : '')
           )
           .join('\n')
+    );
+  }
+  if (diff.missingChoices.length) {
+    parts.push(
+      `\nSelects missing options (${diff.missingChoices.length}):\n` +
+        diff.missingChoices
+          .map(
+            (m) =>
+              `  ${m.name} cannot accept: ${m.missing.join(', ')}` +
+              `  (has: ${m.present.join(', ') || 'nothing'})`
+          )
+          .join('\n') +
+        '\n  Add these by hand: Airtable will not accept an options change over the API.'
     );
   }
   if (diff.mistyped.length) {

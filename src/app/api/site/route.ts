@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getClientIp, rateLimitOk } from '@/lib/guard';
+import { getClientIp, rateLimitOkAsync } from '@/lib/guard';
 import { lookupSite } from '@/lib/server/siteLookup';
 
 export type { SiteResponse } from '@/lib/server/siteLookup';
 
 export async function GET(req: NextRequest) {
-  if (!rateLimitOk(getClientIp(req), 'site')) {
+  if (!(await rateLimitOkAsync(getClientIp(req), 'site'))) {
     return NextResponse.json({ ok: false, error: 'rate_limited' }, { status: 429 });
   }
 

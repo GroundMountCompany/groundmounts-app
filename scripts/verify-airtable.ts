@@ -30,7 +30,6 @@ import {
   additiveChoices,
   createSpecFor,
   diffLeadSchema,
-  schemaMatches,
   type LeadFieldName,
 } from '../src/lib/airtableSchema';
 
@@ -198,11 +197,13 @@ async function main(): Promise<void> {
   const apiKey = process.env.AIRTABLE_API_KEY;
   const baseId = process.env.AIRTABLE_BASE_ID;
   if (!apiKey || !baseId) {
-    fail(
-      'Cannot check the schema: AIRTABLE_API_KEY and AIRTABLE_BASE_ID must both be set.\n' +
-        'The token needs the schema.bases:read scope.',
-      2
+    // This runs inside `npm run test`, and a contributor without Airtable
+    // credentials should not be told their branch is broken. A mismatch fails
+    // the gate; being unable to look does not.
+    console.log(
+      'Skipping the Airtable schema check: AIRTABLE_API_KEY and AIRTABLE_BASE_ID are not set.'
     );
+    return;
   }
 
   let table = await fetchTable(apiKey, baseId);
@@ -273,7 +274,20 @@ async function main(): Promise<void> {
     );
   }
 
-  if (schemaMatches(diff)) {
+  // Reported, never fatal: every write goes through Airtable's `typecast`, so
+  // a select missing an option gets it created on first use rather than 422ing.
+  // Worth knowing about — the option arrives with a colour nobody chose — but
+  // not worth failing a deploy over.
+  if (diff.missingChoices.length) {
+    console.warn(
+      `\nSelects missing options (${diff.missingChoices.length}), which the first write will add:\n` +
+        diff.missingChoices
+          .map((m) => `  ${m.name} has no "${m.missing.join('", "')}" yet`)
+          .join('\n')
+    );
+  }
+
+  if (diff.missing.length === 0 && diff.mistyped.length === 0) {
     console.log(
       `Airtable "${TABLE_NAME}" matches: all ${Object.keys(LEAD_SCHEMA).length} fields present and the right type.`
     );
@@ -291,19 +305,6 @@ async function main(): Promise<void> {
               (m.nearMiss.length ? ` — did you mean "${m.nearMiss.join('", "')}"?` : '')
           )
           .join('\n')
-    );
-  }
-  if (diff.missingChoices.length) {
-    parts.push(
-      `\nSelects missing options (${diff.missingChoices.length}):\n` +
-        diff.missingChoices
-          .map(
-            (m) =>
-              `  ${m.name} cannot accept: ${m.missing.join(', ')}` +
-              `  (has: ${m.present.join(', ') || 'nothing'})`
-          )
-          .join('\n') +
-        '\n  Add these by hand: Airtable will not accept an options change over the API.'
     );
   }
   if (diff.mistyped.length) {

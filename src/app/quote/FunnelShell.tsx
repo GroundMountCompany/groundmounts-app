@@ -10,6 +10,7 @@ import { useQuoteStore, clearPersistedQuote } from '@/store/quoteStore';
 import { useStepUrl, MAX_STEP, allowedStep } from '@/lib/useStepUrl';
 import { captureAndAdvance } from '@/lib/leadPayload';
 import { useSizing } from './steps/useSizing';
+import { usePartialSave } from './usePartialSave';
 import { fitDesignView, rearmDesignFraming } from '@/components/map/MapCanvas';
 
 import { Suspense } from 'react';
@@ -37,6 +38,7 @@ const MAP_FIRST_STEPS = [0, 2, 3];
 export default function FunnelShell() {
   useStepUrl();
   useSizing();
+  usePartialSave();
 
   const step = useQuoteStore((s) => s.currentStepIndex);
   const setStep = useQuoteStore((s) => s.setCurrentStepIndex);

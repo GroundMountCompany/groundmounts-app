@@ -3,6 +3,7 @@ import { TX_FALLBACK_CURVE, type ProductionCurve } from '@/lib/production';
 import { pvwattsUrl, SSURGO_URL } from '@/config/apis';
 import { slopeFromTilequery, type SlopeTier } from '@/lib/slope';
 import type { QuoteInputs } from '@/lib/quoteInputs';
+import { cacheGet, cacheSet } from './redis';
 
 /**
  * What the design step needs to know about a location.
@@ -26,6 +27,14 @@ const UPSTREAM_TIMEOUT_MS = 4000;
 /** Coordinates are rounded to ~100 m for the cache key. */
 const CACHE_PRECISION = 3;
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+/**
+ * A week in Redis. The ground does not move: PVWatts for a coordinate is the
+ * same answer next Tuesday, and SSURGO changes when the USDA resurveys a
+ * county. The design step and the submit that follows it minutes later now
+ * share one lookup, and so does the customer who comes back tomorrow.
+ */
+const REDIS_TTL_SECONDS = 7 * 24 * 60 * 60;
+const REDIS_PREFIX = 'gm:site:';
 const CACHE_MAX_ENTRIES = 500;
 
 interface CacheEntry {
@@ -160,8 +169,18 @@ async function fetchSoil(lat: number, lng: number): Promise<string | null> {
  */
 export async function lookupSite(lat: number, lng: number): Promise<SiteResponse & { cached: boolean }> {
   const key = cacheKey(lat, lng);
-  const cached = readCache(key);
-  if (cached) return { ...cached, cached: true };
+
+  // Per-instance first: it is free and covers the burst of requests a single
+  // funnel makes. Redis second: it is what makes the answer survive a cold
+  // start and be shared between the design step and the submit.
+  const local = readCache(key);
+  if (local) return { ...local, cached: true };
+
+  const durable = await cacheGet<SiteResponse>(REDIS_PREFIX + key);
+  if (durable) {
+    writeCache(key, durable);
+    return { ...durable, cached: true };
+  }
 
   // Fan out. None of the three can fail the request; each has its own fallback.
   const [curve, soilClass, slope] = await Promise.all([
@@ -181,6 +200,7 @@ export async function lookupSite(lat: number, lng: number): Promise<SiteResponse
   };
 
   writeCache(key, value);
+  await cacheSet(REDIS_PREFIX + key, value, REDIS_TTL_SECONDS);
   console.log('[SITE]', key, value.curveSource, value.soilSource, value.slopeSource);
 
   return { ...value, cached: false };

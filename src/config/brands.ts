@@ -14,6 +14,17 @@ export type BrandConfig = {
   email: string;
   calendlyUrl: string;
 
+  /**
+   * The From address on the customer's quote email.
+   *
+   * Its domain has to be verified in Resend or the send fails outright, which
+   * is why every brand here points at a domain the owner controls rather than
+   * at whatever the funnel was embedded on.
+   */
+  fromEmail: string;
+  /** Where a reply lands. A customer hitting reply is a customer talking. */
+  replyTo: string;
+
   // Copy
   headline: string;
   subheadline: string;
@@ -37,6 +48,8 @@ export const brands: Record<string, BrandConfig> = {
     accentColor: "#dc2626",
     phone: "(469) 809-7099",
     email: "info@groundmounts.com",
+    fromEmail: "The Ground Mount Company <quotes@groundmounts.com>",
+    replyTo: "info@groundmounts.com",
     calendlyUrl: "https://calendly.com/groundmounts/consultation",
     headline: "Design Your Ground Mount System",
     subheadline: "Skip the roof. Own your power.",
@@ -55,6 +68,8 @@ export const brands: Record<string, BrandConfig> = {
     accentColor: "#ca8a04",
     phone: "(469) 809-7099",
     email: "info@texasgroundmountsolar.com",
+    fromEmail: "Texas Ground Mount Solar <quotes@texasgroundmountsolar.com>",
+    replyTo: "info@texasgroundmountsolar.com",
     calendlyUrl: "https://calendly.com/groundmounts/consultation",
     headline: "Texas Ground Mount Solar Installers",
     subheadline: "Professional ground mount installation across DFW and Houston",
@@ -73,6 +88,8 @@ export const brands: Record<string, BrandConfig> = {
     accentColor: "#eab308",
     phone: "(469) 809-7099",
     email: "info@backyardsolartexas.com",
+    fromEmail: "Backyard Solar Texas <quotes@backyardsolartexas.com>",
+    replyTo: "info@backyardsolartexas.com",
     calendlyUrl: "https://calendly.com/groundmounts/consultation",
     headline: "Got Land? Skip the Roof.",
     subheadline: "Ground mount solar for Texas properties with space",
@@ -91,6 +108,8 @@ export const brands: Record<string, BrandConfig> = {
     accentColor: "#16a34a",
     phone: "(469) 809-7099",
     email: "info@groundmountsolar.guide",
+    fromEmail: "Ground Mount Solar Guide <quotes@groundmountsolar.guide>",
+    replyTo: "info@groundmountsolar.guide",
     calendlyUrl: "https://calendly.com/groundmounts/consultation",
     headline: "Design Your Ground Mount System",
     subheadline: "Free tool to plan your ground mount solar installation",
@@ -99,8 +118,54 @@ export const brands: Record<string, BrandConfig> = {
     metaTitle: "Ground Mount Solar Guide | Free Design Tool",
     metaDescription: "Free ground mount solar design tool. Plan your installation and get expert guidance.",
   },
+  /**
+   * No branding at all, for partner funnels embedded on somebody else's site.
+   *
+   * The customer there has never heard of any of the four names above, so the
+   * email says what it is and comes from the address that can actually answer
+   * a reply.
+   */
+  neutral: {
+    name: "Ground Mount Solar",
+    tagline: "Ground mount solar design",
+    domain: "groundmounts.com",
+    logo: "/logos/groundmount-company.png",
+    primaryColor: "#1e3a5f",
+    accentColor: "#16a34a",
+    phone: "(469) 809-7099",
+    email: "info@groundmounts.com",
+    fromEmail: "Ground Mount Solar <quotes@groundmounts.com>",
+    replyTo: "info@groundmounts.com",
+    calendlyUrl: "https://calendly.com/groundmounts/consultation",
+    headline: "Design your ground mount system",
+    subheadline: "Plan your installation and get a ballpark price",
+    trustBadges: ["No Roof Damage", "Optimal Sun Angle", "25-Year Warranty", "Texas Local"],
+    socialProofText: "Ground mount solar for Texas landowners",
+    metaTitle: "Ground Mount Solar | Design Tool",
+    metaDescription: "Design your ground mount solar system and get a ballpark price.",
+  },
 };
 
 export type BrandKey = keyof typeof brands;
 
 export const DEFAULT_BRAND: BrandKey = "groundmounts";
+
+/**
+ * The brand for a funnel, from its ?source= domain or the build's default.
+ *
+ * Server-side too: the quote email has to be sent as the brand the customer
+ * filled the form in on, and the route only knows what the payload's `source`
+ * says.
+ */
+export function brandForSource(source?: string | null): BrandConfig {
+  if (source) {
+    const wanted = source.trim().toLowerCase();
+    const match = Object.values(brands).find(
+      (b) => b.domain.toLowerCase() === wanted || wanted.includes(b.domain.toLowerCase())
+    );
+    if (match) return match;
+    if (wanted === 'neutral' || wanted === 'partner') return brands.neutral;
+  }
+  const configured = process.env.NEXT_PUBLIC_BRAND as BrandKey | undefined;
+  return brands[configured ?? DEFAULT_BRAND] ?? brands[DEFAULT_BRAND];
+}

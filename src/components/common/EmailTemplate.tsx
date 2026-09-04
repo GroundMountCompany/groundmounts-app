@@ -20,6 +20,10 @@ export interface EmailTemplateProps {
   priceHigh: number;
   date: string;
   calendlyUrl: string;
+  /** Who the quote is from, as the customer knows them. */
+  brandName: string;
+  brandLogoUrl: string;
+  brandColor: string;
 }
 
 const money = (amount: number) =>
@@ -36,8 +40,9 @@ const money = (amount: number) =>
  * own annual production from a hardcoded kWh-per-kW figure, which meant the
  * email and the screen could quietly disagree about the same system.
  *
- * Phase 7 makes this brand-matched; the copy below is deliberately plain until
- * then.
+ * Brand-matched: the logo, colour and name are the ones on the funnel the
+ * customer filled in, which for a partner embed is the neutral brand rather
+ * than a company they have never heard of.
  */
 export default function EmailTemplate({
   client,
@@ -52,6 +57,9 @@ export default function EmailTemplate({
   priceHigh,
   date,
   calendlyUrl,
+  brandName,
+  brandLogoUrl,
+  brandColor,
 }: EmailTemplateProps) {
   const cell: React.CSSProperties = {
     padding: '10px 0',
@@ -68,7 +76,16 @@ export default function EmailTemplate({
         color: '#171717',
       }}
     >
-      <h1 style={{ fontSize: '22px', marginBottom: '4px' }}>Your ground mount estimate</h1>
+      {/* eslint-disable-next-line @next/next/no-img-element -- an email client
+          renders plain HTML; next/image would emit markup no inbox can use. */}
+      <img
+        src={brandLogoUrl}
+        alt={brandName}
+        style={{ maxHeight: '44px', marginBottom: '12px' }}
+      />
+      <h1 style={{ fontSize: '22px', marginBottom: '4px', color: brandColor }}>
+        Your ground mount estimate
+      </h1>
       <p style={{ color: '#666', fontSize: '15px', marginTop: 0 }}>
         {address} &middot; {date}
       </p>
@@ -150,7 +167,7 @@ export default function EmailTemplate({
           href={calendlyUrl}
           style={{
             display: 'inline-block',
-            background: '#15803d',
+            background: brandColor,
             color: '#ffffff',
             padding: '14px 24px',
             borderRadius: '10px',
@@ -163,7 +180,7 @@ export default function EmailTemplate({
       </div>
 
       <p style={{ marginTop: '24px', fontSize: '13px', color: '#999' }}>
-        Sent to {client}. Reply to this email if anything looks wrong.
+        Sent to {client} by {brandName}. Reply to this email if anything looks wrong.
       </p>
     </div>
   );

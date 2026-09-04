@@ -8,6 +8,23 @@ import { TX_FALLBACK_CURVE } from '@/lib/production';
 import type { LeadFields } from '@/lib/airtableSchema';
 import type { SiteResponse } from '@/lib/server/siteLookup';
 
+/** The durable store, stubbed. Real Redis is not a unit-test dependency. */
+const store = new Map<string, unknown>();
+vi.mock('@/lib/server/redis', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/server/redis')>('@/lib/server/redis');
+  return {
+    ...actual,
+    redis: () => null,
+    cacheGet: async (key: string) => store.get(key) ?? null,
+    cacheSet: async (key: string, value: unknown) => void store.set(key, value),
+    claimOnce: async (key: string) => {
+      if (store.has(key)) return false;
+      store.set(key, '1');
+      return true;
+    },
+  };
+});
+
 /**
  * What actually reaches Airtable.
  *
@@ -17,8 +34,14 @@ import type { SiteResponse } from '@/lib/server/siteLookup';
  */
 
 const written: LeadFields[] = [];
-const notifications: Array<{ html?: string; subject: string; react?: ReactElement; to?: unknown }> =
-  [];
+const notifications: Array<{
+  html?: string;
+  subject: string;
+  react?: ReactElement;
+  to?: unknown;
+  from?: string;
+  replyTo?: string;
+}> = [];
 
 /** The customer's quote email is the one sent as a React element. */
 const quoteEmail = () => notifications.find((n) => n.react);
@@ -29,9 +52,9 @@ vi.mock('@/lib/airtable', async () => {
   const actual = await vi.importActual<typeof import('@/lib/airtable')>('@/lib/airtable');
   return {
     ...actual,
-    createLead: async (fields: LeadFields) => {
-      written.push(fields);
-      return { id: 'recTest123' };
+    upsertLeadByLeadId: async (fields: LeadFields, leadId: string) => {
+      written.push({ ...fields, 'Lead ID': leadId });
+      return { id: 'recTest123', created: true };
     },
   };
 });
@@ -44,6 +67,8 @@ vi.mock('@/lib/resendSafe', () => ({
         subject: string;
         react?: ReactElement;
         to?: unknown;
+        from?: string;
+        replyTo?: string;
       }) => {
         notifications.push(args);
         if (failEmail) return { data: null, error: { message: 'resend is down' } };
@@ -138,6 +163,7 @@ function post(body: Record<string, unknown>): NextRequest {
 }
 
 beforeEach(() => {
+  store.clear();
   written.length = 0;
   curveCalls.length = 0;
   siteFacts = { ...NOTHING_KNOWN, curve: SITE_CURVE, curveSource: 'pvwatts' };
@@ -451,5 +477,145 @@ describe('one request does the whole submit', () => {
     await POST(post({ ...validLead(), resend: true }));
     const expected = priceFromInputs(parseQuoteInputs(INPUTS), SITE_CURVE);
     expect(quoteHtml()).toContain(money(expected.quote.low));
+  });
+});
+
+describe('partial saves', () => {
+  const partial = (extra: Record<string, unknown> = {}) => ({
+    partial: true,
+    id: 'lead-partial-001',
+    stepReached: 4,
+    source: 'groundmounts.com',
+    coordinates: { latitude: 32.7555, longitude: -97.3208 },
+    inputs: INPUTS,
+    ...extra,
+  });
+
+  it('writes the design and where it is, and no PII at all', async () => {
+    // The payload deliberately carries contact details. A partial save must
+    // drop them on the floor: the guarantee is what the handler writes, not
+    // what the client happened to send.
+    const res = await POST(
+      post(
+        partial({
+          name: 'Bert Ortiz',
+          email: 'bert@example.com',
+          phone: '469-555-0100',
+          address: '123 Main St, Fort Worth, TX 76131',
+        })
+      )
+    );
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ ok: true, partial: true, stepReached: 4 });
+
+    const fields = written[0];
+    expect(fields['Lead ID']).toBe('lead-partial-001');
+    expect(fields['Step Reached']).toBe(4);
+    expect(fields.Status).toBe('Partial');
+    expect(fields.Panels).toBe(16);
+    expect(fields.Latitude).toBe(32.7555);
+
+    // The whole point: an abandoned funnel leaves an anonymous design.
+    for (const pii of ['Name', 'Email', 'Phone', 'Address', 'City', 'Zip'] as const) {
+      expect(fields[pii], `a partial save carried ${pii}`).toBeUndefined();
+    }
+    // And no price: nobody has been quoted anything yet.
+    expect(fields['Price Low']).toBeUndefined();
+    expect(fields['Price High']).toBeUndefined();
+  });
+
+  it('saves a step 1 with coordinates and no design yet', async () => {
+    const res = await POST(post(partial({ stepReached: 1, inputs: undefined })));
+
+    expect(res.status).toBe(200);
+    expect(written[0]['Step Reached']).toBe(1);
+    expect(written[0].Latitude).toBe(32.7555);
+    expect(written[0].Panels).toBeUndefined();
+  });
+
+  it('is not held to the minimum-time guard', async () => {
+    // A partial at step 1 happens seconds after arriving. Judging it like a
+    // final submit would throw away every design from someone who moves fast.
+    const res = await POST(post({ ...partial(), ttc_ms: 200 }));
+    expect(res.status).toBe(200);
+  });
+
+  it('refuses a partial with no usable lead id or step', async () => {
+    expect((await POST(post(partial({ id: 'x' })))).status).toBe(400);
+    __resetRateLimits();
+    expect((await POST(post(partial({ stepReached: 99 })))).status).toBe(400);
+    expect(written).toHaveLength(0);
+  });
+
+  it('sends no email of any kind', async () => {
+    await POST(post(partial()));
+    expect(notifications, 'a partial save emailed somebody').toHaveLength(0);
+  });
+});
+
+describe('submitting twice', () => {
+  it('replays the first answer and writes nothing the second time', async () => {
+    const first = await POST(post(validLead()));
+    const firstBody = await first.json();
+
+    __resetRateLimits();
+    const second = await POST(post(validLead()));
+    const secondBody = await second.json();
+
+    expect(secondBody).toMatchObject({
+      leadFiled: true,
+      emailSent: true,
+      priceLow: firstBody.priceLow,
+      priceHigh: firstBody.priceHigh,
+      duplicate: true,
+    });
+
+    // One record, one customer email, one owner notification.
+    expect(written, 'a double submit wrote two records').toHaveLength(1);
+    expect(notifications, 'a double submit sent more mail').toHaveLength(2);
+  });
+
+  it('lets a resend through, because that is the one repeat that is correct', async () => {
+    await POST(post(validLead()));
+    __resetRateLimits();
+
+    const res = await POST(post({ ...validLead(), resend: true }));
+
+    expect(await res.json()).toMatchObject({ emailSent: true });
+    expect(written).toHaveLength(1);
+    expect(notifications.filter((n) => n.react)).toHaveLength(2);
+  });
+
+  it('does not remember a submit that failed, so it can be retried', async () => {
+    failEmail = true;
+    await POST(post(validLead()));
+    expect(written).toHaveLength(1);
+
+    // The email failed, so the result is not cached as final: the retry path
+    // is the resend, and a fresh submit is still allowed to do its work.
+    failEmail = false;
+    __resetRateLimits();
+    const retry = await POST(post({ ...validLead(), resend: true }));
+    expect(await retry.json()).toMatchObject({ emailSent: true });
+  });
+});
+
+describe('the brand on the email', () => {
+  it('sends as the brand the funnel was filled in on', async () => {
+    await POST(post({ ...validLead(), source: 'backyardsolartexas.com' }));
+
+    const quote = quoteEmail() as unknown as { from: string; replyTo: string; subject: string };
+    expect(quote.from).toContain('backyardsolartexas.com');
+    expect(quote.replyTo).toContain('backyardsolartexas.com');
+    expect(quote.subject).toContain('Backyard Solar');
+  });
+
+  it('falls back to a neutral sender for a brandless funnel', async () => {
+    await POST(post({ ...validLead(), source: 'neutral' }));
+
+    const quote = quoteEmail() as unknown as { from: string; subject: string };
+    expect(quote.from).toContain('groundmounts.com');
+    expect(quote.subject).toContain('Ground Mount Solar');
   });
 });

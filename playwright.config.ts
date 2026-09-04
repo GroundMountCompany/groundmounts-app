@@ -99,6 +99,25 @@ export default defineConfig({
       // A real token when the machine has one, otherwise a dummy so the mocked
       // smoke suite still runs on a clean checkout with no secrets.
       NEXT_PUBLIC_MAPBOX_TOKEN: realToken ?? DUMMY_TOKEN,
+
+      // No live credentials reach the server under test.
+      //
+      // This is not belt and braces, it is a fix: partial saves fire from the
+      // design step without any spec asking them to, and the dev server loads
+      // .env.local. A full e2e run wrote seventeen partial records into the
+      // owner's real Airtable base before this was here. Blanking the
+      // credentials makes the write impossible rather than unlikely — a spec
+      // that forgets to mock /api/leads gets a 502 it already ignores.
+      AIRTABLE_API_KEY: '',
+      AIRTABLE_BASE_ID: '',
+      RESEND_API_KEY: '',
+      BLOB_READ_WRITE_TOKEN: '',
+      // Same for the durable store: a test run must not spend the owner's
+      // Upstash quota or leave keys in their database.
+      UPSTASH_REDIS_REST_URL: '',
+      UPSTASH_REDIS_REST_TOKEN: '',
+      KV_REST_API_URL: '',
+      KV_REST_API_TOKEN: '',
     },
   },
 });

@@ -24,10 +24,21 @@ function airtableErrorReason(body: string): string {
 }
 
 /**
+ * Create or update the one record for this funnel.
+ *
+ * Airtable's upsert merges on a field value rather than a record id, which is
+ * what lets a partial save at step 1 and the final submit twenty minutes later
+ * be the same row. Without it the owner would get four rows per customer and
+ * would have to work out which was the real one.
+ *
+ * `typecast` lets Airtable widen a single-select to a value it has not seen
+ * before — the alternative is a 422 that loses the lead over a missing option.
+ *
  * @param leadId Client-generated funnel id, used only for log correlation.
- *               Never log `fields` — it carries name, email, phone and address.
+ *               Never log `fields` — a final submit carries name, email, phone
+ *               and address.
  */
-export async function createLead(fields: LeadFields, leadId?: string) {
+export async function upsertLeadByLeadId(fields: LeadFields, leadId: string) {
   if (!AIRTABLE_API_KEY || !AIRTABLE_BASE_ID) {
     console.error('[AIRTABLE_CONFIG_ERROR] Missing:', {
       hasApiKey: !!AIRTABLE_API_KEY,
@@ -37,24 +48,27 @@ export async function createLead(fields: LeadFields, leadId?: string) {
   }
 
   const url = `https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${encodeURIComponent(AIRTABLE_TABLE_NAME)}`;
-  const payload = { fields };
 
-  console.log('[AIRTABLE_REQUEST] createLead', leadId ?? 'no_lead_id');
+  console.log('[AIRTABLE_REQUEST] upsertLead', leadId, 'step:', fields['Step Reached'] ?? 'final');
 
   const response = await fetch(url, {
-    method: 'POST',
+    method: 'PATCH',
     headers: {
-      'Authorization': `Bearer ${AIRTABLE_API_KEY}`,
+      Authorization: `Bearer ${AIRTABLE_API_KEY}`,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify(payload),
+    body: JSON.stringify({
+      performUpsert: { fieldsToMergeOn: ['Lead ID'] },
+      typecast: true,
+      records: [{ fields: { ...fields, 'Lead ID': leadId } }],
+    }),
   });
 
   if (!response.ok) {
     const reason = airtableErrorReason(await response.text());
     console.error(
-      '[AIRTABLE_ERROR] createLead',
-      leadId ?? 'no_lead_id',
+      '[AIRTABLE_ERROR] upsertLead',
+      leadId,
       'status:', response.status,
       'reason:', reason
     );
@@ -62,8 +76,10 @@ export async function createLead(fields: LeadFields, leadId?: string) {
   }
 
   const result = await response.json();
-  console.log('[AIRTABLE_SUCCESS] createLead', leadId ?? 'no_lead_id', 'record:', result.id);
-  return result;
+  const record = result.records?.[0];
+  const created = (result.createdRecords ?? []).length > 0;
+  console.log('[AIRTABLE_SUCCESS] upsertLead', leadId, created ? 'created' : 'updated', record?.id);
+  return { id: record?.id as string | undefined, created };
 }
 
 // State name to abbreviation mapping

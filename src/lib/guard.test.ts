@@ -1,29 +1,53 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { rateLimitOk, isBotHoneypot, minTimeOk, __resetRateLimits, getClientIp } from './guard';
+import {
+  rateLimitOk,
+  rateLimitOkAsync,
+  ROUTE_LIMITS,
+  isBotHoneypot,
+  minTimeOk,
+  __resetRateLimits,
+  getClientIp,
+} from './guard';
 
 beforeEach(() => __resetRateLimits());
 
 describe('rateLimitOk', () => {
-  it('allows up to the limit and then blocks', () => {
-    for (let i = 0; i < 20; i++) {
+  it('allows up to the route budget and then blocks', () => {
+    for (let i = 0; i < ROUTE_LIMITS.leads; i++) {
       expect(rateLimitOk('1.2.3.4', 'leads')).toBe(true);
     }
     expect(rateLimitOk('1.2.3.4', 'leads')).toBe(false);
   });
 
   it('gives each route its own budget for the same IP', () => {
-    // Exhaust /leads entirely.
-    for (let i = 0; i < 21; i++) rateLimitOk('1.2.3.4', 'leads');
+    // Exhaust the submit budget entirely.
+    for (let i = 0; i <= ROUTE_LIMITS.leads; i++) rateLimitOk('1.2.3.4', 'leads');
     expect(rateLimitOk('1.2.3.4', 'leads')).toBe(false);
 
-    // Sending the quote email must still work for that same user.
-    expect(rateLimitOk('1.2.3.4', 'sendEmail')).toBe(true);
+    // The design step must still be able to ask about the ground.
+    expect(rateLimitOk('1.2.3.4', 'site')).toBe(true);
+  });
+
+  it('gives partial saves a bigger budget than submits', () => {
+    // A single honest session fires several partial saves and one submit, so
+    // holding them to the same allowance would cut the session off partway.
+    expect(ROUTE_LIMITS['lead-partial']).toBeGreaterThan(ROUTE_LIMITS.leads);
   });
 
   it('keeps separate budgets per IP', () => {
-    for (let i = 0; i < 21; i++) rateLimitOk('1.2.3.4', 'leads');
+    for (let i = 0; i <= ROUTE_LIMITS.leads; i++) rateLimitOk('1.2.3.4', 'leads');
     expect(rateLimitOk('1.2.3.4', 'leads')).toBe(false);
     expect(rateLimitOk('5.6.7.8', 'leads')).toBe(true);
+  });
+});
+
+describe('rateLimitOkAsync', () => {
+  it('uses the in-memory limiter when Redis is not configured', async () => {
+    // Local development, and the answer when Upstash is unreachable.
+    for (let i = 0; i < ROUTE_LIMITS.leads; i++) {
+      expect(await rateLimitOkAsync('9.9.9.9', 'leads')).toBe(true);
+    }
+    expect(await rateLimitOkAsync('9.9.9.9', 'leads')).toBe(false);
   });
 });
 

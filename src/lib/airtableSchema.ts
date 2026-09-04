@@ -20,6 +20,13 @@ export type FieldKind =
   | 'attachment';
 
 export const LEAD_SCHEMA = {
+  /** The upsert merge key. One record per funnel, from step 1 to submit. */
+  'Lead ID': 'text',
+  /** How far they got. A partial record is a design nobody has claimed yet. */
+  'Step Reached': 'number',
+  /** Where they were looking. Written from step 1, before any PII exists. */
+  Latitude: 'number',
+  Longitude: 'number',
   Name: 'text',
   Email: 'email',
   Phone: 'phone',
@@ -207,6 +214,9 @@ export const SELECT_CHOICES: Partial<Record<LeadFieldName, string[]>> = {
 const NUMBER_PRECISION: Partial<Record<LeadFieldName, number>> = {
   'System Size kW': 2,
   'Slope %': 1,
+  // Six places is about 4 inches: enough to find the array again.
+  Latitude: 6,
+  Longitude: 6,
 };
 
 export interface AirtableFieldSpec {

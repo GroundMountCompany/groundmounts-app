@@ -940,3 +940,41 @@ describe('telling the owner a lead arrived', () => {
     expect(ownerEmails()).toHaveLength(0);
   });
 });
+
+describe('what a hostile payload can put in the record', () => {
+  it('truncates every free-text field rather than storing a novel', async () => {
+    // Airtable will take a megabyte of text, and the owner's notification puts
+    // the name straight into an email subject line.
+    const huge = 'A'.repeat(50_000);
+
+    await POST(
+      post({
+        ...validLead(),
+        name: huge,
+        email: huge,
+        phone: huge,
+        address: huge,
+        source: huge,
+        state: huge,
+      })
+    );
+
+    const fields = written[0];
+    for (const key of ['Name', 'Email', 'Phone', 'Address', 'Source', 'State'] as const) {
+      const value = fields[key];
+      if (typeof value === 'string') {
+        expect(value.length, `${key} was not truncated`).toBeLessThanOrEqual(200);
+      }
+    }
+
+    // And the subject line the owner receives stays a subject line.
+    const owner = notifications.find((n) => n.html);
+    expect(owner!.subject.length).toBeLessThan(500);
+  });
+
+  it('refuses a lead id long enough to be an attack on the key space', async () => {
+    const res = await POST(post({ ...validLead(), id: 'x'.repeat(5000) }));
+    expect(res.status).toBeGreaterThanOrEqual(400);
+    expect(written).toHaveLength(0);
+  });
+});

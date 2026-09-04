@@ -1,0 +1,97 @@
+name: CI
+
+on:
+  push:
+    branches: [v2, main]
+  pull_request:
+    branches: [v2, main]
+
+# A second push supersedes the first: nobody needs a green tick on a commit
+# that has already been replaced.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # `ci`, not `install`: the lockfile is the build, and a dependency that
+      # resolves differently here than on the owner's machine is a bug we want
+      # to hear about now rather than in production.
+      - run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm run test:unit
+
+      - name: Build
+        run: npm run build
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium webkit
+
+      # No live credentials. The mocked suites cover the funnel; the
+      # interaction project needs a real Mapbox token for satellite tiles and
+      # skips itself with a message when there is not one, which is the
+      # designed behaviour rather than a gap being papered over.
+      - name: End-to-end tests
+        run: npx playwright test
+        env:
+          NEXT_PUBLIC_MAPBOX_TOKEN: pk.e2e-dummy-token
+          AIRTABLE_API_KEY: ''
+          AIRTABLE_BASE_ID: ''
+          RESEND_API_KEY: ''
+          ANTHROPIC_API_KEY: ''
+          BLOB_READ_WRITE_TOKEN: ''
+          UPSTASH_REDIS_REST_URL: ''
+          UPSTASH_REDIS_REST_TOKEN: ''
+          KV_REST_API_URL: ''
+          KV_REST_API_TOKEN: ''
+
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7
+
+  # Separate job: it talks to the owner's live Airtable base, so it only runs
+  # where the secrets exist. A fork's pull request gets everything above and
+  # skips this rather than failing on a secret it was never going to have.
+  airtable-schema:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Check the Airtable schema
+        if: ${{ env.AIRTABLE_API_KEY != '' && env.AIRTABLE_BASE_ID != '' }}
+        run: npm run verify:airtable
+        env:
+          AIRTABLE_API_KEY: ${{ secrets.AIRTABLE_API_KEY }}
+          AIRTABLE_BASE_ID: ${{ secrets.AIRTABLE_BASE_ID }}

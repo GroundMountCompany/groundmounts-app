@@ -147,9 +147,23 @@ interface LeadPayload {
   mapScreenshot?: string;
 }
 
+/**
+ * Longest anything a person types is allowed to be.
+ *
+ * Generous for a real name or address, and short enough that a hostile payload
+ * cannot put a megabyte of text into the owner's Airtable or into the subject
+ * line of an email that lands in their inbox.
+ */
+const MAX_TEXT = 200;
+const MAX_ID = 64;
+
+function text(value: unknown, limit = MAX_TEXT): string {
+  return typeof value === 'string' ? value.slice(0, limit) : '';
+}
+
 function validateLead(data: unknown): LeadPayload {
   const obj = data as Record<string, unknown>;
-  if (!obj.id || typeof obj.id !== 'string' || obj.id.length < 8) {
+  if (!obj.id || typeof obj.id !== 'string' || obj.id.length < 8 || obj.id.length > MAX_ID) {
     throw new Error('Invalid lead ID');
   }
   if (!obj.state || typeof obj.state !== 'string') {
@@ -162,12 +176,12 @@ function validateLead(data: unknown): LeadPayload {
   return {
     id: obj.id,
     resend: obj.resend === true,
-    state: obj.state,
-    email: (obj.email as string) || "",
-    phone: (obj.phone as string) || "",
-    address: (obj.address as string) || "",
-    name: (obj.name as string) || "",
-    source: (obj.source as string) || "",
+    state: text(obj.state, 32),
+    email: text(obj.email),
+    phone: text(obj.phone, 32),
+    address: text(obj.address),
+    name: text(obj.name),
+    source: text(obj.source, 64),
     brand: typeof obj.brand === 'string' ? obj.brand : undefined,
     quote: obj.quote as LeadPayload['quote'],
     ts: obj.ts,
@@ -319,7 +333,7 @@ async function sendQuoteEmail(
  */
 async function savePartial(raw: Record<string, unknown>): Promise<NextResponse> {
   const id = typeof raw.id === 'string' ? raw.id : '';
-  if (id.length < 8) {
+  if (id.length < 8 || id.length > MAX_ID) {
     return NextResponse.json({ ok: false, error: 'invalid_lead_id' }, { status: 400 });
   }
 
@@ -331,7 +345,7 @@ async function savePartial(raw: Record<string, unknown>): Promise<NextResponse> 
   const fields: LeadFields = {
     'Step Reached': Math.round(stepReached),
     Status: 'Partial',
-    Source: typeof raw.source === 'string' ? raw.source : undefined,
+    Source: typeof raw.source === 'string' ? raw.source.slice(0, 64) : undefined,
   };
 
   // The design, if there is one yet. Step 1 has coordinates and nothing else.

@@ -28,6 +28,7 @@ export const ROUTE_LIMITS: Record<string, number> = {
   leads: 10,
   "lead-partial": 40,
   "bill-extract": 10,
+  health: 30,
 };
 
 const limiters = new Map<string, Ratelimit>();

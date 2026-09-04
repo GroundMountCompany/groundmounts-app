@@ -28,8 +28,11 @@ Check what a deployment actually has: `GET /api/health`.
 
 ```json
 {"ok":true,"env":{"hasResend":true,"hasMapbox":true,"hasAirtable":true,
-"hasNrel":true,"hasRedis":true,"notifyEmail":"bert@groundmounts.com"}}
+"hasNrel":true,"hasRedis":true,"hasNotifyEmail":false}}
 ```
+
+Booleans only, deliberately: an unauthenticated caller has no reason to learn
+the owner's notification address from us.
 
 ---
 
@@ -42,6 +45,7 @@ Check what a deployment actually has: `GET /api/health`.
 | `?brand=` | Which brand the funnel wears: `groundmounts` or `neutral`. Anything else falls back to the default. Decides the email sender and the logo. | `/quote?brand=neutral` |
 | `?source=` | **Attribution only.** Recorded in Airtable's Source field. Deliberately cannot pick a brand — otherwise any URL could decide what a customer's email claimed to be from. | `/quote?source=partnersite.com` |
 | `?zipcode=` | Pre-fills the address search. | `/quote?zipcode=76086` |
+| `?partial=1` | Header/query hint that a POST to `/api/leads` is a partial save. Set by the client; the body's `partial: true` works too. | — |
 | `?state=` | Sets the state on the lead. Defaults to `TX`. | `/quote?state=TX` |
 
 ---
@@ -110,6 +114,29 @@ seed, not a quote.
 
 **To switch an option on**, set `enabled: true` in `pricing.ts`. It then appears
 on step 5, is priced, and reaches the lead. Nothing else needs changing.
+
+---
+
+## Known advisories
+
+`npm audit` reports two, and CI runs it report-only so they stay visible
+without blocking a deploy the morning a transitive advisory lands.
+
+**postcss (high) — via `next`.** Four related issues, all about
+`sourceMappingURL` in CSS comments causing arbitrary `.map` file reads, plus
+XSS via an unescaped `</style>` in stringify output.
+
+**Deferred, deliberately.** Every one of them requires an attacker to control
+CSS that PostCSS then processes. PostCSS runs here at **build time only**,
+over Tailwind's output and our own stylesheets — there is no path by which a
+customer's input reaches it, and nothing user-supplied is ever compiled. The
+fix is `npm audit fix --force`, which installs **next@16.3.4, a major version
+bump** across the App Router, the map shell and the whole test suite.
+
+Taking a breaking framework upgrade to close a build-time issue with no
+reachable path would be trading a real regression risk for a theoretical one.
+Revisit when Next is upgraded for its own reasons, or immediately if the app
+ever starts processing CSS it did not author.
 
 ---
 

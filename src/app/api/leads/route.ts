@@ -4,6 +4,7 @@ import { getClientIp, rateLimitOkAsync, isBotHoneypot, minTimeOk } from "@/lib/g
 import { getResendOrThrow } from "@/lib/resendSafe";
 import { put } from "@vercel/blob";
 import { escapeHtml, escapeOr, headerSafe } from "@/lib/escape";
+import { sanitiseExtraction } from "@/lib/billSchema";
 import { sniffImage } from "@/lib/imageSniff";
 import {
   parseQuoteInputs,
@@ -52,6 +53,8 @@ const SUBMIT_TTL_SECONDS = 24 * 60 * 60;
  */
 const LEASE_TTL_SECONDS = 60;
 const SUBMIT_PREFIX = "gm:submit:";
+/** The only steps a partial may claim: address found, meter placed, design done. */
+const PARTIAL_STEPS = [1, 3, 4];
 const LEASE_PREFIX = "gm:submit:lease:";
 
 /**
@@ -156,9 +159,93 @@ interface LeadPayload {
  */
 const MAX_TEXT = 200;
 const MAX_ID = 64;
+/** "Jan 2026" and the like. Long enough for a date range, short enough to read. */
+const MAX_MONTH_LABEL = 16;
 
 function text(value: unknown, limit = MAX_TEXT): string {
   return typeof value === 'string' ? value.slice(0, limit) : '';
+}
+
+/**
+ * A source is attribution, and attribution is a slug.
+ *
+ * It reaches Airtable and the owner reads it, so it may not be a sentence, a
+ * script tag, or a kilobyte of anything. Unrecognisable input is dropped
+ * rather than rejected: a bad campaign parameter should not cost somebody
+ * their quote.
+ */
+function slug(value: unknown, limit = 64): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim().toLowerCase().slice(0, limit);
+  return /^[a-z0-9.-]+$/.test(trimmed) ? trimmed : undefined;
+}
+
+/** A resend carries an id. Everything else is read from the stored record. */
+function validateResend(obj: Record<string, unknown>): LeadPayload {
+  if (typeof obj.id !== 'string' || obj.id.length < 8 || obj.id.length > MAX_ID) {
+    throw new InvalidEnvelope('Invalid lead ID');
+  }
+  return {
+    id: obj.id,
+    resend: true,
+    state: '',
+    email: '',
+    phone: '',
+    address: '',
+    name: '',
+    source: '',
+    ts: 0,
+  };
+}
+
+/** Thrown for an envelope that cannot be read, as opposed to a design that cannot be built. */
+class InvalidEnvelope extends Error {}
+
+/**
+ * A number inside sane bounds, or undefined. Never NaN, never Infinity.
+ *
+ * Absence is checked before conversion because `Number(null)` is 0 and
+ * `Number('')` is 0 — and JSON.stringify turns NaN into null on the way here,
+ * so a field the client could not compute arrives looking like a legitimate
+ * zero. That is the third time this trap has cost something in this codebase.
+ */
+function bounded(value: unknown, min: number, max: number): number | undefined {
+  if (value === null || value === undefined || value === '') return undefined;
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < min || n > max) return undefined;
+  return n;
+}
+
+/**
+ * The context around a quote: what they told us about their bill.
+ *
+ * None of it prices anything — that is all server-derived — but all of it
+ * reaches the owner's Airtable and their notification email, so all of it is
+ * bounded. A monthly bill of 10^9 dollars is not a customer.
+ */
+function validateContext(quote: unknown): LeadPayload['quote'] {
+  const raw = (quote ?? {}) as Record<string, unknown>;
+
+  // Run through the same sanitiser the extraction uses: twelve months, most
+  // recent, labels trimmed, numbers bounded, and nothing else carried through.
+  const bill = sanitiseExtraction({ months: raw.billMonths, confidence: 'high' });
+  const billMonths = bill.months.map((m) => ({
+    month: m.month.slice(0, MAX_MONTH_LABEL),
+    kwh: m.kwh,
+    cost: m.cost,
+  }));
+
+  return {
+    inputs: raw.inputs,
+    totalPanels: bounded(raw.totalPanels, 0, 2000),
+    trenchFeet: bounded(raw.trenchFeet, 0, 20_000),
+    azimuth: bounded(raw.azimuth, 0, 360),
+    percentage: bounded(raw.percentage, 0, 200),
+    avgBill: bounded(raw.avgBill, 0, 100_000),
+    highBill: bounded(raw.highBill, 0, 100_000),
+    billMonths: billMonths.length ? billMonths : null,
+    billAnnualKwh: bounded(raw.billAnnualKwh, 0, 1_000_000) ?? null,
+  };
 }
 
 function validateLead(data: unknown): LeadPayload {
@@ -181,9 +268,9 @@ function validateLead(data: unknown): LeadPayload {
     phone: text(obj.phone, 32),
     address: text(obj.address),
     name: text(obj.name),
-    source: text(obj.source, 64),
+    source: slug(obj.source) ?? '',
     brand: typeof obj.brand === 'string' ? obj.brand : undefined,
-    quote: obj.quote as LeadPayload['quote'],
+    quote: validateContext(obj.quote),
     ts: obj.ts,
     honeypot: obj.honeypot as string,
     ttc_ms: obj.ttc_ms as number,
@@ -331,21 +418,58 @@ async function sendQuoteEmail(
  * Upserted on Lead ID, so the four saves a session makes are one row that
  * fills in as the customer goes.
  */
-async function savePartial(raw: Record<string, unknown>): Promise<NextResponse> {
+async function savePartial(raw: Record<string, unknown>, ip: string): Promise<NextResponse> {
   const id = typeof raw.id === 'string' ? raw.id : '';
   if (id.length < 8 || id.length > MAX_ID) {
     return NextResponse.json({ ok: false, error: 'invalid_lead_id' }, { status: 400 });
   }
 
   const stepReached = Number(raw.stepReached);
-  if (!Number.isFinite(stepReached) || stepReached < 0 || stepReached > 10) {
+  // Only the three steps worth recording. A caller naming step 7 is not a
+  // funnel, and a caller naming step 0 would overwrite a real one with less.
+  if (!PARTIAL_STEPS.includes(stepReached)) {
     return NextResponse.json({ ok: false, error: 'invalid_step' }, { status: 400 });
   }
 
+  /**
+   * A finished funnel does not go backwards.
+   *
+   * Partial saves are fire-and-forget from a page that may still be open in a
+   * tab, so one can land after the submit it precedes — and rewrite the
+   * owner's New lead at Step 6 into a Partial at step 4. A completed record is
+   * the end of the story for that id.
+   */
+  let completed: SubmitRecord | null = null;
+  try {
+    completed = await storeGet<SubmitRecord>(SUBMIT_PREFIX + id);
+  } catch {
+    // The store is unreachable. A partial is not worth a 503 to the customer,
+    // but it is worth not writing blindly, so this one is dropped.
+    console.warn('[LEAD_PARTIAL] store unavailable, skipping', id);
+    return NextResponse.json({ ok: true, partial: true, skipped: 'store_unavailable' });
+  }
+
+  if (completed?.leadFiled) {
+    console.log('[LEAD_PARTIAL] ignored for a filed lead', id, 'step', stepReached);
+    return NextResponse.json({ ok: true, partial: true, skipped: 'already_filed' });
+  }
+
+  /**
+   * At most three per funnel per minute, on top of the per-IP bucket.
+   *
+   * The IP bucket stops one machine flooding the route; this stops one lead id
+   * doing it, which is what a stuck retry loop in somebody's browser looks
+   * like. Three is the number of steps that legitimately save.
+   */
+  if (!(await rateLimitOkAsync(`partial:${id}`, 'lead-partial-id'))) {
+    console.log('[LEAD_PARTIAL] per-lead limit hit', id, 'from', ip);
+    return NextResponse.json({ ok: true, partial: true, skipped: 'rate_limited' });
+  }
+
   const fields: LeadFields = {
-    'Step Reached': Math.round(stepReached),
+    'Step Reached': stepReached,
     Status: 'Partial',
-    Source: typeof raw.source === 'string' ? raw.source.slice(0, 64) : undefined,
+    Source: slug(raw.source),
   };
 
   // The design, if there is one yet. Step 1 has coordinates and nothing else.
@@ -375,9 +499,11 @@ async function savePartial(raw: Record<string, unknown>): Promise<NextResponse> 
   }
 
   const coordinates = raw.coordinates as { latitude?: number; longitude?: number } | undefined;
-  if (typeof coordinates?.latitude === 'number' && typeof coordinates?.longitude === 'number') {
-    fields.Latitude = coordinates.latitude;
-    fields.Longitude = coordinates.longitude;
+  const lat = Number(coordinates?.latitude);
+  const lng = Number(coordinates?.longitude);
+  if (Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180) {
+    fields.Latitude = lat;
+    fields.Longitude = lng;
   }
 
   const clean = Object.fromEntries(
@@ -386,12 +512,59 @@ async function savePartial(raw: Record<string, unknown>): Promise<NextResponse> 
 
   try {
     const { created } = await upsertLeadByLeadId(clean, id);
-    console.log('[LEAD_PARTIAL]', id, 'step:', fields['Step Reached'], created ? 'created' : 'updated');
-    return NextResponse.json({ ok: true, partial: true, stepReached: fields['Step Reached'] });
+    console.log('[LEAD_PARTIAL]', id, 'step:', stepReached, created ? 'created' : 'updated');
+    return NextResponse.json({ ok: true, partial: true, stepReached });
   } catch (error) {
     // A partial save must never be visible to the customer. Log and move on.
     console.error('[LEAD_PARTIAL_ERROR]', id, error instanceof Error ? error.message : error);
     return NextResponse.json({ ok: false, partial: true, error: 'not_saved' }, { status: 502 });
+  }
+}
+
+/**
+ * Put the map screenshot in Blob storage.
+ *
+ * Called only once Airtable has accepted the record. Uploading first meant a
+ * lead rejected for any reason — a schema mismatch, a bad field — still left a
+ * public image in the owner's Blob store with nothing pointing at it and
+ * nothing to clean it up.
+ */
+async function uploadScreenshot(leadId: string, dataUrl: string): Promise<string | undefined> {
+  if (!/^data:image\/(png|jpeg);base64,/.test(dataUrl)) return undefined;
+
+  try {
+    const base64Data = dataUrl.replace(/^data:image\/(png|jpeg);base64,/, '');
+
+    // Reject on the encoded length first, before allocating the buffer.
+    if (base64Data.length > MAX_SCREENSHOT_B64_CHARS) {
+      throw new Error(`screenshot too large (encoded): ${Math.round(base64Data.length / 1024)}KB`);
+    }
+
+    const buffer = Buffer.from(base64Data, 'base64');
+
+    // Cap the size and confirm the bytes really are an image before anything
+    // reaches Blob storage, so this endpoint cannot host arbitrary files.
+    const kind = sniffImage(buffer);
+    if (!kind) throw new Error('screenshot is neither PNG nor JPEG');
+    if (buffer.length > MAX_SCREENSHOT_BYTES) {
+      throw new Error(
+        `screenshot too large: ${Math.round(buffer.length / 1024)}KB > ${MAX_SCREENSHOT_BYTES / 1024}KB`
+      );
+    }
+
+    const blob = await put(`map-screenshots/${leadId}.${kind.ext}`, buffer, {
+      access: 'public',
+      contentType: kind.contentType,
+    });
+    console.log('[MAP_SCREENSHOT_UPLOADED]', leadId, 'size:', Math.round(buffer.length / 1024), 'KB');
+    return blob.url;
+  } catch (error) {
+    console.error(
+      '[MAP_SCREENSHOT_UPLOAD_ERROR]',
+      error instanceof Error ? error.message : error
+    );
+    // The lead matters more than the picture.
+    return undefined;
   }
 }
 
@@ -401,19 +574,18 @@ export async function POST(req: NextRequest) {
   let heldLease: { key: string; token: string } | null = null;
 
   try {
-    const body = await req.json();
-    const raw = body as Record<string, unknown>;
-
     /**
-     * A save from partway through the funnel: a design nobody has put their
-     * name to yet. It carries coordinates and geometry and no PII at all, so
-     * an abandoned funnel leaves an anonymous row rather than a half-filled
-     * contact record.
+     * The cheap checks come before the body is parsed.
+     *
+     * Rate limiting and the honeypot used to sit behind `await req.json()`,
+     * which meant a flood of 5 MB payloads was parsed in full before anything
+     * decided whether to serve it. The kind of request they exist to shed is
+     * exactly the kind that costs most to read.
      */
-    const isPartial = raw.partial === true;
-
-    // Apply guards before processing.
     const ip = getClientIp(req);
+    const isPartial = req.headers.get('x-gm-partial') === '1' || req.nextUrl.searchParams.get('partial') === '1';
+    const declaredHoneypot = req.headers.get('x-gm-hp');
+
     if (!(await rateLimitOkAsync(ip, isPartial ? "lead-partial" : "leads"))) {
       console.log("[LEADS_BLOCKED] Rate limited", isPartial ? "(partial)" : "");
       return NextResponse.json(
@@ -422,17 +594,48 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    if (isBotHoneypot(raw.honeypot as string)) {
-      console.log("[LEADS_BLOCKED] Bot honeypot triggered");
-      // Pretend success so the bot learns nothing.
+    if (isBotHoneypot(declaredHoneypot ?? undefined)) {
+      console.log("[LEADS_BLOCKED] Bot honeypot triggered (header)");
       return NextResponse.json({ ok: true, ignored: true, leadFiled: true, emailSent: true });
     }
 
+    let body: unknown;
+    try {
+      body = await req.json();
+    } catch {
+      // Nothing about the parse error is worth logging: it is attacker text,
+      // and a stack trace here says more about us than about them.
+      console.log('[LEADS_BLOCKED] Malformed JSON from', ip);
+      return NextResponse.json(
+        { ok: false, leadFiled: false, emailSent: false, error: 'bad_request' },
+        { status: 400 }
+      );
+    }
+
+    const raw = (body ?? {}) as Record<string, unknown>;
+
+    // The body's own honeypot still counts: the header is an addition, not a
+    // replacement, and the existing client sends the field.
+    if (isBotHoneypot(raw.honeypot as string)) {
+      console.log("[LEADS_BLOCKED] Bot honeypot triggered");
+      return NextResponse.json({ ok: true, ignored: true, leadFiled: true, emailSent: true });
+    }
+
+    const partial = isPartial || raw.partial === true;
+
+    /**
+     * A resend needs an id and nothing else.
+     *
+     * It reads a stored record and sends the email that record describes, so
+     * demanding a state, a timestamp and a time-to-complete was asking the
+     * client to reconstruct a submit it is not making.
+     */
+    const wantsResend = raw.resend === true;
+
     // A missing ttc_ms is rejected the same as a too-fast one — but only on a
     // real submit. A partial save at step 1 legitimately happens within
-    // seconds of arriving, and holding it to the same bar would throw away
-    // every design from a customer who moves quickly.
-    if (!isPartial && !minTimeOk(raw.ttc_ms)) {
+    // seconds of arriving, and a resend is finishing work already done.
+    if (!partial && !wantsResend && !minTimeOk(raw.ttc_ms)) {
       console.log("[LEADS_BLOCKED] Too fast or missing ttc_ms");
       return NextResponse.json(
         { ok: false, leadFiled: false, emailSent: false, error: "too_fast" },
@@ -440,9 +643,9 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    if (isPartial) return await savePartial(raw);
+    if (partial) return await savePartial(raw, ip);
 
-    const lead = validateLead(body);
+    const lead = wantsResend ? validateResend(raw) : validateLead(raw);
     console.log("[LEADS_VALIDATED]", lead.id);
 
     const submitKey = SUBMIT_PREFIX + lead.id;
@@ -645,46 +848,6 @@ export async function POST(req: NextRequest) {
 
     heldLease = { key: leaseKey, token: leaseToken };
 
-    // Upload map screenshot to Vercel Blob if provided
-    let mapScreenshotUrl: string | undefined;
-    if (lead.mapScreenshot && /^data:image\/(png|jpeg);base64,/.test(lead.mapScreenshot)) {
-      try {
-        const base64Data = lead.mapScreenshot.replace(/^data:image\/(png|jpeg);base64,/, '');
-
-        // Reject on the encoded length first, before allocating the buffer.
-        if (base64Data.length > MAX_SCREENSHOT_B64_CHARS) {
-          throw new Error(
-            `screenshot too large (encoded): ${Math.round(base64Data.length / 1024)}KB`
-          );
-        }
-
-        const buffer = Buffer.from(base64Data, 'base64');
-
-        // Cap the size and confirm the bytes really are an image before anything
-        // reaches Blob storage, so this endpoint cannot host arbitrary files.
-        const kind = sniffImage(buffer);
-        if (!kind) {
-          throw new Error('screenshot is neither PNG nor JPEG');
-        }
-        if (buffer.length > MAX_SCREENSHOT_BYTES) {
-          throw new Error(
-            `screenshot too large: ${Math.round(buffer.length / 1024)}KB > ${MAX_SCREENSHOT_BYTES / 1024}KB`
-          );
-        }
-
-        // Upload to Vercel Blob
-        const blob = await put(`map-screenshots/${lead.id}.${kind.ext}`, buffer, {
-          access: 'public',
-          contentType: kind.contentType,
-        });
-        mapScreenshotUrl = blob.url;
-        console.log("[MAP_SCREENSHOT_UPLOADED]", lead.id, "size:", Math.round(buffer.length / 1024), "KB");
-      } catch (uploadError) {
-        console.error("[MAP_SCREENSHOT_UPLOAD_ERROR]", uploadError instanceof Error ? uploadError.message : uploadError);
-        // Continue without screenshot - don't fail the lead capture
-      }
-    }
-
     // Parse address components
     const addressParts = lead.address ? parseAddress(lead.address) : {};
 
@@ -738,7 +901,7 @@ export async function POST(req: NextRequest) {
       // The funnel is finished, so the row stops being a partial.
       Status: 'New',
       'Step Reached': 6,
-      'Map Screenshot': mapScreenshotUrl ? [{ url: mapScreenshotUrl }] : undefined,
+
     };
 
     // Remove undefined fields
@@ -767,6 +930,25 @@ export async function POST(req: NextRequest) {
     }
 
     console.log("[LEAD_CAPTURED]", lead.id, "airtable_id:", result.id);
+
+    // Now that the record exists, and only now, the screenshot is worth
+    // storing. The row is then patched with the attachment; a failure here
+    // costs the picture, never the lead.
+    let mapScreenshotUrl: string | undefined;
+    if (lead.mapScreenshot) {
+      mapScreenshotUrl = await uploadScreenshot(lead.id, lead.mapScreenshot);
+      if (mapScreenshotUrl) {
+        try {
+          await upsertLeadByLeadId({ 'Map Screenshot': [{ url: mapScreenshotUrl }] }, lead.id);
+        } catch (error) {
+          console.error(
+            '[MAP_SCREENSHOT_ATTACH_ERROR]',
+            lead.id,
+            error instanceof Error ? error.message : error
+          );
+        }
+      }
+    }
 
     /**
      * The record exists, so this submit has happened. Commit that fact before

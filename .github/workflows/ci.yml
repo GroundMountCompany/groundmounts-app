@@ -63,6 +63,14 @@ jobs:
           KV_REST_API_URL: ''
           KV_REST_API_TOKEN: ''
 
+      # Report-only. A failing audit should be something the owner reads and
+      # decides about, not something that blocks a deploy the morning an
+      # advisory lands in a transitive dependency.
+      - name: Dependency audit (report only)
+        if: always()
+        continue-on-error: true
+        run: npm audit --audit-level=moderate
+
       - name: Upload Playwright report
         if: failure()
         uses: actions/upload-artifact@v4

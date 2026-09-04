@@ -23,8 +23,16 @@ import {
  * the safest place for a document we only need for thirty seconds is nowhere.
  */
 
-/** Anything larger is a photo of a wall, not a legible bill. */
-const MAX_BYTES = 10 * 1024 * 1024;
+/**
+ * Four megabytes, not ten.
+ *
+ * Vercel caps a serverless request body at 4.5 MB and rejects anything larger
+ * before this route runs, so a 10 MB limit here was a promise the platform
+ * would break first — the customer would have seen a platform error page
+ * rather than "type it in instead". The client downscales photos to well under
+ * 2 MB before sending, so this is headroom rather than a constraint.
+ */
+const MAX_BYTES = 4 * 1024 * 1024;
 
 export interface BillExtractResponse {
   ok: boolean;
@@ -34,6 +42,9 @@ export interface BillExtractResponse {
 }
 
 const CANNOT_READ = "Couldn't read that one. Type it in instead.";
+const TOO_BIG = 'That file is too big. Try a photo instead, or type it in.';
+/** A PDF cannot be downscaled in the browser, so it needs its own way out. */
+const PDF_TOO_BIG = 'That PDF is too big — take a photo of the usage page instead.';
 
 function refuse(reason: string, status: number): NextResponse {
   return NextResponse.json({ ok: false, reason }, { status });
@@ -49,6 +60,18 @@ export async function POST(req: NextRequest) {
     return refuse(CANNOT_READ, 503);
   }
 
+  /**
+   * Check the declared length before reading the body.
+   *
+   * `formData()` buffers the whole upload to parse it. Refusing after that has
+   * already paid the cost of accepting it.
+   */
+  const declaredLength = Number(req.headers.get('content-length'));
+  if (Number.isFinite(declaredLength) && declaredLength > MAX_BYTES) {
+    console.log('[BILL_EXTRACT] rejected by content-length:', Math.round(declaredLength / 1024), 'KB');
+    return refuse(TOO_BIG, 413);
+  }
+
   let bytes: Buffer;
   try {
     const form = await req.formData();
@@ -58,7 +81,7 @@ export async function POST(req: NextRequest) {
     // Checked before the buffer is allocated: an oversized upload should cost
     // as little as possible.
     if (file.size > MAX_BYTES) {
-      return refuse('That file is too big. Try a photo instead, or type it in.', 413);
+      return refuse(TOO_BIG, 413);
     }
 
     bytes = Buffer.from(await file.arrayBuffer());
@@ -66,11 +89,13 @@ export async function POST(req: NextRequest) {
     return refuse(CANNOT_READ, 400);
   }
 
-  if (bytes.length > MAX_BYTES) {
-    return refuse('That file is too big. Try a photo instead, or type it in.', 413);
-  }
-
   const sniffed = sniffUpload(bytes);
+
+  if (bytes.length > MAX_BYTES) {
+    // A photo can be retaken smaller; a PDF cannot, so say something they can
+    // actually act on.
+    return refuse(sniffed.kind === 'pdf' ? PDF_TOO_BIG : TOO_BIG, 413);
+  }
   if (sniffed.kind === 'heic') {
     // iPhones shoot HEIC by default, so this is worth its own sentence rather
     // than a generic failure the customer cannot act on.

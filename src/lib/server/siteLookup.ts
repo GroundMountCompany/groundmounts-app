@@ -34,7 +34,21 @@ const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
  * share one lookup, and so does the customer who comes back tomorrow.
  */
 const REDIS_TTL_SECONDS = 7 * 24 * 60 * 60;
+/**
+ * How long a partial answer is kept.
+ *
+ * A fallback curve or an unknown soil class is not knowledge about a place,
+ * it is a record of one bad minute. Keeping it for a week would mean a single
+ * PVWatts outage gave every customer on that parcel a generic quote until the
+ * following Tuesday.
+ */
+const REDIS_DEGRADED_TTL_SECONDS = 10 * 60;
 const REDIS_PREFIX = 'gm:site:';
+
+/** Did we actually learn anything, or is this the shape of a failure? */
+function isComplete(value: SiteResponse): boolean {
+  return value.curveSource === 'pvwatts' && value.soilSource === 'ssurgo';
+}
 const CACHE_MAX_ENTRIES = 500;
 
 interface CacheEntry {
@@ -48,6 +62,18 @@ interface CacheEntry {
  * answer. Phase 7's durable store can back this if the call volume justifies it.
  */
 const CACHE = new Map<string, CacheEntry>();
+
+/**
+ * Lookups already in flight, by cache key.
+ *
+ * A cold cache and three simultaneous requests for the same parcel used to
+ * mean three fan-outs: fifteen PVWatts calls, three SSURGO queries and fifteen
+ * Tilequery calls for one answer. One funnel can do this to itself — the design
+ * step and a partial save land within milliseconds of each other. Sharing the
+ * promise makes the second and third callers wait for the first rather than
+ * repeat it.
+ */
+const IN_FLIGHT = new Map<string, Promise<SiteResponse>>();
 
 function cacheKey(lat: number, lng: number): string {
   return `${lat.toFixed(CACHE_PRECISION)},${lng.toFixed(CACHE_PRECISION)}`;
@@ -63,13 +89,14 @@ function readCache(key: string): SiteResponse | null {
   return hit.value;
 }
 
-function writeCache(key: string, value: SiteResponse) {
+function writeCache(key: string, value: SiteResponse, ttlMs = CACHE_TTL_MS) {
   if (CACHE.size >= CACHE_MAX_ENTRIES) {
     // Oldest insertion first; Map preserves order.
     const oldest = CACHE.keys().next().value;
     if (oldest) CACHE.delete(oldest);
   }
-  CACHE.set(key, { value, at: Date.now() });
+  // `at` is offset so a short-lived entry expires early under the same check.
+  CACHE.set(key, { value, at: Date.now() - (CACHE_TTL_MS - ttlMs) });
 }
 
 /**
@@ -182,33 +209,53 @@ export async function lookupSite(lat: number, lng: number): Promise<SiteResponse
     return { ...durable, cached: true };
   }
 
-  // Fan out. None of the three can fail the request; each has its own fallback.
-  const [curve, soilClass, slope] = await Promise.all([
-    fetchCurve(lat, lng),
-    fetchSoil(lat, lng),
-    slopeFromTilequery([lng, lat]),
-  ]);
+  // Somebody else is already asking about this exact place. Wait for them.
+  const pending = IN_FLIGHT.get(key);
+  if (pending) return { ...(await pending), cached: true };
 
-  const value: SiteResponse = {
-    curve: curve ?? TX_FALLBACK_CURVE,
-    curveSource: curve ? 'pvwatts' : 'fallback',
-    soilClass,
-    soilSource: soilClass ? 'ssurgo' : 'unavailable',
-    slopePercent: slope.percent,
-    slopeTier: slope.tier,
-    slopeSource: slope.source === 'unavailable' ? 'unavailable' : 'tilequery',
-  };
+  const work = (async (): Promise<SiteResponse> => {
+    // Fan out. None of the three can fail the request; each has its own
+    // fallback.
+    const [curve, soilClass, slope] = await Promise.all([
+      fetchCurve(lat, lng),
+      fetchSoil(lat, lng),
+      slopeFromTilequery([lng, lat]),
+    ]);
 
-  writeCache(key, value);
-  await cacheSet(REDIS_PREFIX + key, value, REDIS_TTL_SECONDS);
-  console.log('[SITE]', key, value.curveSource, value.soilSource, value.slopeSource);
+    const value: SiteResponse = {
+      curve: curve ?? TX_FALLBACK_CURVE,
+      curveSource: curve ? 'pvwatts' : 'fallback',
+      soilClass,
+      soilSource: soilClass ? 'ssurgo' : 'unavailable',
+      slopePercent: slope.percent,
+      slopeTier: slope.tier,
+      slopeSource: slope.source === 'unavailable' ? 'unavailable' : 'tilequery',
+    };
 
-  return { ...value, cached: false };
+    writeCache(key, value, isComplete(value) ? CACHE_TTL_MS : REDIS_DEGRADED_TTL_SECONDS * 1000);
+    await cacheSet(
+      REDIS_PREFIX + key,
+      value,
+      isComplete(value) ? REDIS_TTL_SECONDS : REDIS_DEGRADED_TTL_SECONDS
+    );
+    console.log('[SITE]', key, value.curveSource, value.soilSource, value.slopeSource);
+    return value;
+  })();
+
+  IN_FLIGHT.set(key, work);
+  try {
+    return { ...(await work), cached: false };
+  } finally {
+    // Whatever happened, the next caller should try again rather than await a
+    // promise that has already settled.
+    IN_FLIGHT.delete(key);
+  }
 }
 
 /** Test seam: the cache is per-instance and would otherwise leak between cases. */
 export function __clearSiteCache(): void {
   CACHE.clear();
+  IN_FLIGHT.clear();
 }
 
 /** Everything nothing about a location was known: the honest empty answer. */

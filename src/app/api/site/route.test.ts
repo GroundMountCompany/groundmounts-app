@@ -3,6 +3,7 @@ import { NextRequest } from 'next/server';
 import { GET } from './route';
 import { __resetRateLimits } from '@/lib/guard';
 import { __clearSiteCache } from '@/lib/server/siteLookup';
+import * as redisModule from '@/lib/server/redis';
 import { TX_FALLBACK_CURVE } from '@/lib/production';
 import { DEFAULTS } from '@/config/pricing';
 import { PVWATTS, SSURGO, MAPBOX } from '@/config/apis';
@@ -247,5 +248,58 @@ describe('/api/site', () => {
     expect(pvwattsCalls).toBe(0);
     expect(body.curveSource).toBe('fallback');
     expect(body.soilSource).toBe('ssurgo');
+  });
+});
+
+describe('simultaneous misses for the same place', () => {
+  it('share one fan-out instead of each paying for their own', async () => {
+    // A cold cache and three requests for one parcel used to mean fifteen
+    // PVWatts calls, three SSURGO queries and fifteen Tilequery calls. One
+    // funnel can do this to itself: the design step and a partial save land
+    // milliseconds apart.
+    let upstreamCalls = 0;
+    routeFetch((url) => {
+      upstreamCalls++;
+      if (isPvwatts(url)) return pvwattsOk(1650);
+      if (isTilequery(url)) return tilequeryOk(100);
+      return ssurgoOk('clay loam');
+    });
+
+    const req = () => new NextRequest('http://localhost/api/site?lat=31.111&lng=-97.111');
+    const [a, b, c] = await Promise.all([GET(req()), GET(req()), GET(req())]);
+    const bodies = await Promise.all([a.json(), b.json(), c.json()]);
+
+    // Five PVWatts azimuths, one SSURGO, five Tilequery points: one fan-out.
+    expect(upstreamCalls).toBe(11);
+    // And all three callers get the same answer.
+    expect(bodies[1].curve).toEqual(bodies[0].curve);
+    expect(bodies[2].soilClass).toBe(bodies[0].soilClass);
+  });
+
+  it('does not keep a failed lookup for a week', async () => {
+    // A fallback is a record of one bad minute, not knowledge about a place.
+    // Cached for ten minutes rather than seven days, so the next customer on
+    // that parcel gets a real curve rather than a generic one until Tuesday.
+    routeFetch(() => new Response('nope', { status: 500 }));
+    const degraded = await (
+      await GET(new NextRequest('http://localhost/api/site?lat=31.222&lng=-97.222'))
+    ).json();
+    expect(degraded.curveSource).toBe('fallback');
+
+    const ttls: number[] = [];
+    vi.spyOn(redisModule, 'cacheSet').mockImplementation(async (_k, _v, ttl) => {
+      ttls.push(ttl);
+    });
+
+    routeFetch((url) => (isPvwatts(url) ? pvwattsOk(1700) : ssurgoOk('clay')));
+    await GET(new NextRequest('http://localhost/api/site?lat=31.333&lng=-97.333'));
+
+    routeFetch(() => new Response('nope', { status: 500 }));
+    await GET(new NextRequest('http://localhost/api/site?lat=31.444&lng=-97.444'));
+
+    const [complete, incomplete] = ttls;
+    expect(complete, 'a full answer should be kept for a week').toBeGreaterThan(24 * 60 * 60);
+    expect(incomplete, 'a failure should expire quickly').toBeLessThanOrEqual(15 * 60);
+    vi.restoreAllMocks();
   });
 });

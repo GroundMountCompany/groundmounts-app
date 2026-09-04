@@ -900,6 +900,42 @@ test.describe('real bills, as the deployed extractor read them', () => {
     await expect(page.getByTestId('bill-annual')).toContainText('18,720');
   });
 
+  test('a 12 MP phone photo is shrunk before it is sent', async ({ page }) => {
+    // Vercel rejects a request body over 4.5 MB before any of our code runs,
+    // so a raw camera photo would have produced a platform error page rather
+    // than the "type it in instead" this funnel promises.
+    await page.route('**/api/bill/extract', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ ok: true, extraction: MUNICIPAL }),
+      })
+    );
+
+    await mockGeocoding(page);
+    await gotoStep(page, 1);
+
+    await page.getByTestId('bill-file').setInputFiles('e2e/fixtures/bills/bill-oversized.png');
+
+    // It still works, which is the point.
+    await expect(page.getByTestId('bill-review')).toBeVisible();
+    await expect(page.getByTestId('bill-kwh-0')).toHaveValue('1560');
+
+    // And what left the browser is a fraction of what was chosen. Measured
+    // from the client rather than from the request: Playwright does not hand
+    // back the body of a multipart upload, and reading `postDataBuffer` gave
+    // 192 bytes whether the image had been shrunk or not.
+    const file = page.getByTestId('bill-file');
+    const original = Number(await file.getAttribute('data-original-bytes'));
+    const uploaded = Number(await file.getAttribute('data-upload-bytes'));
+
+    expect(original, 'the fixture is not the size this test assumes').toBeGreaterThan(
+      5 * 1024 * 1024
+    );
+    expect(uploaded, 'the photo was sent at full size').toBeLessThan(2 * 1024 * 1024);
+    expect(uploaded).toBeLessThan(original / 2);
+  });
+
   test('an unreadable photo would still land on manual entry', async ({ page }) => {
     // The path the blurry fixture was expected to take, kept because it is the
     // one that matters: no dead end when the model genuinely cannot read it.

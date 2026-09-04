@@ -80,6 +80,15 @@ vi.mock('@/lib/airtable', async () => {
   };
 });
 
+/** Blob uploads, counted. Nothing should reach storage before Airtable agrees. */
+const blobs: string[] = [];
+vi.mock('@vercel/blob', () => ({
+  put: async (key: string) => {
+    blobs.push(key);
+    return { url: `https://blob.example/${key}` };
+  },
+}));
+
 vi.mock('@/lib/resendSafe', () => ({
   getResendOrThrow: () => ({
     emails: {
@@ -189,6 +198,7 @@ function post(body: Record<string, unknown>): NextRequest {
 }
 
 beforeEach(() => {
+  blobs.length = 0;
   store.clear();
   storeDown = false;
   failWrite = false;
@@ -976,5 +986,199 @@ describe('what a hostile payload can put in the record', () => {
     const res = await POST(post({ ...validLead(), id: 'x'.repeat(5000) }));
     expect(res.status).toBeGreaterThanOrEqual(400);
     expect(written).toHaveLength(0);
+  });
+});
+
+describe('a partial save arriving after the submit', () => {
+  const partialBody = (step: number) => ({
+    partial: true,
+    id: 'lead-1234-5678',
+    stepReached: step,
+    source: 'groundmounts.com',
+    coordinates: { latitude: 32.7555, longitude: -97.3208 },
+    inputs: INPUTS,
+  });
+
+  it('changes nothing once the lead is filed', async () => {
+    // A page left open in a tab fires these. Without the check, a step-4
+    // partial landing seconds after the submit rewrites the owner's New lead
+    // at step 6 into a Partial at step 4.
+    await POST(post(validLead()));
+    expect(written).toHaveLength(1);
+    expect(written[0].Status).toBe('New');
+    expect(written[0]['Step Reached']).toBe(6);
+
+    __resetRateLimits();
+    const late = await POST(post(partialBody(4)));
+
+    expect(late.status).toBe(200);
+    expect(await late.json()).toMatchObject({ ok: true, skipped: 'already_filed' });
+    expect(written, 'a late partial wrote over a filed lead').toHaveLength(1);
+    expect(written[0].Status).toBe('New');
+    expect(written[0]['Step Reached']).toBe(6);
+  });
+
+  it('accepts only the three steps that mean something', async () => {
+    for (const step of [0, 2, 5, 6, 7, -1]) {
+      __resetRateLimits();
+      const res = await POST(post(partialBody(step)));
+      expect(res.status, `step ${step}`).toBe(400);
+    }
+    expect(written).toHaveLength(0);
+
+    for (const step of [1, 3, 4]) {
+      __resetRateLimits();
+      store.clear();
+      written.length = 0;
+      const res = await POST(post(partialBody(step)));
+      expect(res.status, `step ${step}`).toBe(200);
+    }
+  });
+
+  it('caps how often one lead id may save, whatever its IP', async () => {
+    // A stuck retry loop in one browser is the shape this stops. No resets
+    // between these: the per-IP bucket allows forty, so what stops the fourth
+    // is the per-lead cap and nothing else.
+    for (let i = 0; i < 3; i++) {
+      await POST(post(partialBody(4)));
+    }
+    const before = written.length;
+
+    const capped = await POST(post(partialBody(4)));
+
+    expect(await capped.json()).toMatchObject({ skipped: 'rate_limited' });
+    expect(written).toHaveLength(before);
+  });
+});
+
+describe('the envelope around a quote', () => {
+  it('bounds the figures the customer typed', async () => {
+    await POST(
+      post({
+        ...validLead(),
+        quote: {
+          inputs: INPUTS,
+          avgBill: 1e9,
+          highBill: Number.NaN,
+          percentage: 100000,
+          billAnnualKwh: -5,
+        },
+      })
+    );
+
+    const fields = written[0];
+    // Out of range, not-a-number, and a NaN that JSON turned into null on the
+    // way: none of them should reach the record as a figure.
+    expect(fields['Monthly Bill Avg']).toBeUndefined();
+    expect(fields['Monthly Bill High']).toBeUndefined();
+    expect(fields['Offset Percentage']).toBeUndefined();
+  });
+
+  it('runs bill months through the same sanitiser as extraction', async () => {
+    const months = Array.from({ length: 20 }, (_, i) => ({
+      month: `Month ${i} ${'x'.repeat(50)}`,
+      kwh: 1000 + i,
+      cost: null,
+      accountNumber: '4455-9982',
+    }));
+
+    await POST(post({ ...validLead(), quote: { inputs: INPUTS, billMonths: months } }));
+
+    const stored = JSON.parse(written[0]['Monthly kWh JSON'] as string) as Array<
+      Record<string, unknown>
+    >;
+    expect(stored.length, 'more than a year of months was stored').toBeLessThanOrEqual(12);
+    for (const row of stored) {
+      expect(Object.keys(row).sort()).toEqual(['cost', 'kwh', 'month']);
+      expect((row.month as string).length).toBeLessThanOrEqual(16);
+    }
+    expect(JSON.stringify(stored)).not.toContain('4455-9982');
+  });
+
+  it('drops a source that is not a slug', async () => {
+    await POST(
+      post({ ...validLead(), source: '<script>alert(1)</script> and a whole sentence' })
+    );
+    expect(written[0].Source).toBeUndefined();
+
+    __resetRateLimits();
+    store.clear();
+    written.length = 0;
+    await POST(post({ ...validLead(), source: 'partner-site.com' }));
+    expect(written[0].Source).toBe('partner-site.com');
+  });
+});
+
+describe('the envelope itself', () => {
+  it('answers malformed JSON with a generic 400', async () => {
+    const req = new NextRequest('http://localhost/api/leads', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-forwarded-for': '203.0.113.9' },
+      body: '{"id": "lead-1234-5678", "quote": {',
+    });
+
+    const res = await POST(req);
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe('bad_request');
+    expect(written).toHaveLength(0);
+  });
+
+  it('takes a resend with an id and nothing else', async () => {
+    failEmail = true;
+    await POST(post(validLead()));
+    notifications.length = 0;
+    failEmail = false;
+
+    __resetRateLimits();
+    // No state, no ts, no ttc_ms, no honeypot: none of it is used.
+    const res = await POST(post({ id: 'lead-1234-5678', resend: true }));
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ emailSent: true });
+    expect(notifications.filter((n) => n.react)).toHaveLength(1);
+  });
+});
+
+describe('the map screenshot', () => {
+  /** A one-pixel PNG, as a data URL. */
+  const PNG_DATA_URL =
+    'data:image/png;base64,' +
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+
+  it('is uploaded only after Airtable has taken the record', async () => {
+    await POST(post({ ...validLead(), mapScreenshot: PNG_DATA_URL }));
+
+    // Two upserts on one row: the record, then the attachment patched onto it.
+    // Both merge on Lead ID, so this is still one Airtable record.
+    expect(written).toHaveLength(2);
+    expect(written[0]['Map Screenshot'], 'the record carried the blob URL').toBeUndefined();
+    expect(written[1]['Map Screenshot']).toEqual([
+      { url: 'https://blob.example/map-screenshots/lead-1234-5678.png' },
+    ]);
+    expect(written.every((f) => f['Lead ID'] === 'lead-1234-5678')).toBe(true);
+    expect(blobs, 'the screenshot was not stored').toHaveLength(1);
+  });
+
+  it('leaves no orphan in storage when the write is rejected', async () => {
+    // A blob uploaded before a failed write is a public image nobody points at
+    // and nothing cleans up.
+    failWrite = true;
+
+    const res = await POST(post({ ...validLead(), mapScreenshot: PNG_DATA_URL }));
+
+    expect(res.status).toBe(502);
+    expect(written).toHaveLength(0);
+    expect(blobs, 'a rejected lead still left a blob behind').toHaveLength(0);
+  });
+
+  it('files the lead even when the upload fails', async () => {
+    // Garbage that is not an image: the picture is lost, the lead is not.
+    const res = await POST(
+      post({ ...validLead(), mapScreenshot: 'data:image/png;base64,bm90YW5pbWFnZQ==' })
+    );
+
+    expect(res.status).toBe(200);
+    expect(written).toHaveLength(1);
+    expect(blobs).toHaveLength(0);
   });
 });

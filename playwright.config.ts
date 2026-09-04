@@ -125,6 +125,7 @@ export default defineConfig({
       AIRTABLE_API_KEY: '',
       AIRTABLE_BASE_ID: '',
       RESEND_API_KEY: '',
+      ANTHROPIC_API_KEY: '',
       BLOB_READ_WRITE_TOKEN: '',
       // Same for the durable store: a test run must not spend the owner's
       // Upstash quota or leave keys in their database.

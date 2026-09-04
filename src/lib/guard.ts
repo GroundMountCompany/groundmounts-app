@@ -27,6 +27,8 @@ export const ROUTE_LIMITS: Record<string, number> = {
   site: 30,
   leads: 10,
   "lead-partial": 40,
+  // Per lead id rather than per IP: three is the number of steps that save.
+  "lead-partial-id": 3,
   "bill-extract": 10,
   health: 30,
 };

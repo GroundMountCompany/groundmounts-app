@@ -4,6 +4,7 @@ import { useRef, useState } from 'react';
 import { UI } from '@/config/copy';
 import { useQuoteStore } from '@/store/quoteStore';
 import { MAX_MONTHS, sanitiseExtraction, type BillMonth } from '@/lib/billSchema';
+import { downscaleImage } from '@/lib/downscaleImage';
 
 /**
  * Upload a bill, then check what we read.
@@ -73,8 +74,20 @@ export default function BillUpload({ onConfirm, onDiscard }: BillUploadProps) {
     setFailed(false);
     setPhase('reading');
     try {
+      // Shrunk here, not apologised for later: a phone photo is 8-12 MB and
+      // Vercel rejects a body over 4.5 MB before this route sees it.
+      const upload = await downscaleImage(file);
+
+      // Test hook. What matters is the size of what leaves the browser, and
+      // Playwright does not hand back the body of a multipart upload — so the
+      // e2e reads it here instead. `next build` strips this branch.
+      if (process.env.NODE_ENV !== 'production') {
+        inputRef.current?.setAttribute('data-upload-bytes', String(upload.size));
+        inputRef.current?.setAttribute('data-original-bytes', String(file.size));
+      }
+
       const form = new FormData();
-      form.append('file', file);
+      form.append('file', upload);
 
       const res = await fetch('/api/bill/extract', { method: 'POST', body: form });
       const json = await res.json().catch(() => ({}));

@@ -62,7 +62,12 @@ export function savePartialLead(step: number): void {
 
   void fetch('/api/leads', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      // Declared in a header so the route can rate-limit a partial before it
+      // parses the body it would otherwise have to read to find out.
+      'x-gm-partial': '1',
+    },
     keepalive: true,
     body: JSON.stringify({
       partial: true,

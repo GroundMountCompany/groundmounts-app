@@ -14,6 +14,19 @@ export interface SlopeResult {
 /** Sample offsets (feet) around the array: centre plus four compass points. */
 const SAMPLE_OFFSET_FT = 60;
 
+/**
+ * The server samples a wider ring than the browser does.
+ *
+ * The browser reads a real DEM through `queryTerrainElevation`, which is
+ * metre-accurate, so 60 ft either side of the array is a fair measurement. The
+ * server has only the Tilequery contour layer, whose elevations are quantised
+ * to 10 m bands: at 60 ft apart every sample lands in the same band and the
+ * grade comes out as exactly zero on a hillside. Measured on the live API at
+ * two Texas coordinates, one of them in the Hill Country, all five points
+ * returned an identical elevation.
+ */
+const SERVER_SAMPLE_OFFSET_FT = 200;
+
 export function tierFor(percent: number | null): SlopeTier {
   if (percent === null) return 'Unknown';
   if (percent < 5) return 'Flat';
@@ -21,8 +34,8 @@ export function tierFor(percent: number | null): SlopeTier {
   return 'Steep';
 }
 
-function samplePoints(center: LngLat): LngLat[] {
-  const d = feetToMeters(SAMPLE_OFFSET_FT);
+function samplePoints(center: LngLat, offsetFt = SAMPLE_OFFSET_FT): LngLat[] {
+  const d = feetToMeters(offsetFt);
   return [
     center,
     offsetMeters(center, 0, d),
@@ -67,11 +80,19 @@ export async function slopeFromTilequery(
   center: LngLat,
   token = process.env.NEXT_PUBLIC_MAPBOX_TOKEN
 ): Promise<SlopeResult> {
-  const points = samplePoints(center);
+  const points = samplePoints(center, SERVER_SAMPLE_OFFSET_FT);
   const queried = await tilequeryElevations(points, token);
-  if (queried) {
+
+  // Every sample in the same contour band is not a measurement of flat ground,
+  // it is the absence of a measurement. Reporting it as Flat would override the
+  // customer's own answer with a zero we invented, and Flat carries no site
+  // adder — so the parcels that cost the most to build on would be the ones
+  // quoted lowest. Unknown is the honest answer, and it defers to their pick.
+  if (queried && new Set(queried).size > 1) {
     const percent = gradeFrom(points, queried);
-    if (percent !== null) return { percent, tier: tierFor(percent), source: 'tilequery' };
+    if (percent !== null && percent > 0) {
+      return { percent, tier: tierFor(percent), source: 'tilequery' };
+    }
   }
   return { percent: null, tier: 'Unknown', source: 'unavailable' };
 }
@@ -79,10 +100,10 @@ export async function slopeFromTilequery(
 /**
  * Slope at the array.
  *
- * Primary source is the map's own terrain DEM, which costs no network call and
- * no key. It returns null until terrain tiles have actually loaded, so the
- * Tilequery API is the fallback; if both fail the caller asks the user to pick
- * Flat / Rolling / Steep rather than blocking.
+ * Primary source is the map's own terrain DEM, which costs no network call, no
+ * key, and is accurate to the metre. It returns null until terrain tiles have
+ * actually loaded, so the Tilequery API is the fallback; if both fail the
+ * caller asks the user to pick Flat / Rolling / Steep rather than blocking.
  */
 export async function slopeAt(
   map: mapboxgl.Map | null,

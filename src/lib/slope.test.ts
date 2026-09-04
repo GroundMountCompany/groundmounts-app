@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { gradeFrom, tierFor } from './slope';
+import { describe, it, expect, vi } from 'vitest';
+import { gradeFrom, tierFor, slopeFromTilequery } from './slope';
 import { offsetMeters, type LngLat } from './geo/units';
 import { looksRendered } from './screenshot';
 
@@ -70,5 +70,60 @@ describe('blank-canvas detection', () => {
     expect(looksRendered(pixels((i) => [(i * 7) % 256, (i * 13) % 256, i % 256, 255]))).toBe(
       true
     );
+  });
+});
+
+describe('the server-side slope sample', () => {
+  const CENTER: LngLat = [-97.3208, 32.7555];
+
+  /** One contour elevation per point, in the order the sampler asks. */
+  function stubTilequery(elevations: Array<number | null>) {
+    let call = 0;
+    return vi.fn(async () => {
+      const ele = elevations[call++];
+      return {
+        ok: true,
+        json: async () => ({ features: ele === null ? [] : [{ properties: { ele } }] }),
+      } as unknown as Response;
+    });
+  }
+
+  it('reports Unknown when every sample lands in the same contour band', async () => {
+    // Measured against the live API: at both a Fort Worth and a Hill Country
+    // coordinate, all five points return one identical elevation. Calling that
+    // "Flat" would be inventing a measurement — and Flat carries no site adder,
+    // so the steepest parcels would be the ones quoted lowest.
+    vi.stubGlobal('fetch', stubTilequery([360, 360, 360, 360, 360]));
+
+    const result = await slopeFromTilequery(CENTER, 'pk.test');
+
+    expect(result.source).toBe('unavailable');
+    expect(result.percent).toBeNull();
+    expect(result.tier).toBe('Unknown');
+    vi.unstubAllGlobals();
+  });
+
+  it('reports a grade when the samples genuinely differ', async () => {
+    vi.stubGlobal('fetch', stubTilequery([360, 370, 350, 360, 360]));
+
+    const result = await slopeFromTilequery(CENTER, 'pk.test');
+
+    expect(result.source).toBe('tilequery');
+    expect(result.percent).toBeGreaterThan(0);
+    expect(['Flat', 'Rolling', 'Steep']).toContain(result.tier);
+    vi.unstubAllGlobals();
+  });
+
+  it('reports Unknown when a point has no contour at all', async () => {
+    vi.stubGlobal('fetch', stubTilequery([360, null, 350, 360, 360]));
+
+    const result = await slopeFromTilequery(CENTER, 'pk.test');
+    expect(result.source).toBe('unavailable');
+    vi.unstubAllGlobals();
+  });
+
+  it('needs a token, and says so rather than guessing', async () => {
+    const result = await slopeFromTilequery(CENTER, undefined);
+    expect(result.source).toBe('unavailable');
   });
 });

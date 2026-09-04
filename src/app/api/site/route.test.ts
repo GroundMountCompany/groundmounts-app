@@ -2,9 +2,10 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 import { GET } from './route';
 import { __resetRateLimits } from '@/lib/guard';
+import { __clearSiteCache } from '@/lib/server/siteLookup';
 import { TX_FALLBACK_CURVE } from '@/lib/production';
 import { DEFAULTS } from '@/config/pricing';
-import { PVWATTS, SSURGO } from '@/config/apis';
+import { PVWATTS, SSURGO, MAPBOX } from '@/config/apis';
 
 /**
  * /api/site is advisory, and that is the whole point.
@@ -28,6 +29,15 @@ const pvwattsOk = (annual: number) =>
 const ssurgoOk = (texture: string) =>
   new Response(JSON.stringify({ Table: [['Windthorst', texture]] }), { status: 200 });
 
+/** Contours around one sample point. The route takes the highest per point. */
+const tilequeryOk = (elevation: number) =>
+  new Response(
+    JSON.stringify({ features: [{ properties: { ele: elevation } }] }),
+    { status: 200 }
+  );
+
+const isTilequery = (url: string) => url.includes(MAPBOX.host);
+
 function routeFetch(handler: (url: string) => Response | Promise<Response>) {
   vi.stubGlobal('fetch', (input: RequestInfo | URL) => {
     const url = typeof input === 'string' ? input : input.toString();
@@ -39,6 +49,8 @@ const isPvwatts = (url: string) => url.includes(PVWATTS.host);
 
 beforeEach(() => {
   __resetRateLimits();
+  __clearSiteCache();
+  vi.stubEnv('NEXT_PUBLIC_MAPBOX_TOKEN', 'pk.test');
   // The route only calls PVWatts when it has a key to call it with.
   vi.stubEnv('NREL_API_KEY', 'test-key');
 });
@@ -74,6 +86,39 @@ describe('/api/site', () => {
 
     // And the soil lookup still goes where it always did.
     expect(urls.some((u) => u.includes(SSURGO.host))).toBe(true);
+  });
+
+  it('samples the slope around the array and returns a tier', async () => {
+    // Five points, flat in the middle and higher to one side: a real grade.
+    let point = 0;
+    routeFetch((url) => {
+      if (isPvwatts(url)) return pvwattsOk(1650);
+      if (isTilequery(url)) return tilequeryOk(100 + point++ * 5);
+      return ssurgoOk('clay loam');
+    });
+
+    const body = await (await GET(freshRequest())).json();
+
+    expect(body.slopeSource).toBe('tilequery');
+    expect(body.slopePercent).toBeGreaterThan(0);
+    expect(['Flat', 'Rolling', 'Steep']).toContain(body.slopeTier);
+  });
+
+  it('reports an unknown slope rather than guessing one', async () => {
+    routeFetch((url) => {
+      if (isPvwatts(url)) return pvwattsOk(1650);
+      if (isTilequery(url)) return new Response('no tiles', { status: 404 });
+      return ssurgoOk('clay loam');
+    });
+
+    const body = await (await GET(freshRequest())).json();
+
+    expect(body.slopeSource).toBe('unavailable');
+    expect(body.slopePercent).toBeNull();
+    expect(body.slopeTier).toBe('Unknown');
+    // The other two still answered.
+    expect(body.curveSource).toBe('pvwatts');
+    expect(body.soilSource).toBe('ssurgo');
   });
 
   it('returns both lookups when both answer', async () => {

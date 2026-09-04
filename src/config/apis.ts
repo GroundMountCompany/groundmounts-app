@@ -28,3 +28,16 @@ export const SSURGO = {
 } as const;
 
 export const SSURGO_URL = `https://${SSURGO.host}${SSURGO.path}`;
+
+export const MAPBOX = {
+  host: 'api.mapbox.com',
+  /** Terrain contours, used to sample elevation without loading a map. */
+  tilequeryPath: '/v4/mapbox.mapbox-terrain-v2/tilequery',
+} as const;
+
+export function tilequeryUrl(lng: number, lat: number, token: string): string {
+  return (
+    `https://${MAPBOX.host}${MAPBOX.tilequeryPath}/${lng},${lat}.json` +
+    `?layers=contour&limit=50&access_token=${token}`
+  );
+}

@@ -590,22 +590,29 @@ function pricesIn(text: string): number[] {
 }
 
 test('the email carries the same price the customer was shown', async ({ page }) => {
-  // The whole point of Phase 3.1 item 1: one priced quote, two destinations.
-  // The email route used to re-derive its own figures from its own constants.
+  // One priced quote, two destinations, and now one request that produces
+  // both. The browser sends the design; the route prices it and renders the
+  // email from that same quote.
   await page.addInitScript(
     (payload) => window.localStorage.setItem('gmq:v3', JSON.stringify(payload)),
     contactStepSeed('email-matches-screen')
   );
 
-  let emailBody: { inputs?: unknown } | null = null;
-  let leadBody: { quote?: { inputs?: unknown } } | null = null;
+  const requests: Array<{ quote?: { inputs?: unknown }; resend?: boolean }> = [];
   await page.route('**/api/leads', (route) => {
-    leadBody = JSON.parse(route.request().postData() ?? '{}');
-    return route.fulfill({ status: 200, contentType: 'application/json', body: '{"ok":true}' });
+    requests.push(JSON.parse(route.request().postData() ?? '{}'));
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ ok: true, leadFiled: true, emailSent: true }),
+    });
   });
+  // Nothing should be calling the old route; if anything does, fail loudly
+  // rather than let it be silently unrouted.
+  let strayEmailCalls = 0;
   await page.route('**/api/sendEmail', (route) => {
-    emailBody = JSON.parse(route.request().postData() ?? '{}');
-    return route.fulfill({ status: 200, contentType: 'application/json', body: '{"ok":true}' });
+    strayEmailCalls++;
+    return route.fulfill({ status: 404, body: 'gone' });
   });
 
   await mockGeocoding(page);
@@ -620,24 +627,22 @@ test('the email carries the same price the customer was shown', async ({ page })
   await expect(page.getByTestId('success-screen')).toBeVisible({ timeout: 15_000 });
 
   const revealed = pricesIn(await page.getByTestId('price-revealed').innerText());
-  const sent = emailBody as { inputs?: unknown } | null;
-  const filed = leadBody as { quote?: { inputs?: unknown } } | null;
-
-  expect(sent, 'no email was sent').not.toBeNull();
   expect(revealed).toEqual(beforeSubmit);
 
-  // Neither request carries a price: both carry the design, and both routes
-  // price it themselves. So the check is that the inputs actually sent price to
-  // the range on screen — which is what the customer will receive.
-  for (const body of [JSON.stringify(sent), JSON.stringify(filed)]) {
-    for (const key of ['priceLow', 'priceHigh', 'estimate', 'lineItems']) {
-      expect(body, `a price was sent from the browser: ${key}`).not.toContain(key);
-    }
+  // One request for the whole submit, and not to the route that no longer
+  // exists.
+  expect(requests, 'the submit was not a single request').toHaveLength(1);
+  expect(strayEmailCalls, 'something still calls /api/sendEmail').toBe(0);
+
+  // It carries the design and no price at all: the server prices it, and the
+  // check is that what was sent prices to the range on screen.
+  const body = JSON.stringify(requests[0]);
+  for (const key of ['priceLow', 'priceHigh', 'estimate', 'lineItems']) {
+    expect(body, `a price was sent from the browser: ${key}`).not.toContain(key);
   }
 
-  const priced = priceFromInputs(parseQuoteInputs(sent!.inputs));
+  const priced = priceFromInputs(parseQuoteInputs(requests[0].quote!.inputs));
   expect([priced.quote.low, priced.quote.high]).toEqual(revealed);
-  expect(filed!.quote!.inputs).toEqual(sent!.inputs);
 });
 
 test('a failed email retries only the email, never re-filing the lead', async ({ page }) => {
@@ -646,19 +651,16 @@ test('a failed email retries only the email, never re-filing the lead', async ({
     contactStepSeed('retry-email-test')
   );
 
-  let leadCalls = 0;
-  let emailCalls = 0;
+  const calls: Array<{ resend?: boolean }> = [];
   await page.route('**/api/leads', (route) => {
-    leadCalls++;
-    return route.fulfill({ status: 200, contentType: 'application/json', body: '{"ok":true}' });
-  });
-  await page.route('**/api/sendEmail', (route) => {
-    emailCalls++;
-    // Fail the first attempt, accept the second.
+    const body = JSON.parse(route.request().postData() ?? '{}');
+    calls.push(body);
+    // The lead files; the email fails first time and goes on the retry.
+    const emailSent = calls.length > 1;
     return route.fulfill({
-      status: emailCalls === 1 ? 500 : 200,
+      status: 200,
       contentType: 'application/json',
-      body: emailCalls === 1 ? '{"error":"boom"}' : '{"ok":true}',
+      body: JSON.stringify({ ok: true, leadFiled: true, emailSent }),
     });
   });
 
@@ -677,9 +679,11 @@ test('a failed email retries only the email, never re-filing the lead', async ({
   await page.getByTestId('submit-lead').click();
   await expect(page.getByTestId('success-screen')).toBeVisible({ timeout: 15_000 });
 
-  // Exactly one lead write, two email attempts.
-  expect(leadCalls, 'the lead was filed more than once').toBe(1);
-  expect(emailCalls, 'the email was not retried').toBe(2);
+  // Two requests, and the second asks for the email alone — the record is
+  // already written and must not be written again.
+  expect(calls, 'the submit was retried the wrong number of times').toHaveLength(2);
+  expect(calls[0].resend, 'the first request asked for a resend').toBeFalsy();
+  expect(calls[1].resend, 'the retry would have filed a second lead').toBe(true);
 });
 
 test('a failed lead write sends no email at all', async ({ page }) => {
@@ -688,15 +692,14 @@ test('a failed lead write sends no email at all', async ({ page }) => {
     contactStepSeed('retry-lead-test')
   );
 
-  let leadCalls = 0;
-  let emailCalls = 0;
+  const calls: Array<{ resend?: boolean }> = [];
   await page.route('**/api/leads', (route) => {
-    leadCalls++;
-    return route.fulfill({ status: 500, contentType: 'application/json', body: '{"ok":false}' });
-  });
-  await page.route('**/api/sendEmail', (route) => {
-    emailCalls++;
-    return route.fulfill({ status: 200, contentType: 'application/json', body: '{"ok":true}' });
+    calls.push(JSON.parse(route.request().postData() ?? '{}'));
+    return route.fulfill({
+      status: 500,
+      contentType: 'application/json',
+      body: JSON.stringify({ ok: false, leadFiled: false, emailSent: false }),
+    });
   });
 
   await mockGeocoding(page);
@@ -709,9 +712,13 @@ test('a failed lead write sends no email at all', async ({ page }) => {
   await page.getByTestId('submit-lead').click();
   await expect(page.getByText('Did not go through. Try again.')).toBeVisible();
 
-  // Never promise a customer an email about a lead that was never filed.
-  expect(leadCalls, 'the lead should have been retried').toBe(2);
-  expect(emailCalls, 'an email was sent despite the lead failing').toBe(0);
+  // Never promise a customer an email about a lead that was never filed, and
+  // never let a retry skip the write by asking for a resend.
+  expect(calls, 'the lead should have been retried').toHaveLength(2);
+  expect(
+    calls.some((c) => c.resend),
+    'a retry asked to resend an email for a lead that was never filed'
+  ).toBe(false);
   await expect(page.getByTestId('success-screen')).toHaveCount(0);
 });
 
@@ -875,11 +882,13 @@ test('a filed lead restores read-only contact details, and Start over clears the
     if (pending) window.localStorage.setItem('gmq:v3', pending);
   });
 
+  // The lead files, the email does not: the state these specs care about.
   await page.route('**/api/leads', (route) =>
-    route.fulfill({ status: 200, contentType: 'application/json', body: '{"ok":true}' })
-  );
-  await page.route('**/api/sendEmail', (route) =>
-    route.fulfill({ status: 500, contentType: 'application/json', body: '{"error":"boom"}' })
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ ok: true, leadFiled: true, emailSent: false }),
+    })
   );
 
   await mockGeocoding(page);
@@ -933,11 +942,13 @@ test('a filed lead blocks the design from every route in', async ({ page }) => {
     if (pending) window.localStorage.setItem('gmq:v3', pending);
   });
 
+  // The lead files, the email does not: the state these specs care about.
   await page.route('**/api/leads', (route) =>
-    route.fulfill({ status: 200, contentType: 'application/json', body: '{"ok":true}' })
-  );
-  await page.route('**/api/sendEmail', (route) =>
-    route.fulfill({ status: 500, contentType: 'application/json', body: '{"error":"boom"}' })
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ ok: true, leadFiled: true, emailSent: false }),
+    })
   );
 
   await mockGeocoding(page);

@@ -1,6 +1,8 @@
 import { DEFAULTS } from '@/config/pricing';
 import { TX_FALLBACK_CURVE, type ProductionCurve } from '@/lib/production';
 import { pvwattsUrl, SSURGO_URL } from '@/config/apis';
+import { slopeFromTilequery, type SlopeTier } from '@/lib/slope';
+import type { QuoteInputs } from '@/lib/quoteInputs';
 
 /**
  * What the design step needs to know about a location.
@@ -14,6 +16,9 @@ export interface SiteResponse {
   curveSource: 'pvwatts' | 'fallback';
   soilClass: string | null;
   soilSource: 'ssurgo' | 'unavailable';
+  slopePercent: number | null;
+  slopeTier: SlopeTier;
+  slopeSource: 'tilequery' | 'unavailable';
 }
 
 /** Each upstream gets this long before we give up and use the fallback. */
@@ -158,18 +163,25 @@ export async function lookupSite(lat: number, lng: number): Promise<SiteResponse
   const cached = readCache(key);
   if (cached) return { ...cached, cached: true };
 
-  // Fan out. Neither can fail the request; both have their own fallback.
-  const [curve, soilClass] = await Promise.all([fetchCurve(lat, lng), fetchSoil(lat, lng)]);
+  // Fan out. None of the three can fail the request; each has its own fallback.
+  const [curve, soilClass, slope] = await Promise.all([
+    fetchCurve(lat, lng),
+    fetchSoil(lat, lng),
+    slopeFromTilequery([lng, lat]),
+  ]);
 
   const value: SiteResponse = {
     curve: curve ?? TX_FALLBACK_CURVE,
     curveSource: curve ? 'pvwatts' : 'fallback',
     soilClass,
     soilSource: soilClass ? 'ssurgo' : 'unavailable',
+    slopePercent: slope.percent,
+    slopeTier: slope.tier,
+    slopeSource: slope.source === 'unavailable' ? 'unavailable' : 'tilequery',
   };
 
   writeCache(key, value);
-  console.log('[SITE]', key, value.curveSource, value.soilSource);
+  console.log('[SITE]', key, value.curveSource, value.soilSource, value.slopeSource);
 
   return { ...value, cached: false };
 }
@@ -179,26 +191,79 @@ export function __clearSiteCache(): void {
   CACHE.clear();
 }
 
+/** Everything nothing about a location was known: the honest empty answer. */
+const NOTHING_KNOWN: SiteResponse = {
+  curve: TX_FALLBACK_CURVE,
+  curveSource: 'fallback',
+  soilClass: null,
+  soilSource: 'unavailable',
+  slopePercent: null,
+  slopeTier: 'Unknown',
+  slopeSource: 'unavailable',
+};
+
 /**
- * The production curve for a design, derived here and never accepted from a
- * request.
+ * What the server knows about the ground under an array.
+ *
+ * Production curve, soil and slope, all for the same coordinates and out of the
+ * same cache entry. None of it is accepted from a request: a browser can say
+ * where its array is, and the server decides what that place is like. A design
+ * on rock and a steep grade costs more, so those are answers the customer's own
+ * page must not be able to choose.
  *
  * In the normal case the design step has already asked /api/site about this
- * array, so this is a cache hit in the same instance. When it is not — cold
- * instance, no NREL key, upstream down — the Texas reference is used and said
- * so, rather than a number the caller supplied.
+ * array, so this is a cache hit in the same instance.
  */
-export async function curveForArray(
+export async function siteFactsForArray(
   arrayCenter: [number, number] | null
-): Promise<{ curve: ProductionCurve; curveSource: 'pvwatts' | 'fallback' }> {
-  if (!arrayCenter) return { curve: TX_FALLBACK_CURVE, curveSource: 'fallback' };
+): Promise<SiteResponse> {
+  if (!arrayCenter) return NOTHING_KNOWN;
 
   const [lng, lat] = arrayCenter;
   try {
-    const site = await lookupSite(lat, lng);
-    return { curve: site.curve, curveSource: site.curveSource };
+    const result = await lookupSite(lat, lng);
+    // `cached` is for the /api/site response; a caller pricing a quote does not
+    // care where the answer came from, only what it is.
+    delete (result as Partial<typeof result>).cached;
+    return result;
   } catch (error) {
-    console.warn('[SITE] curve lookup failed:', error instanceof Error ? error.message : error);
-    return { curve: TX_FALLBACK_CURVE, curveSource: 'fallback' };
+    console.warn('[SITE] lookup failed:', error instanceof Error ? error.message : error);
+    return NOTHING_KNOWN;
   }
+}
+
+/**
+ * The site conditions a quote is priced with.
+ *
+ * The server's own answer wins wherever it has one. The client's is used only
+ * where the server has nothing — a soil lookup that failed, a slope the
+ * Tilequery API would not give — because in that case the alternative is not a
+ * better number, it is no number, and an unknown slope prices as if the ground
+ * were flat.
+ *
+ * So: a design claiming sand on flat ground, sitting on rock on a steep grade,
+ * is priced as rock on a steep grade.
+ */
+export function resolveSiteConditions(
+  clientInputs: Pick<QuoteInputs, 'soilClass' | 'slopePercent' | 'slopeTier'>,
+  facts: SiteResponse
+): {
+  soilClass: string | null;
+  slopePercent: number | null;
+  slopeTier: SlopeTier | null;
+  soilAuthority: 'server' | 'client';
+  slopeAuthority: 'server' | 'client';
+} {
+  const serverSoil = facts.soilSource === 'ssurgo';
+  const serverSlope = facts.slopeSource === 'tilequery' && facts.slopePercent !== null;
+
+  return {
+    soilClass: serverSoil ? facts.soilClass : clientInputs.soilClass,
+    slopePercent: serverSlope ? facts.slopePercent : clientInputs.slopePercent,
+    // The manual Flat/Rolling/Steep pick only ever applies when the server
+    // could not measure the ground itself.
+    slopeTier: serverSlope ? facts.slopeTier : clientInputs.slopeTier,
+    soilAuthority: serverSoil ? 'server' : 'client',
+    slopeAuthority: serverSlope ? 'server' : 'client',
+  };
 }

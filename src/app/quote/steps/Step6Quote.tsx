@@ -83,43 +83,36 @@ export default function Step6Quote() {
     try {
       const store = useQuoteStore.getState();
 
-      // Lead first. It is the thing the business cannot recover if it is lost;
-      // the email is a courtesy that can be retried. Both are keyed on leadId so
-      // a retry after a partial failure skips whatever already went through.
-      if (store.leadFiled !== payload.id) {
-        const result = await enqueueOrSend(payload);
-        if (!result.ok) {
-          setError(UI.submitFailed);
-          return;
-        }
-        store.setLeadFiled(payload.id);
+      // One request. It files the lead, sends the quote email and notifies the
+      // owner, and reports which of those happened. Two routes meant two site
+      // lookups and two chances for the customer's email and the owner's record
+      // to describe different numbers.
+      //
+      // The one case for a second request is a lead that was filed while its
+      // email failed: `resend` sends the email alone rather than re-writing a
+      // record that already exists.
+      const alreadyFiled = store.leadFiled === payload.id;
+      const result = await enqueueOrSend(
+        alreadyFiled ? { ...payload, resend: true } : payload
+      );
+
+      if (result.body?.leadFiled) store.setLeadFiled(payload.id);
+
+      if (!result.ok) {
+        setError(
+          useQuoteStore.getState().leadFiled === payload.id
+            ? UI.emailFailedAfterSave
+            : UI.submitFailed
+        );
+        return;
       }
 
-      if (useQuoteStore.getState().emailSent !== payload.id) {
-        const emailRes = await fetch('/api/sendEmail', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          // The design, not the price. The route prices these inputs itself
-          // with the same function this screen used, so the email cannot be
-          // talked into quoting a number nobody computed.
-          body: JSON.stringify({
-            leadId: payload.id,
-            email,
-            address: payload.address,
-            name,
-            inputs: payload.quote.inputs,
-            honeypot: company,
-            ttc_ms: payload.ttc_ms,
-          }),
-        });
-
-        if (!emailRes.ok) {
-          // The lead is safe. Say so plainly, and retry only the email.
-          setError(UI.emailFailedAfterSave);
-          return;
-        }
-        useQuoteStore.getState().setEmailSent(payload.id);
+      if (!result.body?.emailSent) {
+        // The lead is safe. Say so plainly, and retry only the email.
+        setError(UI.emailFailedAfterSave);
+        return;
       }
+      useQuoteStore.getState().setEmailSent(payload.id);
 
       clearPersistedQuote();
       setDone(true);

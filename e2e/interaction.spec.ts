@@ -840,26 +840,18 @@ test.describe('design step gestures', () => {
   test('screenshot survives a reload on the contact form and reaches the lead', async ({
     page,
   }) => {
-    // Mock the two endpoints so the flow completes without touching Airtable or
-    // Resend, and so the outgoing lead payload can be inspected.
+    // Mock the endpoint so the flow completes without touching Airtable or
+    // Resend, and so the outgoing lead payload can be inspected. One request
+    // now does the whole submit.
     let leadBody: { mapScreenshot?: string; ttc_ms?: number } | null = null;
-    let emailBody: { ttc_ms?: number } | null = null;
 
     // Intercepted, not blindly succeeded: the request itself is the evidence.
-    await page.route('**/api/sendEmail', (route) => {
-      emailBody = JSON.parse(route.request().postData() ?? '{}');
-      return route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: '{"ok":true}',
-      });
-    });
     await page.route('**/api/leads', (route) => {
       leadBody = JSON.parse(route.request().postData() ?? '{}');
       return route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: '{"ok":true,"airtableId":"recTest"}',
+        body: '{"ok":true,"leadFiled":true,"emailSent":true,"airtableId":"recTest"}',
       });
     });
 
@@ -914,7 +906,6 @@ test.describe('design step gestures', () => {
     // that order. Polling only the lead used to pass by accident when the email
     // went first.
     await expect.poll(() => (leadBody ? 'sent' : 'pending'), { timeout: 20_000 }).toBe('sent');
-    await expect.poll(() => (emailBody ? 'sent' : 'pending'), { timeout: 20_000 }).toBe('sent');
 
     const shot = leadBody!.mapScreenshot;
     expect(shot, 'lead payload has no screenshot after reload').toBeTruthy();
@@ -923,16 +914,14 @@ test.describe('design step gestures', () => {
 
     // The funnel timer must survive the reload. If startedAt were not persisted,
     // ttc_ms would measure the seconds since the refresh and a prompt submit
-    // would be rejected by the min-time guard on /api/sendEmail.
-    expect(emailBody, '/api/sendEmail was never called').not.toBeNull();
+    // would be rejected by the min-time guard on /api/leads.
     expect(
-      emailBody!.ttc_ms,
+      leadBody!.ttc_ms,
       'ttc_ms restarted at the reload instead of the funnel start'
     ).toBeGreaterThan(300_000);
-    expect(leadBody!.ttc_ms).toBeGreaterThan(300_000);
 
     // And it must still pass the guard the server actually applies.
-    expect(minTimeOk(emailBody!.ttc_ms)).toBe(true);
+    expect(minTimeOk(leadBody!.ttc_ms)).toBe(true);
   });
 
   test('grip keeps a usable screen distance from the array at any zoom', async ({

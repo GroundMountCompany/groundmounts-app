@@ -1,6 +1,7 @@
 import type mapboxgl from 'mapbox-gl';
 import { offsetMeters, feetToMeters, type LngLat } from './geo/units';
 import { distanceMeters } from './geo/trench';
+import { tilequeryUrl } from '@/config/apis';
 
 export type SlopeTier = 'Flat' | 'Rolling' | 'Steep' | 'Unknown';
 
@@ -55,6 +56,27 @@ export function gradeFrom(points: LngLat[], elevations: number[]): number | null
 }
 
 /**
+ * Slope from the Tilequery API alone, with no map.
+ *
+ * The server has no WebGL context and no loaded terrain tiles, so this is the
+ * only source available to it. Same five sample points and the same grade
+ * arithmetic the browser uses, so a server answer and a client answer describe
+ * the same ground the same way.
+ */
+export async function slopeFromTilequery(
+  center: LngLat,
+  token = process.env.NEXT_PUBLIC_MAPBOX_TOKEN
+): Promise<SlopeResult> {
+  const points = samplePoints(center);
+  const queried = await tilequeryElevations(points, token);
+  if (queried) {
+    const percent = gradeFrom(points, queried);
+    if (percent !== null) return { percent, tier: tierFor(percent), source: 'tilequery' };
+  }
+  return { percent: null, tier: 'Unknown', source: 'unavailable' };
+}
+
+/**
  * Slope at the array.
  *
  * Primary source is the map's own terrain DEM, which costs no network call and
@@ -91,7 +113,7 @@ export async function slopeAt(
   return { percent: null, tier: 'Unknown', source: 'unavailable' };
 }
 
-async function tilequeryElevations(
+export async function tilequeryElevations(
   points: LngLat[],
   token?: string
 ): Promise<number[] | null> {
@@ -99,10 +121,9 @@ async function tilequeryElevations(
   try {
     const results = await Promise.all(
       points.map(async ([lng, lat]) => {
-        const url =
-          `https://api.mapbox.com/v4/mapbox.mapbox-terrain-v2/tilequery/` +
-          `${lng},${lat}.json?layers=contour&limit=50&access_token=${token}`;
-        const res = await fetch(url, { signal: AbortSignal.timeout(4000) });
+        const res = await fetch(tilequeryUrl(lng, lat, token), {
+          signal: AbortSignal.timeout(4000),
+        });
         if (!res.ok) return null;
         const json = await res.json();
         const elevations: number[] = (json?.features ?? [])

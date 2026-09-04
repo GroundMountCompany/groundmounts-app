@@ -6,7 +6,9 @@ import { put } from "@vercel/blob";
 import { escapeHtml, escapeOr, headerSafe } from "@/lib/escape";
 import { sniffImage } from "@/lib/imageSniff";
 import { parseQuoteInputs, priceFromInputs, InvalidQuoteInputs } from "@/lib/quoteInputs";
-import { curveForArray } from "@/lib/server/siteLookup";
+import { siteFactsForArray, resolveSiteConditions } from "@/lib/server/siteLookup";
+import EmailTemplate from "@/components/common/EmailTemplate";
+import type { ReactElement } from "react";
 
 /** Decoded screenshots above this are rejected rather than uploaded. */
 const MAX_SCREENSHOT_BYTES = 2 * 1024 * 1024;
@@ -29,6 +31,14 @@ const AIRTABLE_TABLE_ID = process.env.AIRTABLE_TABLE_ID;
 
 interface LeadPayload {
   id: string;
+  /**
+   * Send the customer's email again for a lead that is already filed.
+   *
+   * The one case where a second request is correct: the record was written and
+   * the email was not. Skips the Airtable write entirely rather than trying to
+   * be clever about duplicates.
+   */
+  resend?: boolean;
   state: string;
   email?: string;
   phone?: string;
@@ -66,6 +76,7 @@ function validateLead(data: unknown): LeadPayload {
 
   return {
     id: obj.id,
+    resend: obj.resend === true,
     state: obj.state,
     email: (obj.email as string) || "",
     phone: (obj.phone as string) || "",
@@ -80,6 +91,63 @@ function validateLead(data: unknown): LeadPayload {
   };
 }
 
+/**
+ * The customer's quote email.
+ *
+ * Rendered from the priced quote this route just computed, so the number in
+ * the customer's inbox is the number in the owner's Airtable by construction
+ * rather than by two routes agreeing.
+ */
+async function sendQuoteEmail(
+  to: string,
+  address: string,
+  inputs: { panelCount: number; trenchFeet: number },
+  priced: {
+    systemSizeKw: number;
+    annualProductionKwh: number;
+    quote: { lineItems: Array<{ key: string; label: string; detail?: string; amount: number }>; estimate: number; low: number; high: number };
+  }
+): Promise<boolean> {
+  try {
+    const resend = getResendOrThrow();
+    const template = EmailTemplate({
+      client: to,
+      address: address || 'Your Property',
+      totalPanels: inputs.panelCount,
+      systemSizeKw: priced.systemSizeKw,
+      trenchingDistance: inputs.trenchFeet,
+      annualProductionKwh: priced.annualProductionKwh,
+      lineItems: priced.quote.lineItems,
+      estimate: priced.quote.estimate,
+      priceLow: priced.quote.low,
+      priceHigh: priced.quote.high,
+      date: new Date().toLocaleDateString('en-US', {
+        day: '2-digit',
+        month: 'short',
+        year: 'numeric',
+      }),
+      calendlyUrl:
+        process.env.NEXT_PUBLIC_CALENDLY_URL || 'https://calendly.com/groundmounts/consultation',
+    }) as ReactElement;
+
+    const { error } = await resend.emails.send({
+      from: 'Ground Mounts Solar System <info@groundmounts.com>',
+      to: [to],
+      subject: 'Your Quote Summary & Booking Link',
+      react: template,
+    });
+
+    if (error) {
+      console.error('[QUOTE_EMAIL_ERROR]', error);
+      return false;
+    }
+    return true;
+  } catch (error) {
+    console.error('[QUOTE_EMAIL_ERROR]', error instanceof Error ? error.message : error);
+    return false;
+  }
+}
+
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
@@ -88,22 +156,77 @@ export async function POST(req: NextRequest) {
     const ip = getClientIp(req);
     if (!rateLimitOk(ip, 'leads')) {
       console.log("[LEADS_BLOCKED] Rate limited");
-      return NextResponse.json({ ok: false, error: "rate_limited" }, { status: 429 });
+      return NextResponse.json(
+        { ok: false, leadFiled: false, emailSent: false, error: "rate_limited" },
+        { status: 429 }
+      );
     }
 
     if (isBotHoneypot((body as Record<string, unknown>).honeypot as string)) {
       console.log("[LEADS_BLOCKED] Bot honeypot triggered");
-      return NextResponse.json({ ok: true, ignored: true }); // pretend success, do nothing
+      // Pretend success so the bot learns nothing.
+      return NextResponse.json({ ok: true, ignored: true, leadFiled: true, emailSent: true });
     }
 
     // A missing ttc_ms is rejected the same as a too-fast one.
     if (!minTimeOk((body as Record<string, unknown>).ttc_ms)) {
       console.log("[LEADS_BLOCKED] Too fast or missing ttc_ms");
-      return NextResponse.json({ ok: false, error: "too_fast" }, { status: 400 });
+      return NextResponse.json(
+        { ok: false, leadFiled: false, emailSent: false, error: "too_fast" },
+        { status: 400 }
+      );
     }
 
     const lead = validateLead(body);
     console.log("[LEADS_VALIDATED]", lead.id);
+
+    // Price the design here, not on the customer's phone.
+    //
+    // The record the owner quotes from must be one this server computed. A
+    // browser can describe its design; it cannot name its own price, and a
+    // payload that tries is priced from its inputs like any other.
+    let priced;
+    let inputs;
+    let facts;
+    let conditions;
+    try {
+      inputs = parseQuoteInputs(lead.quote?.inputs);
+      // One lookup for this array: curve, soil and slope, all for the same
+      // coordinates out of the same cache entry. Everything the ground
+      // contributes to the price is decided here, not in the payload.
+      facts = await siteFactsForArray(inputs.arrayCenter);
+      conditions = resolveSiteConditions(inputs, facts);
+      priced = priceFromInputs({ ...inputs, ...conditions }, facts.curve);
+    } catch (error) {
+      if (error instanceof InvalidQuoteInputs) {
+        console.log('[LEADS_BLOCKED] Invalid quote inputs:', error.message);
+        return NextResponse.json(
+          { ok: false, leadFiled: false, emailSent: false, error: 'invalid_inputs' },
+          { status: 400 }
+        );
+      }
+      throw error;
+    }
+
+    // A retry for a lead that is already filed: send the email, nothing else.
+    // The record exists, so re-writing it would duplicate it, and the customer
+    // is waiting on the one thing that failed.
+    if (lead.resend) {
+      const emailSent = lead.email
+        ? await sendQuoteEmail(lead.email, lead.address ?? '', inputs, priced)
+        : false;
+      console.log('[LEAD_EMAIL_RESEND]', lead.id, emailSent ? 'sent' : 'failed');
+      return NextResponse.json(
+        {
+          ok: emailSent,
+          leadFiled: true,
+          emailSent,
+          priceLow: priced.quote.low,
+          priceHigh: priced.quote.high,
+        },
+        { status: emailSent ? 200 : 502 }
+      );
+    }
 
     // Upload map screenshot to Vercel Blob if provided
     let mapScreenshotUrl: string | undefined;
@@ -145,30 +268,6 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Price the design here, not on the customer's phone.
-    //
-    // The record the owner quotes from must be one this server computed. A
-    // browser can describe its design; it cannot name its own price, and a
-    // payload that tries is priced from its inputs like any other.
-    let priced;
-    let inputs;
-    let curveSource: 'pvwatts' | 'fallback' = 'fallback';
-    try {
-      inputs = parseQuoteInputs(lead.quote?.inputs);
-      // Derived here from the array's own coordinates. A curve in the request
-      // body is ignored: it decides the production figure the owner quotes
-      // from, so it cannot be something the browser chose.
-      const derived = await curveForArray(inputs.arrayCenter);
-      curveSource = derived.curveSource;
-      priced = priceFromInputs(inputs, derived.curve);
-    } catch (error) {
-      if (error instanceof InvalidQuoteInputs) {
-        console.log('[LEADS_BLOCKED] Invalid quote inputs:', error.message);
-        return NextResponse.json({ ok: false, error: 'invalid_inputs' }, { status: 400 });
-      }
-      throw error;
-    }
-
     // Parse address components
     const addressParts = lead.address ? parseAddress(lead.address) : {};
 
@@ -204,13 +303,13 @@ export async function POST(req: NextRequest) {
       'Panel Tier': inputs.tier,
       'Battery Units': inputs.batteryUnits,
       'Site Prep': inputs.needsClearing,
-      'Slope %': inputs.slopePercent ?? undefined,
+      'Slope %': conditions.slopePercent ?? undefined,
       'Slope Tier': priced.quote.slopeTier,
-      'Soil Class': inputs.soilClass ?? undefined,
+      'Soil Class': conditions.soilClass ?? undefined,
       'Est Annual Production kWh': priced.annualProductionKwh,
       // Whether that production figure came from the site's own PVWatts curve
       // or the Texas reference, so a quote can be read in context later.
-      'Curve Source': curveSource,
+      'Curve Source': facts.curveSource,
       Azimuth: inputs.azimuth,
       Source: lead.source || undefined,
       Status: 'New',
@@ -225,6 +324,13 @@ export async function POST(req: NextRequest) {
     const result = await createLead(cleanFields, lead.id);
 
     console.log("[LEAD_CAPTURED]", lead.id, "airtable_id:", result.id);
+
+    // The customer's quote email. The lead is already safe at this point, so a
+    // failure here is reported in the response rather than failing the request:
+    // the client retries the email alone.
+    const emailSent = lead.email
+      ? await sendQuoteEmail(lead.email, lead.address ?? '', inputs, priced)
+      : false;
 
     // Send notification email (don't fail request if email fails)
     try {
@@ -329,12 +435,22 @@ export async function POST(req: NextRequest) {
       // Don't throw - lead was still captured successfully
     }
 
-    return NextResponse.json({ ok: true, airtableId: result.id });
+    return NextResponse.json({
+      ok: true,
+      leadFiled: true,
+      emailSent,
+      priceLow: priced.quote.low,
+      priceHigh: priced.quote.high,
+      airtableId: result.id,
+    });
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e);
     const stack = e instanceof Error ? e.stack : undefined;
     console.error("[LEADS_ROUTE_ERROR]", msg);
     if (stack) console.error("[LEADS_ROUTE_STACK]", stack);
-    return NextResponse.json({ ok: false, error: msg || "bad_request" }, { status: 400 });
+    return NextResponse.json(
+      { ok: false, leadFiled: false, emailSent: false, error: msg || "bad_request" },
+      { status: 400 }
+    );
   }
 }

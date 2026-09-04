@@ -17,6 +17,7 @@ type Payload = {
   honeypot?: string;     // spam prevention
   ttc_ms?: number;       // time to complete (milliseconds)
   mapScreenshot?: string; // base64 PNG of map with panel placement
+  resend?: boolean;      // email-only retry for a lead that is already filed
   _retries?: number;     // internal retry count
 };
 
@@ -57,6 +58,12 @@ export interface SendResult {
   /** It was put on the offline queue and will be retried. */
   queued: boolean;
   status?: number;
+  /**
+   * What the route reported. One request now files the lead and sends the
+   * customer's email, and either half can succeed alone, so the retry decision
+   * is driven by these rather than by the status code.
+   */
+  body?: { leadFiled?: boolean; emailSent?: boolean; priceLow?: number; priceHigh?: number };
 }
 
 /**
@@ -78,7 +85,12 @@ export async function enqueueOrSend(
       body: JSON.stringify(payload),
     });
     status = res.status;
-    if (res.ok) return { ok: true, queued: false, status };
+    if (res.ok) {
+      // The body carries what actually happened: the lead is filed, and the
+      // email may or may not have gone with it.
+      const body = await res.json().catch(() => ({}));
+      return { ok: true, queued: false, status, body };
+    }
     throw new Error("net");
   } catch {
     const q = load(); q.push({ ...payload, _retries: 0 }); save(q);

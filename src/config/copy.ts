@@ -106,12 +106,12 @@ export const STEPS: StepCopy[] = [
   },
 ];
 
-/** Option cards on step 5. Prices arrive with the pricing engine. */
+/** Option cards on step 5. */
 export const OPTION_CARDS = [
   {
     key: 'panels',
     title: 'Panels',
-    body: 'Standard or premium. Premium makes more power in the same footprint.',
+    body: 'Premium panels make more power in the same footprint, so you need fewer of them.',
   },
   {
     key: 'battery',
@@ -171,9 +171,20 @@ export const UI = {
   meterPlaced: 'Meter placed. Drag it if it is off.',
 
   // Step 4
-  optionPriceLater: 'Pricing for this comes next.',
+  tierStandard: 'Standard',
+  tierPremium: 'Premium',
+  batteryNone: 'None',
+  batteryOne: 'One',
+  batteryTwo: 'Two',
+  clearingNo: 'It is clear',
+  clearingYes: 'Needs clearing',
+  included: 'Included',
+  priceRangeLabel: 'Your range',
+  priceEstimateNote: 'An estimate from your design. The real number comes after a site visit.',
+  lineItemsTitle: 'What that covers',
   trenchNote: 'We route the trench around anything in the way once we are on site.',
   slopeChecking: 'checking',
+  soilLabel: 'Soil',
 
   // Step 6
   summaryPanels: 'Panels',
@@ -199,8 +210,6 @@ export const UI = {
   progressLabel: 'Progress',
   progressNotYet: ' (not yet)',
   rotateHandle: 'Turn',
-  /** Placeholder digits behind the blur. Not a real number. */
-  pricePlaceholder: '$00,000 – $00,000',
   errorBoundary: 'Something went wrong. Refresh and try again.',
   addressPlaceholder: 'Enter your address',
 } as const;

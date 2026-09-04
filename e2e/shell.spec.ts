@@ -33,6 +33,43 @@ async function waitForHydration(page: Page) {
   await page.waitForSelector('[data-testid="funnel"][data-hydrated="true"]', { timeout: 20_000 });
 }
 
+/**
+ * Navigate to a step, retrying once if the previous page supersedes it.
+ *
+ * The funnel keeps ?step= in sync with the store, so a page being torn down can
+ * still push its own step as the next navigation starts. Harmless in a browser
+ * — the newer navigation wins — but Playwright reports it as an error.
+ */
+async function gotoStep(page: Page, step: number) {
+  try {
+    await page.goto(`/quote?step=${step}`);
+  } catch (error) {
+    if (!String(error).includes('interrupted by another navigation')) throw error;
+    await page.goto(`/quote?step=${step}`);
+  }
+  await waitForHydration(page);
+}
+
+/**
+ * Wait for the sheet to stop resizing before measuring anything.
+ *
+ * Its height comes from a ResizeObserver over the header and footer, so right
+ * after a navigation it is still settling — and under parallel load that window
+ * is wide enough to measure the wrong thing.
+ */
+async function waitForSheet(page: Page) {
+  await page.waitForSelector('[data-testid="bottom-sheet"]', { timeout: 15_000 });
+  let last = -1;
+  for (let i = 0; i < 30; i++) {
+    const height = await page
+      .getByTestId('bottom-sheet')
+      .evaluate((el) => Math.round(el.getBoundingClientRect().height));
+    if (height === last) return;
+    last = height;
+    await page.waitForTimeout(100);
+  }
+}
+
 async function openFunnel(page: Page) {
   await mockGeocoding(page);
   await page.goto('/quote');
@@ -101,11 +138,11 @@ test('the page never scrolls under the map, on any step', async ({ page }, testI
     // Navigate with the step in the URL rather than reloading: ?step= is
     // authoritative over the persisted index, so a plain reload would restore
     // whichever step the previous URL named.
-    await page.goto(`/quote?step=${step}`);
-    await waitForHydration(page);
+    await gotoStep(page, step);
     await expect(
       page.getByRole('heading', { name: STEP_HEADINGS[step] })
     ).toBeVisible({ timeout: 10_000 });
+    await waitForSheet(page);
 
     expect(await scrollTop(page), `step ${step} on load`).toBe(0);
 
@@ -313,13 +350,13 @@ test('every interactive control is at least 44px, on every step', async ({
     // Navigate with the step in the URL rather than reloading: ?step= is
     // authoritative over the persisted index, so a plain reload would restore
     // whichever step the previous URL named.
-    await page.goto(`/quote?step=${step}`);
-    await waitForHydration(page);
+    await gotoStep(page, step);
 
     // Confirm we are auditing the step we think we are before measuring.
     await expect(
       page.getByRole('heading', { name: STEP_HEADINGS[step] })
     ).toBeVisible({ timeout: 10_000 });
+    await waitForSheet(page);
 
     // Open the sheet fully so the step's own controls are laid out, not
     // clipped. Steps with no map have no handle: the sheet is already full.
@@ -494,8 +531,7 @@ test('a focused field and the button are both visible with a keyboard up', async
   };
 
   // Step 2: focus each bill field in turn.
-  await page.goto('/quote?step=1');
-  await waitForHydration(page);
+  await gotoStep(page, 1);
   await page.evaluate(() => window.visualViewport?.dispatchEvent(new Event('resize')));
 
   for (const field of ['#avg-bill', '#rate-kwh']) {
@@ -516,8 +552,7 @@ test('a focused field and the button are both visible with a keyboard up', async
   }
 
   // Step 6: the three contact fields and the submit button.
-  await page.goto('/quote?step=5');
-  await waitForHydration(page);
+  await gotoStep(page, 5);
   await page.evaluate(() => window.visualViewport?.dispatchEvent(new Event('resize')));
 
   for (const field of ['#name', '#email', '#phone']) {
@@ -543,8 +578,7 @@ test('no stray text renders outside the sheet on a map-less step', async ({ page
   // edge: the map column was rendering its own copy of the intro into the blank
   // band left by a half-height sheet.
   await mockGeocoding(page);
-  await page.goto('/quote?step=1');
-  await waitForHydration(page);
+  await gotoStep(page, 1);
 
   const strays = await page.evaluate(() => {
     const sheet = document.querySelector('[data-testid="bottom-sheet"]');
@@ -578,8 +612,8 @@ test('the sheet fills the screen on steps with no map', async ({ page }, testInf
 
   await mockGeocoding(page);
   for (const step of [1, 4, 5]) {
-    await page.goto(`/quote?step=${step}`);
-    await waitForHydration(page);
+    await gotoStep(page, step);
+    await waitForSheet(page);
 
     const box = (await page.getByTestId('bottom-sheet').boundingBox())!;
     const size = page.viewportSize()!;
@@ -614,8 +648,7 @@ test('a filed lead restores read-only contact details, and Start over clears the
     (v) => window.sessionStorage.setItem('e2e:seed', v),
     JSON.stringify(contactStepSeed('restore-test'))
   );
-  await page.goto('/quote?step=5');
-  await waitForHydration(page);
+  await gotoStep(page, 5);
   // Drop the seed so the reload below keeps what the app persisted rather than
   // re-seeding over it.
   await page.evaluate(() => window.sessionStorage.removeItem('e2e:seed'));
@@ -675,8 +708,7 @@ test('a filed lead blocks the design from every route in', async ({ page }) => {
   );
   // Arrive at the contact step the way a customer does — from Options — so the
   // history behind it holds a design step for the back button to return to.
-  await page.goto('/quote?step=4');
-  await waitForHydration(page);
+  await gotoStep(page, 4);
   await page.evaluate(() => window.sessionStorage.removeItem('e2e:seed'));
   await page.getByTestId('primary-cta').click();
   await expect(page.getByRole('heading', { name: 'Get your number' })).toBeVisible();
@@ -696,8 +728,7 @@ test('a filed lead blocks the design from every route in', async ({ page }) => {
   await expect(page.getByRole('heading', { name: 'Options' })).toHaveCount(0);
 
   // Route 2: a hand-typed ?step=.
-  await page.goto('/quote?step=3');
-  await waitForHydration(page);
+  await gotoStep(page, 3);
   await expect(designHeading).toHaveCount(0);
   await expect(page.getByTestId('design-locked')).toBeVisible();
 
@@ -709,8 +740,7 @@ test('a filed lead blocks the design from every route in', async ({ page }) => {
   // Step 0 is locked too: the address is on the filed record as well.
   const addressHeading = page.getByRole('heading', { name: 'Find your property' });
 
-  await page.goto('/quote?step=0');
-  await waitForHydration(page);
+  await gotoStep(page, 0);
   await expect(addressHeading).toHaveCount(0);
   await expect(page.getByTestId('design-locked')).toBeVisible();
 
@@ -731,8 +761,7 @@ test('?reset=1 clears the funnel and starts over', async ({ page }) => {
     (v) => window.sessionStorage.setItem('e2e:seed', v),
     JSON.stringify(contactStepSeed('reset-test'))
   );
-  await page.goto('/quote?step=5');
-  await waitForHydration(page);
+  await gotoStep(page, 5);
   await page.evaluate(() => window.sessionStorage.removeItem('e2e:seed'));
   await expect(page.getByRole('heading', { name: 'Get your number' })).toBeVisible();
 
@@ -755,8 +784,7 @@ test('?reset=1 clears the funnel and starts over', async ({ page }) => {
 
 test('the bill field rounds to whole dollars on blur', async ({ page }) => {
   await mockGeocoding(page);
-  await page.goto('/quote?step=1');
-  await waitForHydration(page);
+  await gotoStep(page, 1);
 
   const bill = page.locator('#avg-bill');
   await bill.fill('240.75');

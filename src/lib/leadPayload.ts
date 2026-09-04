@@ -2,6 +2,7 @@ import { useQuoteStore } from '@/store/quoteStore';
 import { captureMap } from './screenshot';
 import { mapRef } from '@/store/mapRefs';
 import { PANELS } from '@/config/pricing';
+import { priceQuote, subtotals, spread } from './pricing';
 
 export interface LeadQuote {
   quotation: number;
@@ -13,6 +14,7 @@ export interface LeadQuote {
   panelTier: string;
   slopePercent: number | null;
   slopeTier: string;
+  soilClass: string | null;
   percentage: number;
   avgBill: number;
   highBill: number;
@@ -20,6 +22,18 @@ export interface LeadQuote {
   coordinates: { latitude: number; longitude: number };
   arrayCenter: [number, number] | null;
   meter: [number, number] | null;
+
+  // --- Pricing (Phase 3) ---
+  batteryUnits: number;
+  needsClearing: boolean;
+  priceLow: number;
+  priceHigh: number;
+  equipmentLow: number;
+  equipmentHigh: number;
+  trenchingLow: number;
+  trenchingHigh: number;
+  /** The full breakdown, so the record shows how the number was reached. */
+  lineItemsJson: string;
 }
 
 export interface LeadPayload {
@@ -62,6 +76,18 @@ export function buildLeadPayload(
   now: number
 ): LeadPayload {
   const watts = PANELS[s.panelTier].watts;
+
+  // Priced here rather than passed in, so the record and the screen cannot
+  // disagree: both derive from the same store state through the same function.
+  const quote = priceQuote(
+    { panelCount: s.totalPanels, tier: s.panelTier, trenchFeet: s.trenchFeet },
+    { batteryUnits: s.batteryUnits, needsClearing: s.needsClearing },
+    { slopePercent: s.slopePercent, soilClass: s.soilClass }
+  );
+  const parts = subtotals(quote);
+  const equipment = spread(parts.equipment);
+  const trenching = spread(parts.trench);
+
   return {
     id: s.leadId,
     state: contact.state,
@@ -78,7 +104,8 @@ export function buildLeadPayload(
       azimuth: Math.round(s.azimuth),
       panelTier: s.panelTier,
       slopePercent: s.slopePercent,
-      slopeTier: s.slopeTier,
+      slopeTier: quote.slopeTier,
+      soilClass: s.soilClass,
       percentage: s.percentage,
       avgBill: s.avgValue,
       highBill: s.highestValue,
@@ -86,6 +113,15 @@ export function buildLeadPayload(
       coordinates: s.coordinates,
       arrayCenter: s.arrayCenter,
       meter: s.electricalMeterPosition,
+      batteryUnits: s.batteryUnits,
+      needsClearing: s.needsClearing,
+      priceLow: quote.low,
+      priceHigh: quote.high,
+      equipmentLow: equipment.low,
+      equipmentHigh: equipment.high,
+      trenchingLow: trenching.low,
+      trenchingHigh: trenching.high,
+      lineItemsJson: JSON.stringify(quote.lineItems),
     },
     ts: now,
     honeypot: contact.honeypot,

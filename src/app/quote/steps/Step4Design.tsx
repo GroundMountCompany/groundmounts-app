@@ -31,6 +31,7 @@ export default function Step4Design() {
   const slopePercent = useQuoteStore((s) => s.slopePercent);
   const slopeTier = useQuoteStore((s) => s.slopeTier);
   const panelAdjust = useQuoteStore((s) => s.panelAdjust);
+  const soilClass = useQuoteStore((s) => s.soilClass);
   const setPanelAdjust = useQuoteStore((s) => s.setPanelAdjust);
 
   const footprint = useMemo(() => footprintFt(totalPanels, panelTier), [totalPanels, panelTier]);
@@ -94,7 +95,8 @@ export default function Step4Design() {
         {slopePercent === null
           ? UI.slopeChecking
           : `${slopePercent}% · ${slopeTier.toLowerCase()}`}
-        . {UI.trenchNote}
+        . {soilClass ? `${UI.soilLabel}: ${soilClass}. ` : ''}
+        {UI.trenchNote}
       </p>
 
       <EducationCard copy={STEPS[3].education} />

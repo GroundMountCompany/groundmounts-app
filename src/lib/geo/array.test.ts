@@ -113,15 +113,15 @@ describe('hull dimensions per axis (an axis swap must fail here)', () => {
     });
   }
 
-  it('IronRidge 40 panels measures ~57 ft across and ~13.5 ft deep on the ground', () => {
+  it('IronRidge 40 panels measures ~57 ft across and ~13 ft deep on the ground', () => {
     const built = buildArray({ center: FORT_WORTH, azimuth: 180, panelCount: 40, tier });
     const axes = hullAxesFt(built.hull);
 
     expect(axes.widthFt).toBeGreaterThan(56);
     expect(axes.widthFt).toBeLessThan(58);
-    // 14.96 ft slant x cos(25) = 13.6 ft on the ground.
-    expect(axes.depthFt).toBeGreaterThan(13);
-    expect(axes.depthFt).toBeLessThan(14);
+    // 14.96 ft of slant at the owner's 30 degree tilt is 12.96 ft of ground.
+    expect(axes.depthFt).toBeGreaterThan(12.5);
+    expect(axes.depthFt).toBeLessThan(13.5);
     // The table is much wider than it is deep; a swap would invert this.
     expect(axes.widthFt).toBeGreaterThan(axes.depthFt * 3);
   });

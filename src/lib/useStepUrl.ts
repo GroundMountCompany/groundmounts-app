@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { useQuoteStore, clearPersistedQuote } from '@/store/quoteStore';
 
 export const MAX_STEP = 5;
@@ -52,6 +52,12 @@ function stepFromLocation(): number | null {
 export function useStepUrl() {
   const step = useQuoteStore((s) => s.currentStepIndex);
   const setStep = useQuoteStore((s) => s.setCurrentStepIndex);
+  /**
+   * The URL is authoritative on load, so nothing may write to it until it has
+   * been read. Without this the store rehydrated a stale step and pushed it
+   * over the top of the address the browser was still navigating to.
+   */
+  const adopted = useRef(false);
 
   /**
    * ?reset=1 wipes the funnel and starts clean.
@@ -76,15 +82,18 @@ export function useStepUrl() {
   // Adopt ?step= on first load, before anything else reads the store.
   useEffect(() => {
     const fromUrl = stepFromLocation();
-    if (fromUrl === null) return;
-    const target = allowedStep(fromUrl);
-    if (target !== useQuoteStore.getState().currentStepIndex) setStep(target);
-    if (target !== fromUrl) useQuoteStore.getState().setDesignLockNotice(true);
+    if (fromUrl !== null) {
+      const target = allowedStep(fromUrl);
+      if (target !== useQuoteStore.getState().currentStepIndex) setStep(target);
+      if (target !== fromUrl) useQuoteStore.getState().setDesignLockNotice(true);
+    }
+    adopted.current = true;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Mirror store -> URL.
+  // Mirror store -> URL, but never before the URL has been adopted.
   useEffect(() => {
+    if (!adopted.current) return;
     const url = new URL(window.location.href);
     if (url.searchParams.get('step') === String(step)) return;
 

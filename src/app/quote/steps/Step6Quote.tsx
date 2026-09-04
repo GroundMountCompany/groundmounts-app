@@ -9,7 +9,18 @@ import { buildLeadPayload } from '@/lib/leadPayload';
 import { enqueueOrSend } from '@/lib/leadQueue';
 import { useBrand } from '@/contexts/BrandContext';
 import { PANELS } from '@/config/pricing';
-import { annualKwh, TX_FALLBACK_CURVE } from '@/lib/production';
+import { annualKwh } from '@/lib/production';
+import { useQuote } from './useQuote';
+
+
+/** Whole dollars; nobody quotes a ground mount to the cent. */
+function money(amount: number): string {
+  return amount.toLocaleString('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    maximumFractionDigits: 0,
+  });
+}
 
 /**
  * The hook: they can see exactly what they designed, and the price is the one
@@ -44,8 +55,10 @@ export default function Step6Quote() {
   const [done, setDone] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const curve = useQuoteStore((s) => s.productionCurve);
+  const quote = useQuote();
   const kw = (totalPanels * PANELS[panelTier].watts) / 1000;
-  const production = annualKwh(TX_FALLBACK_CURVE, kw, azimuth);
+  const production = annualKwh(curve, kw, azimuth);
   const ready = name.trim() !== '' && email.trim() !== '' && phone.trim() !== '';
 
   const submit = async () => {
@@ -125,6 +138,31 @@ export default function Step6Quote() {
   if (done) {
     return (
       <div data-testid="success-screen" className="space-y-4">
+        <div className="rounded-xl border border-neutral-200 p-5 text-center">
+          <p className="text-[15px] uppercase tracking-wide text-neutral-500">
+            {UI.priceRangeLabel}
+          </p>
+          <p data-testid="price-revealed" className="text-[26px] font-bold text-neutral-900">
+            {money(quote.low)} – {money(quote.high)}
+          </p>
+          <p className="mt-1 text-[15px] text-neutral-600">{UI.priceEstimateNote}</p>
+        </div>
+
+        <div>
+          <h4 className="text-[17px] font-semibold text-neutral-900">{UI.lineItemsTitle}</h4>
+          <dl data-testid="line-items" className="mt-2 space-y-1 text-[16px]">
+            {quote.lineItems.map((item) => (
+              <div key={item.key} className="flex justify-between gap-4">
+                <dt className="text-neutral-700">
+                  {item.label}
+                  {item.detail ? <span className="block text-[15px] text-neutral-500">{item.detail}</span> : null}
+                </dt>
+                <dd className="whitespace-nowrap font-semibold">{money(item.amount)}</dd>
+              </div>
+            ))}
+          </dl>
+        </div>
+
         <h3 className="text-[22px] font-semibold text-neutral-900">{UI.successTitle}</h3>
         <p className="text-[17px] text-neutral-700">{UI.successBody}</p>
         <a
@@ -155,9 +193,15 @@ export default function Step6Quote() {
         </dl>
       </div>
 
-      <div data-testid="price-blur" className="relative overflow-hidden rounded-xl border border-neutral-200 p-6">
-        <p className="select-none text-center text-[28px] font-bold text-neutral-900 blur-md">
-          {UI.pricePlaceholder}
+      <div
+        data-testid="price-blur"
+        className="relative overflow-hidden rounded-xl border border-neutral-200 p-6"
+      >
+        <p
+          data-testid="price-range"
+          className="select-none text-center text-[26px] font-bold text-neutral-900 blur-md"
+        >
+          {money(quote.low)} – {money(quote.high)}
         </p>
         <div className="absolute inset-0 flex items-center justify-center">
           <span className="text-[17px] font-semibold text-neutral-800">{UI.priceHidden}</span>

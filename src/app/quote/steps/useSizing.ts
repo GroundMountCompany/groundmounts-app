@@ -2,19 +2,15 @@
 
 import { useEffect } from 'react';
 import { useQuoteStore } from '@/store/quoteStore';
-import {
-  dollarsPerKwhFromCents,
-  estimateMonthlyKWh,
-  kWFromMonthlyKWh,
-  panelsFromkW,
-} from '@/lib/solar';
+import { dollarsPerKwhFromCents } from '@/lib/solar';
+import { annualTargetKwh, panelsForTarget } from '@/lib/sizing';
 
 /**
- * Keep the panel count in step with the bill, the offset and any manual
- * adjustment the customer made on the design step.
+ * Keep the panel count in step with the bill, the offset, the panel tier and
+ * any manual adjustment the customer made on the design step.
  *
- * Lives outside the step components so the count is correct even when the
- * design step has not been opened yet — the auto-placement needs it.
+ * Sized against the PVWatts curve for their own coordinates rather than a flat
+ * capacity factor, so changing tier or turning the array re-sizes properly.
  */
 export function useSizing() {
   const avgValue = useQuoteStore((s) => s.avgValue);
@@ -23,11 +19,16 @@ export function useSizing() {
   const panelAdjust = useQuoteStore((s) => s.panelAdjust);
   const totalPanels = useQuoteStore((s) => s.totalPanels);
   const setTotalPanels = useQuoteStore((s) => s.setTotalPanels);
+  const tier = useQuoteStore((s) => s.panelTier);
+  const azimuth = useQuoteStore((s) => s.azimuth);
+  const curve = useQuoteStore((s) => s.productionCurve);
 
   useEffect(() => {
-    const monthlyKWh = estimateMonthlyKWh(avgValue, dollarsPerKwhFromCents(rateCents));
-    const sized = panelsFromkW(kWFromMonthlyKWh(monthlyKWh * (percentage / 100)));
+    const target = annualTargetKwh(avgValue, dollarsPerKwhFromCents(rateCents), percentage);
+    const sized = panelsForTarget(curve, target, azimuth, tier);
+    if (sized <= 0) return;
+
     const next = Math.max(1, sized + panelAdjust);
-    if (sized > 0 && next !== totalPanels) setTotalPanels(next);
-  }, [avgValue, rateCents, percentage, panelAdjust, totalPanels, setTotalPanels]);
+    if (next !== totalPanels) setTotalPanels(next);
+  }, [avgValue, rateCents, percentage, panelAdjust, tier, azimuth, curve, totalPanels, setTotalPanels]);
 }

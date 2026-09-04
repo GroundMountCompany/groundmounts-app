@@ -71,6 +71,33 @@ export function useDesignSetup() {
     );
   }, [mapReady, meter, totalPanels, panelTier, arrayCenter]);
 
+  // Site intel: production curve and soil, fetched once per location. Advisory
+  // only — the store already holds the Texas fallback curve and a null soil
+  // class, so a failure here never blocks the step.
+  useEffect(() => {
+    if (!meter) return;
+    const [lng, lat] = meter;
+    let cancelled = false;
+
+    fetch(`/api/site?lat=${lat}&lng=${lng}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((json) => {
+        if (cancelled || !json?.ok) return;
+        useQuoteStore.getState().setSiteIntel({
+          curve: json.curve,
+          curveSource: json.curveSource,
+          soilClass: json.soilClass,
+        });
+      })
+      .catch(() => {
+        // Keeping the fallback is the correct outcome, so there is nothing to do.
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [meter]);
+
   // First slope read. Later ones are triggered by dragend inside the map.
   useEffect(() => {
     if (!mapReady || !arrayCenter || slopePercent !== null) return;

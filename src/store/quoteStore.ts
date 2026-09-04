@@ -7,6 +7,7 @@ import { v4 as uuid } from 'uuid';
 import { TRENCHING_COST_PER_FT } from '@/lib/solar';
 import type { PanelTier } from '@/config/pricing';
 import type { SlopeTier } from '@/lib/slope';
+import { TX_FALLBACK_CURVE, type ProductionCurve } from '@/lib/production';
 
 export interface Coordinates {
   latitude: number;
@@ -98,6 +99,14 @@ interface QuoteState {
   contactPhone: string;
   /** Shown when a navigation into the design was refused after filing. */
   designLockNotice: boolean;
+
+  // --- Options and site intel (Phase 3) ---
+  batteryUnits: number;
+  needsClearing: boolean;
+  /** kWh per kW per year at the reference azimuths, from /api/site. */
+  productionCurve: ProductionCurve;
+  curveSource: 'pvwatts' | 'fallback';
+  soilClass: string | null;
 }
 
 interface QuoteActions {
@@ -134,6 +143,13 @@ interface QuoteActions {
   setEmailSent: (leadId: string | null) => void;
   setContact: (field: 'contactName' | 'contactEmail' | 'contactPhone', value: string) => void;
   setDesignLockNotice: (v: boolean) => void;
+  setBatteryUnits: (v: number) => void;
+  setNeedsClearing: (v: boolean) => void;
+  setSiteIntel: (intel: {
+    curve: ProductionCurve;
+    curveSource: 'pvwatts' | 'fallback';
+    soilClass: string | null;
+  }) => void;
 }
 
 export type QuoteStore = QuoteState & QuoteActions;
@@ -174,6 +190,11 @@ const initialState: QuoteState = {
   contactEmail: '',
   contactPhone: '',
   designLockNotice: false,
+  batteryUnits: 0,
+  needsClearing: false,
+  productionCurve: TX_FALLBACK_CURVE,
+  curveSource: 'fallback',
+  soilClass: null,
 };
 
 /** Straight-line meter→array distance in whole feet. */
@@ -225,8 +246,9 @@ export const useQuoteStore = create<QuoteStore>()(
 
       /**
        * Single source of truth for trench length and its cost. The old provider
-       * wrote additionalCost from three different places with three copies of the
-       * $45/ft literal; this is the only writer now.
+       * wrote additionalCost from three different places, each with its own copy
+       * of the per-foot rate; this is the only writer now, and the rate itself
+       * comes from pricing.ts.
        */
       updateDistanceAndCost: (meter, panel) => {
         if (!meter || !panel) return;
@@ -263,6 +285,10 @@ export const useQuoteStore = create<QuoteStore>()(
       setEmailSent: (emailSent) => set({ emailSent }),
       setContact: (field, value) => set({ [field]: value } as Partial<QuoteState>),
       setDesignLockNotice: (designLockNotice) => set({ designLockNotice }),
+      setBatteryUnits: (batteryUnits) => set({ batteryUnits }),
+      setNeedsClearing: (needsClearing) => set({ needsClearing }),
+      setSiteIntel: ({ curve, curveSource, soilClass }) =>
+        set({ productionCurve: curve, curveSource, soilClass }),
 
       resetQuote: () => {
         set({ ...initialState, hydrated: true, leadId: uuid(), startedAt: Date.now() });
@@ -307,6 +333,11 @@ export const useQuoteStore = create<QuoteStore>()(
         contactName: state.contactName,
         contactEmail: state.contactEmail,
         contactPhone: state.contactPhone,
+        batteryUnits: state.batteryUnits,
+        needsClearing: state.needsClearing,
+        productionCurve: state.productionCurve,
+        curveSource: state.curveSource,
+        soilClass: state.soilClass,
         // Downscaled JPEG, so it is small enough to persist. Without this a
         // refresh on the contact form dropped the screenshot silently.
         mapScreenshot: state.mapScreenshot,

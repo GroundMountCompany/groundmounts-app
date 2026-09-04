@@ -1,12 +1,15 @@
-export const PANEL_WATTS = 435; // Mission Solar MSX10-435HN0B (435W panels)
+import { PANELS, DEFAULTS, TRENCH } from '@/config/pricing';
+
+/** Re-exported from pricing.ts so there is still only one place to edit them. */
+export const PANEL_WATTS = PANELS.standard.watts;
 export const CAP_FACTOR = 0.18; // capacity factor for Texas (~5.25 peak sun hours accounting for losses)
-export const BILL_PER_KWH = 0.14; // $/kWh - Texas average (ERCOT residential)
+export const BILL_PER_KWH = DEFAULTS.ratePerKwh;
 
 /** Whole cents from the bill -> dollars per kWh, with a sane fallback. */
 export function dollarsPerKwhFromCents(cents: number): number {
   return Number.isFinite(cents) && cents > 0 ? cents / 100 : BILL_PER_KWH;
 }
-export const TRENCHING_COST_PER_FT = 45; // $/ft - includes labor, conduit, backfill (Texas average)
+export const TRENCHING_COST_PER_FT = TRENCH.basePerFt;
 
 // Estimate monthly kWh from monthly bill
 export function estimateMonthlyKWh(avgBillUSD: number, $perKWh = BILL_PER_KWH) {

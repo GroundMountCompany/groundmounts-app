@@ -42,6 +42,16 @@ interface LeadPayload {
     avgBill?: number;
     highBill?: number;
     systemSizeKw?: number;
+    batteryUnits?: number;
+    needsClearing?: boolean;
+    priceLow?: number;
+    priceHigh?: number;
+    equipmentLow?: number;
+    equipmentHigh?: number;
+    trenchingLow?: number;
+    trenchingHigh?: number;
+    lineItemsJson?: string;
+    soilClass?: string | null;
   };
   ts: number;
   honeypot?: string;
@@ -165,6 +175,20 @@ export async function POST(req: NextRequest) {
       'Trenching Cost': lead.quote?.additionalCost,
       'Equipment Cost': lead.quote?.quotation,
       'Total Investment': lead.quote?.quotation ? (lead.quote.quotation + (lead.quote.additionalCost || 0)) : undefined,
+      'Price Low': lead.quote?.priceLow,
+      'Price High': lead.quote?.priceHigh,
+      'Equipment Cost Low': lead.quote?.equipmentLow,
+      'Equipment Cost High': lead.quote?.equipmentHigh,
+      'Trenching Cost Low': lead.quote?.trenchingLow,
+      'Trenching Cost High': lead.quote?.trenchingHigh,
+      'Line Items JSON': lead.quote?.lineItemsJson,
+      'Panel Tier': lead.quote?.panelTier,
+      'Battery Units': lead.quote?.batteryUnits,
+      'Site Prep': lead.quote?.needsClearing,
+      'Slope %': lead.quote?.slopePercent ?? undefined,
+      'Slope Tier': lead.quote?.slopeTier,
+      'Soil Class': lead.quote?.soilClass ?? undefined,
+      Azimuth: lead.quote?.azimuth,
       Source: lead.source || undefined,
       Status: 'New',
       'Map Screenshot': mapScreenshotUrl ? [{ url: mapScreenshotUrl }] : undefined,

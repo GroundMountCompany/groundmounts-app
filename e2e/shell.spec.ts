@@ -478,6 +478,21 @@ test('a focused field and the button are both visible with a keyboard up', async
     return box.y >= 0 && box.y + box.height <= limit + 1;
   };
 
+  /**
+   * Visible is not enough: the sticky button was sitting on top of the field,
+   * overlapping Name by 35px and Phone by 22px.
+   */
+  const overlapPx = async (a: string, b: string) => {
+    const [ra, rb] = await Promise.all([
+      page.locator(a).boundingBox(),
+      page.locator(b).boundingBox(),
+    ]);
+    if (!ra || !rb) return 0;
+    const vertical = Math.min(ra.y + ra.height, rb.y + rb.height) - Math.max(ra.y, rb.y);
+    const horizontal = Math.min(ra.x + ra.width, rb.x + rb.width) - Math.max(ra.x, rb.x);
+    return vertical > 0 && horizontal > 0 ? vertical : 0;
+  };
+
   // Step 2: focus each bill field in turn.
   await page.goto('/quote?step=1');
   await waitForHydration(page);
@@ -494,6 +509,10 @@ test('a focused field and the button are both visible with a keyboard up', async
       await visibleAboveKeyboard('[data-testid="primary-cta"]'),
       `button hidden while ${field} focused`
     ).toBe(true);
+    expect(
+      await overlapPx(field, '[data-testid="primary-cta"]'),
+      `button covers ${field}`
+    ).toBe(0);
   }
 
   // Step 6: the three contact fields and the submit button.
@@ -510,6 +529,10 @@ test('a focused field and the button are both visible with a keyboard up', async
       await visibleAboveKeyboard('[data-testid="submit-lead"]'),
       `submit hidden while ${field} focused`
     ).toBe(true);
+    expect(
+      await overlapPx(field, '[data-testid="submit-lead"]'),
+      `submit button covers ${field}`
+    ).toBe(0);
   }
 });
 
@@ -681,6 +704,18 @@ test('a filed lead blocks the design from every route in', async ({ page }) => {
   // Route 3: the progress bar.
   await page.getByTestId('progress-step-3').click();
   await expect(designHeading).toHaveCount(0);
+  await expect(page.getByTestId('design-locked')).toBeVisible();
+
+  // Step 0 is locked too: the address is on the filed record as well.
+  const addressHeading = page.getByRole('heading', { name: 'Find your property' });
+
+  await page.goto('/quote?step=0');
+  await waitForHydration(page);
+  await expect(addressHeading).toHaveCount(0);
+  await expect(page.getByTestId('design-locked')).toBeVisible();
+
+  await page.getByTestId('progress-step-0').click();
+  await expect(addressHeading).toHaveCount(0);
   await expect(page.getByTestId('design-locked')).toBeVisible();
 });
 

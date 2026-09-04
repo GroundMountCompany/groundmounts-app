@@ -6,11 +6,11 @@ import { useQuoteStore, clearPersistedQuote } from '@/store/quoteStore';
 export const MAX_STEP = 5;
 
 /**
- * Steps that describe the design. Once the lead is filed these are settled —
- * editing them would leave the Airtable record describing something the
- * customer no longer sees, so every route back into them is refused.
+ * Every step before the contact form. Once the lead is filed these are all
+ * settled — including the address, which is on the record — so every route back
+ * into them is refused and the customer is offered a fresh start instead.
  */
-export const DESIGN_STEPS = [1, 2, 3, 4, 5];
+export const DESIGN_STEPS = [0, 1, 2, 3, 4];
 
 /** Where a blocked navigation lands: the contact step it came from. */
 const LOCKED_LANDING = MAX_STEP;

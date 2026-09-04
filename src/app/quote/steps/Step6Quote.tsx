@@ -236,7 +236,7 @@ export default function Step6Quote() {
 
       {/* Sticky, so it stays reachable while the contact fields scroll — the
           shell's own footer is empty on the last step. */}
-      <div className="sticky bottom-0 -mx-5 bg-white px-5 pb-2 pt-3">
+      <div data-sticky-footer className="sticky bottom-0 -mx-5 bg-white px-5 pb-2 pt-3">
         <button
           type="button"
           data-testid="submit-lead"

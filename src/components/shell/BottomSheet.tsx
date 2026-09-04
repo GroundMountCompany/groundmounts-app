@@ -69,6 +69,8 @@ export default function BottomSheet({
   const [isPhone, setIsPhone] = useState(false);
   /** How much of the layout viewport the on-screen keyboard is covering. */
   const [keyboardInset, setKeyboardInset] = useState(0);
+  /** Height of a sticky button rendered inside the content, if any. */
+  const [stickyFooterPx, setStickyFooterPx] = useState(0);
   const [peekPx, setPeekPx] = useState(MIN_PEEK_PX);
   const headRef = useRef<HTMLDivElement>(null);
   const footRef = useRef<HTMLDivElement>(null);
@@ -201,6 +203,20 @@ export default function BottomSheet({
     [viewport, peekPx, snap, onSnapChange]
   );
 
+  // Track a sticky button inside the content so its height can be reserved.
+  useEffect(() => {
+    const el = contentRef.current;
+    if (!el) return;
+    const measure = () => {
+      const sticky = el.querySelector<HTMLElement>('[data-sticky-footer]');
+      setStickyFooterPx(sticky?.offsetHeight ?? 0);
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [children]);
+
   /**
    * Bring a focused field above the on-screen keyboard.
    *
@@ -218,9 +234,14 @@ export default function BottomSheet({
       // A beat's delay: the keyboard has to resize the visual viewport first.
       setTimeout(() => {
         const visual = window.visualViewport;
+        // The last step's submit button is sticky inside the content rather
+        // than in the shell footer, so it obstructs the field too. Measure
+        // whatever is actually covering the bottom, not just the footer.
+        const stickyInside = el.querySelector<HTMLElement>('[data-sticky-footer]');
+        const obstruction =
+          (footRef.current?.offsetHeight ?? 0) + (stickyInside?.offsetHeight ?? 0);
         const bottomLimit =
-          (visual ? visual.offsetTop + visual.height : window.innerHeight) -
-          (footRef.current?.offsetHeight ?? 0);
+          (visual ? visual.offsetTop + visual.height : window.innerHeight) - obstruction;
 
         const field = target.getBoundingClientRect();
         // Only move if the field is actually hidden behind the keyboard or the
@@ -300,6 +321,9 @@ export default function BottomSheet({
         ref={contentRef}
         data-testid="sheet-content"
         className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 pb-4 md:px-0"
+        // Reserve the sticky button's height so a scrolled-to field lands above
+        // it rather than underneath.
+        style={{ scrollPaddingBottom: stickyFooterPx }}
       >
         {children}
       </div>

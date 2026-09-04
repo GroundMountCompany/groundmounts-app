@@ -85,8 +85,13 @@ export default defineConfig({
        * `dependencies` makes it wait for the others to finish rather than
        * compete with them. The alternative was a longer timeout, which would
        * have hidden the contention rather than removed it.
+       *
+       * `fullyParallel: false` on top of that, so the file's tests run one at
+       * a time within the project as well — two SwiftShader contexts on one
+       * machine are still two software rasterisers competing.
        */
       dependencies: ['mobile', 'desktop', 'mobile-chromium'],
+      fullyParallel: false,
       use: {
         ...devices['Desktop Chrome'],
         viewport: { width: 390, height: 844 },

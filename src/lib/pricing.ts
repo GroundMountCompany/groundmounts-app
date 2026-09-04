@@ -8,6 +8,7 @@ import {
   type PanelTier,
   type RackingConfig,
   type SlopeTierName,
+  batteryPrice,
 } from '@/config/pricing';
 import { footprintFt } from './geo/array';
 
@@ -69,14 +70,18 @@ const round = (n: number) => Math.round(n);
 
 /** Which conduit row applies to this system. */
 export function conduitFor(systemKw: number, hasBattery: boolean) {
-  return (
-    TRENCH.conduitSchedule.find(
-      (row) => row.hasBattery === hasBattery && systemKw <= row.maxKw
-    ) ??
-    // The schedule ends with an Infinity row for each battery case, so this is
-    // only reachable if the config is edited into an incomplete state.
-    TRENCH.conduitSchedule[TRENCH.conduitSchedule.length - 1]
-  );
+  const row =
+    TRENCH.conduitSchedule.find((r) => systemKw <= r.maxKw) ??
+    // The schedule ends with an Infinity row, so this is only reachable if the
+    // config is edited into an incomplete state.
+    TRENCH.conduitSchedule[TRENCH.conduitSchedule.length - 1];
+
+  // A battery adds a run alongside whatever the system size called for.
+  return {
+    ...row,
+    conduits: hasBattery ? row.conduits + 1 : row.conduits,
+    multiplier: hasBattery ? row.multiplier + TRENCH.batteryMultiplierAdder : row.multiplier,
+  };
 }
 
 /** The slope tier a measured grade falls into. */
@@ -116,6 +121,18 @@ export function soilAdderFor(soilClass: string | null): number {
 }
 
 /** Acres to clear: the array footprint plus working room on every side. */
+/**
+ * What clearing costs for a given area.
+ *
+ * A flat charge covers turning up and anything up to a quarter of an acre —
+ * most arrays — and only the excess is charged by the acre.
+ */
+export function clearingPrice(acres: number): number {
+  const { baseCharge, baseAcres, perAcre } = SITE.vegetationClearing;
+  if (acres <= baseAcres) return baseCharge;
+  return baseCharge + (acres - baseAcres) * perAcre;
+}
+
 export function clearingAcres(
   panelCount: number,
   tier: PanelTier,
@@ -215,7 +232,7 @@ export function priceQuote(
   });
 
   if (hasBattery) {
-    const battery = options.batteryUnits * BATTERY.pricePerUnit;
+    const battery = batteryPrice(options.batteryUnits);
     lineItems.push({
       key: 'battery',
       label: 'Battery',
@@ -254,9 +271,7 @@ export function priceQuote(
       key: 'clearing',
       label: 'Clearing',
       detail: `${acres.toFixed(2)} acres`,
-      amount: round(
-        Math.max(SITE.vegetationClearing.minimum, acres * SITE.vegetationClearing.perAcre)
-      ),
+      amount: round(clearingPrice(acres)),
     });
   }
 

@@ -169,6 +169,7 @@ export const UI = {
   addPanel: 'Add a panel',
   removePanel: 'Remove a panel',
   priceHidden: 'Your price range',
+  estimateNote: 'Estimates — final price after site visit',
   successTitle: 'On its way',
   successBody: 'Check your email. If you want to talk it through, book a time below.',
   bookCall: 'Book a call',

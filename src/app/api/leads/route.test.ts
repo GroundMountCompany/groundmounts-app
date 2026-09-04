@@ -74,6 +74,9 @@ vi.mock('@/lib/airtable', async () => {
     ...actual,
     upsertLeadByLeadId: async (fields: LeadFields, leadId: string) => {
       if (failWrite) throw new Error('Airtable error: 503 - upstream');
+      if (failAttach && fields['Map Screenshot']) {
+        throw new Error('Airtable error: 422 - attachment rejected');
+      }
       written.push({ ...fields, 'Lead ID': leadId });
       return { id: 'recTest123', created: true };
     },
@@ -82,10 +85,15 @@ vi.mock('@/lib/airtable', async () => {
 
 /** Blob uploads, counted. Nothing should reach storage before Airtable agrees. */
 const blobs: string[] = [];
+/** Blobs deleted again, so an orphan can be told from a kept one. */
+const deletedBlobs: string[] = [];
 vi.mock('@vercel/blob', () => ({
   put: async (key: string) => {
     blobs.push(key);
     return { url: `https://blob.example/${key}` };
+  },
+  del: async (url: string) => {
+    deletedBlobs.push(url);
   },
 }));
 
@@ -133,6 +141,8 @@ const NOTHING_KNOWN: SiteResponse = {
 let failEmail = false;
 /** Set by the tests that need Airtable to fail. */
 let failWrite = false;
+/** Set by the test that needs only the attachment patch to fail. */
+let failAttach = false;
 
 /** What the stubbed server "finds" on the ground. Overridden per test. */
 let siteFacts: SiteResponse = { ...NOTHING_KNOWN, curve: SITE_CURVE, curveSource: 'pvwatts' };
@@ -167,7 +177,7 @@ const INPUTS = {
 const HOSTILE_CURVE = { 90: 9999, 135: 9999, 180: 9999, 225: 9999, 270: 9999 };
 
 const validLead = (quoteExtra: Record<string, unknown> = {}) => ({
-  id: 'lead-1234-5678',
+  id: '8f14e45f-ceea-467a-9f34-2c8c3b1a77de',
   state: 'TX',
   name: 'Bert Ortiz',
   email: 'bert@example.com',
@@ -199,6 +209,8 @@ function post(body: Record<string, unknown>): NextRequest {
 
 beforeEach(() => {
   blobs.length = 0;
+  deletedBlobs.length = 0;
+  failAttach = false;
   store.clear();
   storeDown = false;
   failWrite = false;
@@ -509,7 +521,7 @@ describe('one request does the whole submit', () => {
 describe('partial saves', () => {
   const partial = (extra: Record<string, unknown> = {}) => ({
     partial: true,
-    id: 'lead-partial-001',
+    id: '2b9d6d7e-1f4a-4f8b-8c21-9a7d5e3f0b11',
     stepReached: 4,
     source: 'groundmounts.com',
     coordinates: { latitude: 32.7555, longitude: -97.3208 },
@@ -536,7 +548,7 @@ describe('partial saves', () => {
     expect(await res.json()).toMatchObject({ ok: true, partial: true, stepReached: 4 });
 
     const fields = written[0];
-    expect(fields['Lead ID']).toBe('lead-partial-001');
+    expect(fields['Lead ID']).toBe('2b9d6d7e-1f4a-4f8b-8c21-9a7d5e3f0b11');
     expect(fields['Step Reached']).toBe(4);
     expect(fields.Status).toBe('Partial');
     expect(fields.Panels).toBe(16);
@@ -676,7 +688,7 @@ describe('the brand on the email', () => {
 
 describe('resending is not a way to send mail', () => {
   it('refuses a resend for a lead it has never heard of', async () => {
-    const res = await POST(post({ ...validLead(), id: 'never-submitted-1234', resend: true }));
+    const res = await POST(post({ ...validLead(), id: '00000000-0000-4000-8000-000000000001', resend: true }));
 
     expect(res.status).toBe(404);
     expect((await res.json()).error).toBe('no_such_lead');
@@ -817,10 +829,10 @@ describe('sending the same email twice', () => {
     await POST(post(validLead()));
 
     const quote = quoteEmail() as unknown as { idempotencyKey?: string };
-    expect(quote.idempotencyKey).toBe('gm:quote:lead-1234-5678');
+    expect(quote.idempotencyKey).toBe('gm:quote:8f14e45f-ceea-467a-9f34-2c8c3b1a77de');
 
     const owner = notifications.find((n) => n.html);
-    expect(owner?.idempotencyKey).toBe('gm:owner-notify:lead-1234-5678');
+    expect(owner?.idempotencyKey).toBe('gm:owner-notify:8f14e45f-ceea-467a-9f34-2c8c3b1a77de');
   });
 
   it('reuses the key when the flag write fails after the send', async () => {
@@ -832,8 +844,8 @@ describe('sending the same email twice', () => {
     const firstKey = (quoteEmail() as unknown as { idempotencyKey?: string }).idempotencyKey;
 
     // Rewind the stored record to the state a crash would have left behind.
-    const record = store.get('gm:submit:lead-1234-5678') as { emailSent: boolean };
-    store.set('gm:submit:lead-1234-5678', { ...record, emailSent: false });
+    const record = store.get('gm:submit:8f14e45f-ceea-467a-9f34-2c8c3b1a77de') as { emailSent: boolean };
+    store.set('gm:submit:8f14e45f-ceea-467a-9f34-2c8c3b1a77de', { ...record, emailSent: false });
     notifications.length = 0;
 
     __resetRateLimits();
@@ -841,7 +853,7 @@ describe('sending the same email twice', () => {
 
     const resent = quoteEmail() as unknown as { idempotencyKey?: string };
     expect(resent.idempotencyKey).toBe(firstKey);
-    expect(resent.idempotencyKey).toBe('gm:quote:lead-1234-5678');
+    expect(resent.idempotencyKey).toBe('gm:quote:8f14e45f-ceea-467a-9f34-2c8c3b1a77de');
   });
 });
 
@@ -856,7 +868,7 @@ describe('a resend touches nothing but the stored record', () => {
     __resetRateLimits();
     const res = await POST(
       post({
-        id: 'lead-1234-5678',
+        id: '8f14e45f-ceea-467a-9f34-2c8c3b1a77de',
         state: 'TX',
         ts: 1_700_000_000_000,
         ttc_ms: 60_000,
@@ -877,7 +889,7 @@ describe('a resend touches nothing but the stored record', () => {
   it('costs nothing at all for a lead id it does not know', async () => {
     curveCalls.length = 0;
 
-    const res = await POST(post({ ...validLead(), id: 'unknown-lead-9999', resend: true }));
+    const res = await POST(post({ ...validLead(), id: '00000000-0000-4000-8000-000000000002', resend: true }));
 
     expect(res.status).toBe(404);
     // No PVWatts, no SSURGO, no Tilequery: an unauthenticated caller must not
@@ -905,7 +917,7 @@ describe('telling the owner a lead arrived', () => {
     failEmail = true;
     await POST(post(validLead()));
 
-    const stored = store.get('gm:submit:lead-1234-5678') as { ownerNotified: boolean };
+    const stored = store.get('gm:submit:8f14e45f-ceea-467a-9f34-2c8c3b1a77de') as { ownerNotified: boolean };
     expect(stored.ownerNotified).toBe(false);
   });
 
@@ -926,8 +938,8 @@ describe('telling the owner a lead arrived', () => {
     // The customer has their quote; the owner does not. A repeat of the submit
     // is the only thing that will come along, so it finishes the job.
     await POST(post(validLead()));
-    const stored = store.get('gm:submit:lead-1234-5678') as Record<string, unknown>;
-    store.set('gm:submit:lead-1234-5678', { ...stored, ownerNotified: false });
+    const stored = store.get('gm:submit:8f14e45f-ceea-467a-9f34-2c8c3b1a77de') as Record<string, unknown>;
+    store.set('gm:submit:8f14e45f-ceea-467a-9f34-2c8c3b1a77de', { ...stored, ownerNotified: false });
     notifications.length = 0;
 
     __resetRateLimits();
@@ -982,6 +994,24 @@ describe('what a hostile payload can put in the record', () => {
     expect(owner!.subject.length).toBeLessThan(500);
   });
 
+  it('refuses anything that is not a UUID v4', async () => {
+    // The id is the Airtable merge key, the idempotency key and part of a
+    // Redis key. A caller picking `aaaaaaaa` could collide with somebody.
+    for (const id of [
+      'x'.repeat(5000),
+      'lead-1234-5678',
+      'aaaaaaaa',
+      '8f14e45f-ceea-367a-9f34-2c8c3b1a77de', // version 3
+      '8f14e45f-ceea-467a-1f34-2c8c3b1a77de', // bad variant
+      '',
+    ]) {
+      __resetRateLimits();
+      const res = await POST(post({ ...validLead(), id }));
+      expect(res.status, id.slice(0, 20)).toBeGreaterThanOrEqual(400);
+    }
+    expect(written).toHaveLength(0);
+  });
+
   it('refuses a lead id long enough to be an attack on the key space', async () => {
     const res = await POST(post({ ...validLead(), id: 'x'.repeat(5000) }));
     expect(res.status).toBeGreaterThanOrEqual(400);
@@ -992,7 +1022,7 @@ describe('what a hostile payload can put in the record', () => {
 describe('a partial save arriving after the submit', () => {
   const partialBody = (step: number) => ({
     partial: true,
-    id: 'lead-1234-5678',
+    id: '8f14e45f-ceea-467a-9f34-2c8c3b1a77de',
     stepReached: step,
     source: 'groundmounts.com',
     coordinates: { latitude: 32.7555, longitude: -97.3208 },
@@ -1131,7 +1161,7 @@ describe('the envelope itself', () => {
 
     __resetRateLimits();
     // No state, no ts, no ttc_ms, no honeypot: none of it is used.
-    const res = await POST(post({ id: 'lead-1234-5678', resend: true }));
+    const res = await POST(post({ id: '8f14e45f-ceea-467a-9f34-2c8c3b1a77de', resend: true }));
 
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({ emailSent: true });
@@ -1153,9 +1183,9 @@ describe('the map screenshot', () => {
     expect(written).toHaveLength(2);
     expect(written[0]['Map Screenshot'], 'the record carried the blob URL').toBeUndefined();
     expect(written[1]['Map Screenshot']).toEqual([
-      { url: 'https://blob.example/map-screenshots/lead-1234-5678.png' },
+      { url: 'https://blob.example/map-screenshots/8f14e45f-ceea-467a-9f34-2c8c3b1a77de.png' },
     ]);
-    expect(written.every((f) => f['Lead ID'] === 'lead-1234-5678')).toBe(true);
+    expect(written.every((f) => f['Lead ID'] === '8f14e45f-ceea-467a-9f34-2c8c3b1a77de')).toBe(true);
     expect(blobs, 'the screenshot was not stored').toHaveLength(1);
   });
 
@@ -1180,5 +1210,136 @@ describe('the map screenshot', () => {
     expect(res.status).toBe(200);
     expect(written).toHaveLength(1);
     expect(blobs).toHaveLength(0);
+  });
+});
+
+describe('a partial racing the submit that follows it', () => {
+  const LEAD = '8f14e45f-ceea-467a-9f34-2c8c3b1a77de';
+  const partialBody = (step: number) => ({
+    partial: true,
+    id: LEAD,
+    stepReached: step,
+    source: 'groundmounts.com',
+    coordinates: { latitude: 32.7555, longitude: -97.3208 },
+    inputs: INPUTS,
+  });
+
+  it('stands aside while the submit holds the lease', async () => {
+    // The page fires a partial on a step change at the moment the customer
+    // presses the button. Both write the same Airtable row.
+    //
+    // Held by hand here: the submit's lease is taken and not yet released.
+    const held = await import('@/lib/server/redis').then((m) =>
+      m.acquireLease(`gm:submit:lease:${LEAD}`, 60)
+    );
+    expect(held).toBeTruthy();
+
+    const res = await POST(post(partialBody(4)));
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ skipped: 'in_progress' });
+    expect(written, 'a partial wrote while a submit held the lease').toHaveLength(0);
+  });
+
+  it('leaves Status New and Step Reached 6 when it resumes after the submit', async () => {
+    // The interleaving that matters: the partial reads the completed record
+    // before the submit writes it, then tries to write afterwards.
+    const beforeSubmit = await storeGetRecord(LEAD);
+    expect(beforeSubmit).toBeNull();
+
+    await POST(post(validLead()));
+    expect(written).toHaveLength(1);
+
+    // Resuming now, with the submit finished, it finds the completed record.
+    __resetRateLimits();
+    const resumed = await POST(post(partialBody(4)));
+
+    expect(await resumed.json()).toMatchObject({ skipped: 'already_filed' });
+    expect(written).toHaveLength(1);
+    expect(written[0].Status).toBe('New');
+    expect(written[0]['Step Reached']).toBe(6);
+  });
+
+  it('gives the lease back so the submit is not blocked by it', async () => {
+    await POST(post(partialBody(4)));
+    expect(written).toHaveLength(1);
+
+    __resetRateLimits();
+    const submit = await POST(post(validLead()));
+
+    expect(submit.status, 'the partial kept the lease').toBe(200);
+    expect(written).toHaveLength(2);
+  });
+});
+
+/** Read the stored submit record the way the route does. */
+async function storeGetRecord(id: string) {
+  const { storeGet } = await import('@/lib/server/redis');
+  return storeGet(`gm:submit:${id}`);
+}
+
+describe('what a partial is allowed to believe', () => {
+  it('never takes the customer\'s word for the soil', async () => {
+    // A partial is written with nobody reviewing it. The server found rock;
+    // the payload claims sand; the row says rock.
+    siteFacts = {
+      ...NOTHING_KNOWN,
+      curve: SITE_CURVE,
+      curveSource: 'pvwatts',
+      soilClass: 'rock outcrop',
+      soilSource: 'ssurgo',
+    };
+
+    await POST(
+      post({
+        partial: true,
+        id: '3c1f9a22-77b4-4d1e-9f0a-6e2b8d4c5a90',
+        stepReached: 4,
+        inputs: { ...INPUTS, soilClass: 'sand' },
+      })
+    );
+
+    expect(written[0]['Soil Class']).toBe('rock outcrop');
+  });
+
+  it('records Unknown rather than the claim when the server found nothing', async () => {
+    siteFacts = { ...NOTHING_KNOWN, curve: SITE_CURVE, curveSource: 'pvwatts' };
+
+    await POST(
+      post({
+        partial: true,
+        id: '3c1f9a22-77b4-4d1e-9f0a-6e2b8d4c5a91',
+        stepReached: 4,
+        inputs: { ...INPUTS, soilClass: 'caliche' },
+      })
+    );
+
+    expect(written[0]['Soil Class'], 'a partial trusted the payload').toBeUndefined();
+  });
+});
+
+describe('an attachment Airtable would not take', () => {
+  const PNG_DATA_URL =
+    'data:image/png;base64,' +
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+
+  it('is deleted rather than left in storage', async () => {
+    // Nothing points at it and nothing ever will. A public photo of somebody's
+    // property with no record referencing it is worse than no screenshot.
+    failAttach = true;
+
+    const res = await POST(post({ ...validLead(), mapScreenshot: PNG_DATA_URL }));
+
+    expect(res.status).toBe(200);
+    expect(blobs, 'the screenshot was never uploaded').toHaveLength(1);
+    expect(deletedBlobs, 'the orphaned blob was left behind').toHaveLength(1);
+    expect(deletedBlobs[0]).toContain('map-screenshots/');
+  });
+
+  it('is kept when the patch succeeds', async () => {
+    await POST(post({ ...validLead(), mapScreenshot: PNG_DATA_URL }));
+
+    expect(blobs).toHaveLength(1);
+    expect(deletedBlobs, 'a good attachment was deleted').toHaveLength(0);
   });
 });

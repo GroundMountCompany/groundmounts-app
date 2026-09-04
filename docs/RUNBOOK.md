@@ -99,18 +99,27 @@ All of it is in **`src/config/pricing.ts`**, and a unit test fails if a money
 figure appears anywhere else. Anything marked `PLACEHOLDER` is a plausible
 seed, not a quote.
 
-| What | Currently | Status |
-|---|---|---|
-| Standard panel (Mission Solar 435 W, $3.50/W) | live | **Owner-confirmed** |
-| Racking, tilt 30° | live | **Owner-confirmed** |
-| Trench base rate, $45/ft | live | Confirmed |
-| Conduit schedule (six rows of multipliers) | live | **PLACEHOLDER** |
-| Premium panel (460 W, $3.95/W) | `enabled: false` | **PLACEHOLDER — not offered** |
-| Battery (13.5 kWh, $12,500) | `enabled: false` | **PLACEHOLDER — not offered** |
-| Slope adders (6% rolling, 15% steep) | live | **PLACEHOLDER** |
-| Soil adders (rock 12%, caliche 10%, clay 2%) | live | **PLACEHOLDER** |
-| Vegetation clearing ($3,200/acre, $850 min) | `enabled: true` | **PLACEHOLDER but offered** |
-| Range spread, ±8% | live | Deliberate |
+Nothing is a placeholder any more. Every figure below is owner-confirmed as of
+this commit; anything added later that is not should be marked `PLACEHOLDER`
+and shipped `enabled: false`.
+
+| What | Value |
+|---|---|
+| Standard panel | Mission Solar MSX10-435HN0B, 435 W, $3.50/W |
+| Premium panel | REC Alpha Pure-RX, 460 W, 68.0 × 44.6 in, $4.00/W, 25-yr |
+| Racking, tilt | 30° |
+| Trench base rate | $45/ft |
+| Conduit schedule | ≤10 kW ×1.00 · 10–20 kW ×1.05 · >20 kW ×1.20 |
+| Battery trench adder | +0.05 on the multiplier |
+| Battery | Tesla Powerwall 3, 13.5 kWh — first $14,500, second $9,500, max 2 |
+| Slope adders | Flat <5% +0% · Rolling 5–12% +5% · Steep >12% +12% |
+| Soil adders | caliche +8% · rock / rock outcrop / limestone +15% |
+| Vegetation clearing | $1,500 flat to 0.25 acre, then $2,500/acre |
+| Range spread | ±8% |
+
+Clay, loam and sand are **absent** from `soilAdders` rather than present with a
+zero — an explicit zero invites somebody to tidy the config by giving them a
+value.
 
 **To switch an option on**, set `enabled: true` in `pricing.ts`. It then appears
 on step 5, is priced, and reaches the lead. Nothing else needs changing.

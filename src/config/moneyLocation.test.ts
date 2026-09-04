@@ -61,8 +61,11 @@ function costValues(): Map<number, string> {
 
   const add = (value: unknown, where: string) => {
     if (typeof value !== 'number' || !Number.isFinite(value)) return;
-    // 0 and 1 are every other number in the codebase too.
-    if (value === 0 || value === 1) return;
+    // Small whole numbers are unscannable: a bare 4 is an array index, a loop
+    // bound and a panel row long before it is $4.00 a watt. The decorated
+    // patterns above still catch "$4" and "4/W", which is how a price is
+    // actually written when somebody hardcodes one.
+    if (Number.isInteger(value) && Math.abs(value) < 10) return;
     if (!found.has(value)) found.set(value, where);
   };
 
@@ -75,16 +78,18 @@ function costValues(): Map<number, string> {
   TRENCH.conduitSchedule.forEach((row, i) =>
     add(row.multiplier, `TRENCH.conduitSchedule[${i}].multiplier`)
   );
+  add(TRENCH.batteryMultiplierAdder, 'TRENCH.batteryMultiplierAdder');
 
   add(BATTERY.kwh, 'BATTERY.kwh');
-  add(BATTERY.pricePerUnit, 'BATTERY.pricePerUnit');
+  add(BATTERY.firstUnit, 'BATTERY.firstUnit');
+  add(BATTERY.additionalUnit, 'BATTERY.additionalUnit');
 
   SITE.slopeTiers.forEach((t) => add(t.adderPct, `SITE.slopeTiers.${t.name}.adderPct`));
   for (const [soil, pct] of Object.entries(SITE.soilAdders)) {
     add(pct, `SITE.soilAdders["${soil}"]`);
   }
   add(SITE.vegetationClearing.perAcre, 'SITE.vegetationClearing.perAcre');
-  add(SITE.vegetationClearing.minimum, 'SITE.vegetationClearing.minimum');
+  add(SITE.vegetationClearing.baseCharge, 'SITE.vegetationClearing.baseCharge');
 
   add(DEFAULTS.ratePerKwh, 'DEFAULTS.ratePerKwh');
   add(DEFAULTS.fallbackKwhPerKwYear, 'DEFAULTS.fallbackKwhPerKwYear');

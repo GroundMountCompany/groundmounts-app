@@ -578,37 +578,87 @@ test.describe('design step gestures', () => {
 
     expect(moved, 'array did not move under a single-finger drag').toBeGreaterThan(0);
 
-    // The map must not visibly pan underneath the finger. Measured in screen
-    // pixels rather than degrees: the residual here is a fraction of one pixel,
-    // which is not something a person can see, and an absolute epsilon in
-    // degrees would silently mean different things at different zooms.
+    // The map must not visibly pan underneath the finger, and "visibly" has to
+    // be measured against how far the finger actually went — not against a
+    // fixed pixel budget that means different things at different zooms and
+    // different drag lengths.
     const degreesPerPixel = await page.evaluate(() => {
       const a = window.__gmTest.unproject([0, 0]);
       const b = window.__gmTest.unproject([1, 0]);
       return Math.hypot(a[0] - b[0], a[1] - b[1]);
     });
-    // The map must not track the finger. If it were still panning with the
-    // drag, its movement would be comparable to the array's; instead it is a
-    // small residual from the moment before our handler claims the gesture.
-    //
-    // Not asserted as zero: pinning the camera cut this from ~16px to a
-    // measured 1.7-6.3px depending on how many grab attempts missed first, and
-    // the last pixels come from Mapbox handling the touch before we see it. The
-    // owner confirmed on a real iPhone that the drag does not fight the map.
-    //
-    // The ratio threshold is 3 rather than 5 because a run once measured 4.94
-    // and failed. A map that is still tracking the finger scores about 1; a
-    // map that is pinned scores 20 or more. Anything in between is frame
-    // timing, and a threshold sitting inside that band tests the harness
-    // rather than the app. The absolute pixel bound below is the real limit.
+
+    const fingerTravelPx = Math.hypot(20 * 9, 20 * 6);
+    const driftPx = mapDrift / degreesPerPixel;
+    const driftShare = driftPx / fingerTravelPx;
+
+    expect(moved, 'the array did not move').toBeGreaterThan(0);
+    // Under 5% of the finger's travel: the residual from the moment before our
+    // handler claims the gesture, not the map following the drag.
     expect(
-      moved / mapDrift,
-      'map moved about as much as the array — it is still tracking the finger'
-    ).toBeGreaterThan(3);
+      driftShare,
+      `map drifted ${driftPx.toFixed(1)}px over ${fingerTravelPx.toFixed(0)}px of finger travel`
+    ).toBeLessThan(0.05);
+  });
+
+  test('the control: a drag on empty ground does move the map', async ({ page }) => {
+    // The assertion above is only worth anything if a map that IS tracking the
+    // finger fails it. This is that map: the same gesture, started away from
+    // the array, where Mapbox handles it and the camera follows.
+    await openDesignStep(page);
+    await waitForArray(page, 15_000);
+    await bringMapIntoView(page);
+
+    const client = await page.context().newCDPSession(page);
+
+    const empty = await page.evaluate(() => {
+      const t = window.__gmTest;
+      const r = t.canvasRect();
+      const centre = t.state().arrayCenter!;
+      const [cx, cy] = t.project(centre);
+      // Well clear of the array and its hit padding, and still on canvas.
+      const candidates = [
+        [cx, cy + 220],
+        [cx, cy - 220],
+        [cx + 220, cy],
+      ];
+      for (const [x, y] of candidates) {
+        if (x > 10 && y > 10 && x < r.width - 10 && y < r.height - 10) {
+          const hit = t.hitAt([x, y]);
+          if (hit.hull === 0 && hit.handle === 0) {
+            return { point: [r.left + x, r.top + y] as Pt, ok: true };
+          }
+        }
+      }
+      return { point: [0, 0] as Pt, ok: false };
+    });
+    expect(empty.ok, 'no empty ground on screen to drag').toBe(true);
+
+    const before = await page.evaluate(() => window.__gmTest.mapCenter());
+    await touchStart(client, [{ x: empty.point[0], y: empty.point[1], id: 1 }]);
+    for (let i = 1; i <= 20; i++) {
+      await touchMove(client, [
+        { x: empty.point[0] + i * 9, y: empty.point[1] + i * 6, id: 1 },
+      ]);
+    }
+    const during = await page.evaluate(() => window.__gmTest.mapCenter());
+    await touchEnd(client);
+
+    const degreesPerPixel = await page.evaluate(() => {
+      const a = window.__gmTest.unproject([0, 0]);
+      const b = window.__gmTest.unproject([1, 0]);
+      return Math.hypot(a[0] - b[0], a[1] - b[1]);
+    });
+
+    const fingerTravelPx = Math.hypot(20 * 9, 20 * 6);
+    const movedPx = distance(during, before) / degreesPerPixel;
+
+    // A map that follows the finger moves most of the way with it. This is the
+    // number the array-drag assertion has to be nowhere near.
     expect(
-      mapDrift / degreesPerPixel,
-      'map panned far enough to be a regression'
-    ).toBeLessThan(20);
+      movedPx / fingerTravelPx,
+      `map only moved ${movedPx.toFixed(1)}px over ${fingerTravelPx.toFixed(0)}px of finger travel`
+    ).toBeGreaterThan(0.5);
   });
 
   test('a second finger hands the gesture to the map mid-drag', async ({ page }) => {

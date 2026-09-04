@@ -163,6 +163,9 @@ export default function Step6Quote() {
           <p data-testid="price-revealed" className="text-[26px] font-bold text-neutral-900">
             {money(filed?.low ?? quote.low)} – {money(filed?.high ?? quote.high)}
           </p>
+          <p data-testid="estimate-note-revealed" className="mt-1 text-[15px] text-neutral-500">
+            {UI.estimateNote}
+          </p>
           <p className="mt-1 text-[15px] text-neutral-600">{UI.priceEstimateNote}</p>
         </div>
 
@@ -222,6 +225,9 @@ export default function Step6Quote() {
           className="select-none text-center text-[26px] font-bold text-neutral-900 blur-md"
         >
           {money(quote.low)} – {money(quote.high)}
+        </p>
+        <p data-testid="estimate-note" className="mt-1 text-center text-[15px] text-neutral-500">
+          {UI.estimateNote}
         </p>
         <div className="absolute inset-0 flex items-center justify-center">
           <span className="text-[17px] font-semibold text-neutral-800">{UI.priceHidden}</span>

@@ -296,7 +296,24 @@ export default function MapStage({ mode }: { mode: MapMode }) {
       const t = e.touches[0];
       const rect = canvas.getBoundingClientRect();
       const pt: [number, number] = [t.clientX - rect.left, t.clientY - rect.top];
-      if (hitTest(pt)) e.stopPropagation();
+      if (hitTest(pt)) {
+        e.stopPropagation();
+        // And prevent the default, so Mapbox's pan never starts at all rather
+        // than starting and being corrected a frame later. Pointer events are
+        // generated independently of the touch default action, so the stream
+        // this component drags with is unaffected — verified by the drag,
+        // pinch and compass tests, which all run on synthetic touch.
+        if (e.cancelable) e.preventDefault();
+        // Pin from here, not from pointerdown.
+        //
+        // touchstart fires first, and the pin used to start one event later —
+        // so anything Mapbox did in between was corrected only after the fact,
+        // a frame at a time. Under load that reactive snap-back was visible:
+        // one run in five drifted 17px where the others drifted two or three.
+        // Recording the camera now means the correction has something to
+        // correct *to* from the first move event onwards.
+        pendingCamera = [map.getCenter().lng, map.getCenter().lat];
+      }
     };
     canvas.addEventListener('touchstart', onTouchStartCapture, { capture: true });
 
@@ -310,15 +327,20 @@ export default function MapStage({ mode }: { mode: MapMode }) {
      * put back. The map is free again the instant the finger lifts.
      */
     let pinning = false;
+    /** Where the camera was when a touch landed on our geometry. */
+    let pendingCamera: LngLat | null = null;
+
     const onMapMove = () => {
-      const g = grab.current;
-      if (!g || pinning) return;
+      // Whichever we have: the grab's centre once the pointer handler has run,
+      // and the one recorded at touchstart in the moments before that.
+      const target = grab.current?.cameraCenter ?? pendingCamera;
+      if (!target || pinning) return;
       const c = map.getCenter();
-      if (Math.abs(c.lng - g.cameraCenter[0]) < 1e-12 && Math.abs(c.lat - g.cameraCenter[1]) < 1e-12) {
+      if (Math.abs(c.lng - target[0]) < 1e-12 && Math.abs(c.lat - target[1]) < 1e-12) {
         return;
       }
       pinning = true;
-      map.setCenter(g.cameraCenter);
+      map.setCenter(target);
       pinning = false;
     };
     map.on('move', onMapMove);
@@ -327,6 +349,14 @@ export default function MapStage({ mode }: { mode: MapMode }) {
     canvas.addEventListener('pointermove', onPointerMove);
     canvas.addEventListener('pointerup', onPointerUp);
     canvas.addEventListener('pointercancel', onPointerUp);
+
+    // The pin is released with the finger, not with the grab: a touch that
+    // never became a grab must not leave the camera held.
+    const releasePending = () => {
+      pendingCamera = null;
+    };
+    canvas.addEventListener('touchend', releasePending);
+    canvas.addEventListener('touchcancel', releasePending);
 
     const onClick = (e: mapboxgl.MapMouseEvent) => {
       if (modeRef.current !== 'place-meter') return;
@@ -469,6 +499,8 @@ export default function MapStage({ mode }: { mode: MapMode }) {
       framedResetRef.current = null;
       if (slopeTimer.current) clearTimeout(slopeTimer.current);
       canvas.removeEventListener('touchstart', onTouchStartCapture, { capture: true });
+      canvas.removeEventListener('touchend', releasePending);
+      canvas.removeEventListener('touchcancel', releasePending);
       canvas.removeEventListener('pointerdown', onPointerDown);
       canvas.removeEventListener('pointermove', onPointerMove);
       canvas.removeEventListener('pointerup', onPointerUp);

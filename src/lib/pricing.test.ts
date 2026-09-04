@@ -5,6 +5,7 @@ import {
   slopeTierFor,
   soilAdderFor,
   clearingAcres,
+  clearingPrice,
   spread,
   subtotals,
 } from './pricing';
@@ -19,11 +20,17 @@ import { PANELS, TRENCH, BATTERY, SITE, RANGE_SPREAD_PCT } from '@/config/pricin
  */
 const ALL_ON = { premiumPanels: true, battery: true, sitePrep: true };
 
-/** The worked example from the brief. */
+/**
+ * The worked example from the brief, on ground that costs something.
+ *
+ * Caliche rather than clay loam: with the owner's confirmed adders, clay
+ * carries nothing at all, so an example built on it would exercise the soil
+ * line by never producing one.
+ */
 const EXAMPLE = {
   design: { panelCount: 16, tier: 'standard' as const, trenchFeet: 113 },
   options: { batteryUnits: 0, needsClearing: false },
-  site: { slopePercent: 3, soilClass: 'clay loam' },
+  site: { slopePercent: 3, soilClass: 'caliche' },
 };
 
 describe('the worked example', () => {
@@ -52,9 +59,9 @@ describe('the worked example', () => {
     expect(quote.lineItems.some((i) => i.key === 'slope')).toBe(false);
   });
 
-  it('adds the clay loam rate to the groundwork only', () => {
+  it('adds the caliche rate to the groundwork only', () => {
     const groundwork = quote.lineItems[0].amount + quote.lineItems[1].amount;
-    expect(quote.soilAdderPct).toBe(SITE.soilAdders['clay loam']);
+    expect(quote.soilAdderPct).toBe(SITE.soilAdders.caliche);
     expect(quote.lineItems[2].amount).toBe(Math.round(groundwork * quote.soilAdderPct));
   });
 
@@ -86,17 +93,19 @@ describe('the worked example', () => {
           "label": "Trenching",
         },
         {
-          "amount": 589,
-          "detail": "clay loam",
+          "amount": 2356,
+          "detail": "caliche",
           "key": "soil",
           "label": "Ground conditions",
         },
       ]
     `);
+    // 16 x 435W at $3.50/W = $24,360, plus 113 ft at $45 x1.00 = $5,085,
+    // plus 8% caliche on the $29,445 of groundwork = $2,356. Spread +/-8%.
     expect({ low: quote.low, estimate: quote.estimate, high: quote.high }).toEqual({
-      low: 27631,
-      estimate: 30034,
-      high: 32437,
+      low: 29257,
+      estimate: 31801,
+      high: 34345,
     });
   });
 });
@@ -131,12 +140,20 @@ describe('site conditions', () => {
   });
 
   it('matches soil descriptions by substring, longest first', () => {
-    // SSURGO returns free text, so "clay loam" must beat the shorter "clay".
-    expect(soilAdderFor('Windthorst clay loam, 1 to 3 percent slopes')).toBe(
-      SITE.soilAdders['clay loam']
-    );
-    expect(soilAdderFor('Rocky outcrop')).toBe(SITE.soilAdders.rock);
+    // SSURGO returns free text, so a longer key must beat a shorter one that
+    // is contained in it.
+    expect(soilAdderFor('Tarrant rock outcrop complex')).toBe(SITE.soilAdders['rock outcrop']);
+    expect(soilAdderFor('Rocky, very gravelly')).toBe(SITE.soilAdders.rock);
     expect(soilAdderFor('Caliche')).toBe(SITE.soilAdders.caliche);
+    expect(soilAdderFor('Eckrant limestone')).toBe(SITE.soilAdders.limestone);
+  });
+
+  it('charges nothing for ground that is ordinary to build on', () => {
+    // Clay, loam and sand are deliberately absent from the config rather than
+    // present with a zero, so they fall through to the default of nothing.
+    for (const soil of ['Windthorst clay loam', 'Sandy loam', 'Silty clay', 'Fine sand']) {
+      expect(soilAdderFor(soil), soil).toBe(SITE.defaultSoilAdderPct);
+    }
   });
 
   it('falls back for unknown or missing soil', () => {
@@ -149,33 +166,40 @@ describe('site conditions', () => {
     expect(clearingAcres(0, 'standard')).toBe(0);
   });
 
-  it('never charges less than the clearing minimum', () => {
+  it('charges the flat rate for anything up to a quarter acre', () => {
+    // Most arrays. The flat charge covers turning up.
     const quote = priceQuote(
       { panelCount: 4, tier: 'standard', trenchFeet: 20 },
       { batteryUnits: 0, needsClearing: true },
-      { slopePercent: 0, soilClass: 'loam' }
+      { slopePercent: 0, soilClass: 'loam' },
+      ALL_ON
     );
     const clearing = quote.lineItems.find((i) => i.key === 'clearing')!;
-    expect(clearing.amount).toBe(SITE.vegetationClearing.minimum);
+    expect(clearingAcres(4, 'standard')).toBeLessThan(SITE.vegetationClearing.baseAcres);
+    expect(clearing.amount).toBe(SITE.vegetationClearing.baseCharge);
+  });
+
+  it('charges by the acre only beyond the flat rate', () => {
+    const { baseCharge, baseAcres, perAcre } = SITE.vegetationClearing;
+    expect(clearingPrice(baseAcres)).toBe(baseCharge);
+    expect(clearingPrice(baseAcres + 1)).toBe(baseCharge + perAcre);
+    expect(clearingPrice(0)).toBe(baseCharge);
+
+    // A big array — 200 panels is about a third of an acre once the working
+    // margin is included. The excess is what costs.
+    const acres = clearingAcres(200, 'standard');
+    expect(acres).toBeGreaterThan(baseAcres);
+    expect(clearingPrice(acres)).toBe(baseCharge + (acres - baseAcres) * perAcre);
   });
 });
 
 describe('options change the price', () => {
   const base = priceQuote(EXAMPLE.design, EXAMPLE.options, EXAMPLE.site);
 
-  it('a battery adds its own line and raises the trench rate', () => {
-    const withBattery = priceQuote(
-      EXAMPLE.design,
-      { batteryUnits: 1, needsClearing: false },
-      EXAMPLE.site,
-      ALL_ON
-    );
-    const line = withBattery.lineItems.find((i) => i.key === 'battery')!;
-    expect(line.amount).toBe(BATTERY.pricePerUnit);
-    expect(subtotals(withBattery).trench).toBeGreaterThan(subtotals(base).trench);
-  });
-
-  it('two batteries cost twice one', () => {
+  it('prices the second battery cheaper than the first', () => {
+    // The first carries the inverter and the install; the second is mostly the
+    // battery. Charging twice the first price would over-quote anybody
+    // wanting two.
     const one = priceQuote(
       EXAMPLE.design,
       { batteryUnits: 1, needsClearing: false },
@@ -189,7 +213,26 @@ describe('options change the price', () => {
       ALL_ON
     );
     const amount = (q: typeof one) => q.lineItems.find((i) => i.key === 'battery')!.amount;
-    expect(amount(two)).toBe(amount(one) * 2);
+
+    expect(amount(one)).toBe(BATTERY.firstUnit);
+    expect(amount(two)).toBe(BATTERY.firstUnit + BATTERY.additionalUnit);
+    expect(amount(two)).toBeLessThan(amount(one) * 2);
+  });
+
+  it('a battery adds its own line and raises the trench rate', () => {
+    const withBattery = priceQuote(
+      EXAMPLE.design,
+      { batteryUnits: 1, needsClearing: false },
+      EXAMPLE.site,
+      ALL_ON
+    );
+    const line = withBattery.lineItems.find((i) => i.key === 'battery')!;
+    expect(line.amount).toBe(BATTERY.firstUnit);
+    // A battery adds a second run alongside, whatever the system size.
+    expect(conduitFor(withBattery.systemKw, true).multiplier).toBe(
+      conduitFor(withBattery.systemKw, false).multiplier + TRENCH.batteryMultiplierAdder
+    );
+    expect(subtotals(withBattery).trench).toBeGreaterThan(subtotals(base).trench);
   });
 
   it('premium panels cost more for the same count', () => {

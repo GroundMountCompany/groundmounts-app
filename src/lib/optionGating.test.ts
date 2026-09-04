@@ -16,24 +16,33 @@ const DESIGN = { panelCount: 16, tier: 'standard' as const, trenchFeet: 113 };
 const SITE_CONDITIONS = { slopePercent: 3, soilClass: 'clay loam' };
 
 describe('what ships enabled', () => {
-  it('is standard panels and site prep, and nothing else', () => {
-    // Change these and the tests below change with them; this is the record of
-    // what the owner has confirmed as of this commit.
+  it('is everything, now that the owner has confirmed the prices', () => {
+    // The record of what is on offer as of this commit. An option added later
+    // with a placeholder price should ship false until it is confirmed.
     expect(PANELS.standard.enabled).toBe(true);
-    expect(PANELS.premium.enabled).toBe(false);
-    expect(BATTERY.enabled).toBe(false);
+    expect(PANELS.premium.enabled).toBe(true);
+    expect(BATTERY.enabled).toBe(true);
     expect(SITE.vegetationClearing.enabled).toBe(true);
   });
 });
+
+/** Nothing on offer, which is how an unconfirmed option ships. */
+const ALL_OFF = { premiumPanels: false, battery: false, sitePrep: false };
 
 describe('a design asking for something that is not on offer', () => {
   it('is priced as though it had not asked', () => {
     const asked = priceQuote(
       { ...DESIGN, tier: 'premium' },
       { batteryUnits: 2, needsClearing: false },
-      SITE_CONDITIONS
+      SITE_CONDITIONS,
+      ALL_OFF
     );
-    const plain = priceQuote(DESIGN, { batteryUnits: 0, needsClearing: false }, SITE_CONDITIONS);
+    const plain = priceQuote(
+      DESIGN,
+      { batteryUnits: 0, needsClearing: false },
+      SITE_CONDITIONS,
+      ALL_OFF
+    );
 
     expect(asked.estimate).toBe(plain.estimate);
     expect(asked.lineItems.map((i) => i.key)).not.toContain('battery');
@@ -41,11 +50,13 @@ describe('a design asking for something that is not on offer', () => {
     expect(asked.lineItems[0].detail).toContain(PANELS.standard.name);
   });
 
-  it('keeps the option that is enabled', () => {
+  it('keeps the options that are enabled', () => {
+    const onlyClearing = { premiumPanels: false, battery: false, sitePrep: true };
     const withClearing = priceQuote(
       DESIGN,
       { batteryUnits: 0, needsClearing: true },
-      SITE_CONDITIONS
+      SITE_CONDITIONS,
+      onlyClearing
     );
     expect(withClearing.lineItems.map((i) => i.key)).toContain('clearing');
   });
@@ -53,7 +64,8 @@ describe('a design asking for something that is not on offer', () => {
   it('normalises the design itself, not just the price', () => {
     const { design, options } = availableOnly(
       { ...DESIGN, tier: 'premium' },
-      { batteryUnits: 2, needsClearing: true }
+      { batteryUnits: 2, needsClearing: true },
+      { premiumPanels: false, battery: false, sitePrep: true }
     );
     expect(design.tier).toBe('standard');
     expect(options.batteryUnits).toBe(0);
@@ -61,7 +73,8 @@ describe('a design asking for something that is not on offer', () => {
   });
 
   it('reaches the lead as what will be built', () => {
-    // Otherwise the owner rings a customer about a battery nobody sold them.
+    // Everything is on offer today, so this is the pass-through case. The
+    // stripping itself is covered above, where availability is injected.
     const inputs = buildableInputs(
       parseQuoteInputs({
         panelCount: 16,
@@ -74,8 +87,8 @@ describe('a design asking for something that is not on offer', () => {
       })
     );
 
-    expect(inputs.tier).toBe('standard');
-    expect(inputs.batteryUnits).toBe(0);
+    expect(inputs.tier).toBe('premium');
+    expect(inputs.batteryUnits).toBe(2);
     expect(inputs.needsClearing).toBe(true);
   });
 });
@@ -120,7 +133,7 @@ describe('when the owner switches an option on', () => {
     const line = priced.lineItems.find((i) => i.key === 'battery');
 
     expect(line, 'no battery line with the option enabled').toBeTruthy();
-    expect(line!.amount).toBe(2 * BATTERY.pricePerUnit);
+    expect(line!.amount).toBe(BATTERY.firstUnit + BATTERY.additionalUnit);
   });
 
   it('reports what is currently on offer', () => {

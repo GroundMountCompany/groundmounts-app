@@ -4,9 +4,10 @@
  * The owner edits this and nothing else. A unit test greps the repository and
  * fails on any dollar figure or dollars-per-watt found outside it.
  *
- * Values marked PLACEHOLDER are seeds, not quotes. They are plausible enough to
- * exercise the maths and wrong enough that nobody should send them to a
- * customer without confirming them first.
+ * Every figure below is owner-confirmed. Anything added later that is not
+ * should be marked PLACEHOLDER and, if it prices an option, shipped with
+ * `enabled: false` — a card quoting a number nobody stands behind is worse
+ * than no card.
  */
 
 export interface PanelProduct {
@@ -42,15 +43,13 @@ export const PANELS: Record<PanelTier, PanelProduct> = {
     warranty: '25-year product and performance',
   },
   premium: {
-    // PLACEHOLDER - owner to confirm make, wattage, dimensions and price.
-    // Off until they do.
-    enabled: false,
-    name: 'Premium 460W (TBD)',
+    enabled: true,
+    name: 'REC Alpha Pure-RX 460W',
     watts: 460,
     widthIn: 44.6,
-    heightIn: 71.5,
-    pricePerWatt: 3.95,
-    warranty: '30-year product and performance',
+    heightIn: 68.0,
+    pricePerWatt: 4.0,
+    warranty: '25-year product and performance',
   },
 };
 
@@ -110,8 +109,6 @@ export function panelHeightFt(p: PanelProduct): number {
 export interface ConduitRun {
   /** Applies up to this system size, in kW. */
   maxKw: number;
-  /** Whether this row is for a system with a battery. */
-  hasBattery: boolean;
   conduits: number;
   sizeIn: number;
   /** Multiplier on the base trench rate. */
@@ -122,44 +119,54 @@ export interface TrenchConfig {
   /** Open, backfill and conduit for the simplest run. */
   basePerFt: number;
   /**
-   * More copper needs more or bigger conduit, and a battery adds a second run.
-   * First matching row wins, scanning in order.
+   * More copper needs more or bigger conduit. First matching row wins,
+   * scanning in order.
    */
   conduitSchedule: ConduitRun[];
+  /** A battery adds a second run alongside, whatever the system size. */
+  batteryMultiplierAdder: number;
 }
 
 export const TRENCH: TrenchConfig = {
   basePerFt: 45,
   conduitSchedule: [
-    // PLACEHOLDER - owner to confirm the real conduit schedule and multipliers.
-    { maxKw: 10, hasBattery: false, conduits: 1, sizeIn: 1.5, multiplier: 1 },
-    { maxKw: 20, hasBattery: false, conduits: 1, sizeIn: 2, multiplier: 1.15 },
-    { maxKw: Infinity, hasBattery: false, conduits: 2, sizeIn: 2, multiplier: 1.35 },
-    { maxKw: 10, hasBattery: true, conduits: 2, sizeIn: 2, multiplier: 1.4 },
-    { maxKw: 20, hasBattery: true, conduits: 2, sizeIn: 2, multiplier: 1.55 },
-    { maxKw: Infinity, hasBattery: true, conduits: 3, sizeIn: 2, multiplier: 1.75 },
+    { maxKw: 10, conduits: 1, sizeIn: 1.5, multiplier: 1.0 },
+    { maxKw: 20, conduits: 1, sizeIn: 2, multiplier: 1.05 },
+    { maxKw: Infinity, conduits: 2, sizeIn: 2, multiplier: 1.2 },
   ],
+  batteryMultiplierAdder: 0.05,
 };
 
 // --- Battery ---------------------------------------------------------------
 
 export interface BatteryConfig {
-  /** Off until the owner confirms the product and the price. */
   enabled: boolean;
   name: string;
   kwh: number;
-  pricePerUnit: number;
+  /**
+   * The first one carries the inverter and the install; the second is mostly
+   * the battery itself, so it is cheaper. Pricing every unit at the first
+   * unit's price would over-quote anybody wanting two.
+   */
+  firstUnit: number;
+  additionalUnit: number;
   maxUnits: number;
 }
 
 export const BATTERY: BatteryConfig = {
-  // PLACEHOLDER - owner to confirm make, capacity and price.
-  enabled: false,
-  name: 'Home battery (TBD)',
+  enabled: true,
+  name: 'Tesla Powerwall 3',
   kwh: 13.5,
-  pricePerUnit: 12500,
+  firstUnit: 14500,
+  additionalUnit: 9500,
   maxUnits: 2,
 };
+
+/** What a given number of batteries costs, first unit dearer than the rest. */
+export function batteryPrice(units: number): number {
+  if (units <= 0) return 0;
+  return BATTERY.firstUnit + (units - 1) * BATTERY.additionalUnit;
+}
 
 // --- Site conditions -------------------------------------------------------
 
@@ -185,37 +192,42 @@ export interface SiteConfig {
   vegetationClearing: {
     /** Whether site prep is offered as a choice on the options step. */
     enabled: boolean;
-    /** Charged on the array footprint plus a working margin. */
+    /** Flat charge covering mobilisation and the first `baseAcres`. */
+    baseCharge: number;
+    baseAcres: number;
+    /** Charged per acre beyond `baseAcres`. */
     perAcre: number;
-    /** Minimum charge for any clearing at all. */
-    minimum: number;
     /** Working room around the array when computing the cleared area, in feet. */
     marginFt: number;
   };
 }
 
 export const SITE: SiteConfig = {
-  // PLACEHOLDER - owner to confirm the adders for slope, soil and clearing.
   slopeTiers: [
     { name: 'Flat', maxPercent: 5, adderPct: 0 },
-    { name: 'Rolling', maxPercent: 12, adderPct: 0.06 },
-    { name: 'Steep', maxPercent: Infinity, adderPct: 0.15 },
+    { name: 'Rolling', maxPercent: 12, adderPct: 0.05 },
+    { name: 'Steep', maxPercent: Infinity, adderPct: 0.12 },
   ],
+  /**
+   * Only the ground that costs more to build on is listed.
+   *
+   * Clay, loam and sand are not here on purpose: they carry no adder, and an
+   * explicit zero invites somebody to "tidy up" the config by giving them one.
+   */
   soilAdders: {
-    rock: 0.12,
-    caliche: 0.1,
-    clay: 0.02,
-    'clay loam': 0.02,
-    loam: 0,
-    sand: 0,
-    'sandy loam': 0,
+    caliche: 0.08,
+    rock: 0.15,
+    'rock outcrop': 0.15,
+    limestone: 0.15,
   },
   defaultSoilAdderPct: 0,
   vegetationClearing: {
-    // The one option whose numbers are close enough to offer today.
     enabled: true,
-    perAcre: 3200,
-    minimum: 850,
+    /** Covers mobilisation and anything up to a quarter of an acre. */
+    baseCharge: 1500,
+    baseAcres: 0.25,
+    /** Charged on whatever is cleared beyond that. */
+    perAcre: 2500,
     marginFt: 15,
   },
 };

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { upsertLeadByLeadId, parseAddress, LeadFields } from "@/lib/airtable";
 import { getClientIp, rateLimitOkAsync, isBotHoneypot, minTimeOk } from "@/lib/guard";
 import { getResendOrThrow } from "@/lib/resendSafe";
-import { put } from "@vercel/blob";
+import { put, del } from "@vercel/blob";
 import { escapeHtml, escapeOr, headerSafe } from "@/lib/escape";
 import { sanitiseExtraction } from "@/lib/billSchema";
 import { sniffImage } from "@/lib/imageSniff";
@@ -158,7 +158,19 @@ interface LeadPayload {
  * line of an email that lands in their inbox.
  */
 const MAX_TEXT = 200;
-const MAX_ID = 64;
+/**
+ * A lead id is a UUID v4 and nothing else.
+ *
+ * It is the merge key on the owner's Airtable, the idempotency key on a
+ * submit, and part of a Redis key. "8 to 64 characters" let a caller choose
+ * `aaaaaaaa` and collide with somebody, or mint ids in a pattern. The client
+ * has always generated a v4; now the server insists on one.
+ */
+const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function isLeadId(value: unknown): value is string {
+  return typeof value === 'string' && UUID_V4.test(value);
+}
 /** "Jan 2026" and the like. Long enough for a date range, short enough to read. */
 const MAX_MONTH_LABEL = 16;
 
@@ -182,7 +194,7 @@ function slug(value: unknown, limit = 64): string | undefined {
 
 /** A resend carries an id. Everything else is read from the stored record. */
 function validateResend(obj: Record<string, unknown>): LeadPayload {
-  if (typeof obj.id !== 'string' || obj.id.length < 8 || obj.id.length > MAX_ID) {
+  if (!isLeadId(obj.id)) {
     throw new InvalidEnvelope('Invalid lead ID');
   }
   return {
@@ -250,7 +262,7 @@ function validateContext(quote: unknown): LeadPayload['quote'] {
 
 function validateLead(data: unknown): LeadPayload {
   const obj = data as Record<string, unknown>;
-  if (!obj.id || typeof obj.id !== 'string' || obj.id.length < 8 || obj.id.length > MAX_ID) {
+  if (!isLeadId(obj.id)) {
     throw new Error('Invalid lead ID');
   }
   if (!obj.state || typeof obj.state !== 'string') {
@@ -419,10 +431,10 @@ async function sendQuoteEmail(
  * fills in as the customer goes.
  */
 async function savePartial(raw: Record<string, unknown>, ip: string): Promise<NextResponse> {
-  const id = typeof raw.id === 'string' ? raw.id : '';
-  if (id.length < 8 || id.length > MAX_ID) {
+  if (!isLeadId(raw.id)) {
     return NextResponse.json({ ok: false, error: 'invalid_lead_id' }, { status: 400 });
   }
+  const id = raw.id;
 
   const stepReached = Number(raw.stepReached);
   // Only the three steps worth recording. A caller naming step 7 is not a
@@ -466,6 +478,31 @@ async function savePartial(raw: Record<string, unknown>, ip: string): Promise<Ne
     return NextResponse.json({ ok: true, partial: true, skipped: 'rate_limited' });
   }
 
+  /**
+   * The same lease a submit takes, for the same reason.
+   *
+   * A partial and the submit it precedes can be in flight together — the page
+   * fires one on a step change while the customer presses the button — and
+   * both write the same Airtable row. The completed-record check above closes
+   * the window where the submit has already finished; this closes the one
+   * where it has not finished yet.
+   */
+  const leaseKey = LEASE_PREFIX + id;
+  let leaseToken: string | null;
+  try {
+    leaseToken = await acquireLease(leaseKey, LEASE_TTL_SECONDS);
+  } catch {
+    console.warn('[LEAD_PARTIAL] store unavailable at lease, skipping', id);
+    return NextResponse.json({ ok: true, partial: true, skipped: 'store_unavailable' });
+  }
+
+  if (!leaseToken) {
+    // A submit for this lead is mid-write. It is about to say everything this
+    // save would have, and more.
+    console.log('[LEAD_PARTIAL] lead is mid-write, skipping', id);
+    return NextResponse.json({ ok: true, partial: true, skipped: 'in_progress' });
+  }
+
   const fields: LeadFields = {
     'Step Reached': stepReached,
     Status: 'Partial',
@@ -476,7 +513,12 @@ async function savePartial(raw: Record<string, unknown>, ip: string): Promise<Ne
   try {
     const inputs = buildableInputs(parseQuoteInputs(raw.inputs));
     const facts = await siteFactsForArray(inputs.arrayCenter);
-    const conditions = resolveSiteConditions(inputs, facts);
+    // A partial is written without anybody reviewing it, so the client's soil
+    // text is not accepted here at all: either the server found the ground or
+    // the row says Unknown. On a submit the customer's answer is a fallback
+    // worth having; on a background save it is just unverified text landing in
+    // the owner's records.
+    const conditions = resolveSiteConditions({ ...inputs, soilClass: null }, facts);
     const priced = priceFromInputs({ ...inputs, ...conditions }, facts.curve);
 
     fields.Panels = inputs.panelCount;
@@ -518,6 +560,10 @@ async function savePartial(raw: Record<string, unknown>, ip: string): Promise<Ne
     // A partial save must never be visible to the customer. Log and move on.
     console.error('[LEAD_PARTIAL_ERROR]', id, error instanceof Error ? error.message : error);
     return NextResponse.json({ ok: false, partial: true, error: 'not_saved' }, { status: 502 });
+  } finally {
+    // Held for the write and no longer: a submit arriving a moment later
+    // should not be told its own lead is busy.
+    await releaseLease(leaseKey, leaseToken);
   }
 }
 
@@ -946,6 +992,20 @@ export async function POST(req: NextRequest) {
             lead.id,
             error instanceof Error ? error.message : error
           );
+          // Nothing points at it now, and nothing ever will. A public image of
+          // somebody's property left in storage with no record referencing it
+          // is worse than no screenshot.
+          try {
+            await del(mapScreenshotUrl);
+            console.log('[MAP_SCREENSHOT_ORPHAN_DELETED]', lead.id);
+          } catch (cleanupError) {
+            console.error(
+              '[MAP_SCREENSHOT_ORPHAN_KEPT]',
+              lead.id,
+              cleanupError instanceof Error ? cleanupError.message : cleanupError
+            );
+          }
+          mapScreenshotUrl = undefined;
         }
       }
     }

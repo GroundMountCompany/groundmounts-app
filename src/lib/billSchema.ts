@@ -38,8 +38,8 @@ export const BILL_TOOL_SCHEMA = {
   properties: {
     months: {
       type: 'array',
-      description: 'One entry per billing period shown, most recent first.',
-      maxItems: 24,
+      description: 'Up to twelve billing periods, most recent first.',
+      maxItems: 12,
       items: {
         type: 'object',
         additionalProperties: false,
@@ -139,6 +139,46 @@ export function schemaRequestsPii(): string[] {
   );
 }
 
+/** A year is twelve months. More than that is history nobody sized against. */
+export const MAX_MONTHS = 12;
+
+const MONTH_NAMES = [
+  'jan', 'feb', 'mar', 'apr', 'may', 'jun',
+  'jul', 'aug', 'sep', 'oct', 'nov', 'dec',
+];
+
+/**
+ * Sort key for a billing period label, or null when it cannot be read.
+ *
+ * Bills label periods however they like — "Jan 2026", "January 2026",
+ * "12/2025", "2025-12", "Dec 1 - Dec 31 2025". This understands the common
+ * shapes and gives up honestly on the rest, because a wrong date silently
+ * drops the wrong month.
+ */
+export function monthOrder(label: string): number | null {
+  const text = label.toLowerCase();
+
+  const named = MONTH_NAMES.findIndex((m) => text.includes(m));
+  if (named >= 0) {
+    const fourDigit = text.match(/\b(20\d{2})\b/);
+    if (fourDigit) return Number(fourDigit[1]) * 12 + named;
+
+    // "Aug 25", "Jul 26" — how usage-history charts label their bars, and the
+    // shape that sent a real extraction down the fallback path and dropped the
+    // most recent month instead of the oldest.
+    const twoDigit = text.match(/\b(\d{2})\b/);
+    if (twoDigit) return (2000 + Number(twoDigit[1])) * 12 + named;
+  }
+
+  const numeric = text.match(/\b(\d{1,2})\s*[/-]\s*(20\d{2})\b/);
+  if (numeric) return Number(numeric[2]) * 12 + (Number(numeric[1]) - 1);
+
+  const isoish = text.match(/\b(20\d{2})\s*[/-]\s*(\d{1,2})\b/);
+  if (isoish) return Number(isoish[1]) * 12 + (Number(isoish[2]) - 1);
+
+  return null;
+}
+
 /**
  * Keep only what the schema allows.
  *
@@ -151,12 +191,14 @@ export function sanitiseExtraction(raw: unknown): BillExtraction {
   const input = (raw ?? {}) as Record<string, unknown>;
   const rawMonths = Array.isArray(input.months) ? input.months : [];
 
-  const months: BillMonth[] = rawMonths
-    .slice(0, 24)
+  const usable: BillMonth[] = rawMonths
     .map((entry) => {
       const row = (entry ?? {}) as Record<string, unknown>;
       const kwh = Number(row.kwh);
-      const cost = Number(row.cost);
+      // A period the bill did not price is null, not zero: a zero would show
+      // the customer a month that cost them nothing.
+      const hasCost = row.cost !== null && row.cost !== undefined && row.cost !== '';
+      const cost = hasCost ? Number(row.cost) : Number.NaN;
       return {
         month: typeof row.month === 'string' ? row.month.slice(0, 32) : '',
         kwh: Number.isFinite(kwh) && kwh >= 0 ? Math.round(kwh) : Number.NaN,
@@ -164,6 +206,24 @@ export function sanitiseExtraction(raw: unknown): BillExtraction {
       };
     })
     .filter((row) => Number.isFinite(row.kwh) && row.kwh > 0);
+
+  // Twelve at most, and the most recent twelve.
+  //
+  // Some bills print a two-year usage graph. Sizing against all of it would
+  // quietly double the array, and taking whichever twelve came first would
+  // size against 2024 for a customer whose usage has changed since.
+  const dated = usable.map((row, index) => ({ row, index, order: monthOrder(row.month) }));
+  const allDated = dated.every((entry) => entry.order !== null);
+
+  const months = (
+    allDated
+      ? [...dated].sort((a, b) => b.order! - a.order!)
+      : // Unreadable labels: trust the order the model was asked to use
+        // (most recent first) rather than inventing a sequence.
+        dated
+  )
+    .slice(0, MAX_MONTHS)
+    .map((entry) => entry.row);
 
   const rate = Number(input.ratePerKwh);
 

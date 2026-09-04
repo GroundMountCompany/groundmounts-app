@@ -41,8 +41,10 @@ describe('annual usage from confirmed months', () => {
     expect(annualFromMonths([month(0)])).toEqual({ annual: 0, scaled: false });
   });
 
-  it('handles more than twelve months without scaling them', () => {
+  it('never sums more than twelve, even if thirteen reach it', () => {
+    // Belt and braces with the cap in sanitisation: whichever path fed this,
+    // a year is twelve months.
     const months = Array.from({ length: 13 }, () => month(1000));
-    expect(annualFromMonths(months)).toEqual({ annual: 13_000, scaled: false });
+    expect(annualFromMonths(months)).toEqual({ annual: 12_000, scaled: false });
   });
 });

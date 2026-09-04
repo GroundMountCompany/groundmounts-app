@@ -3,6 +3,7 @@ import './gmTest';
 import { TX_FALLBACK_CURVE } from '../src/lib/production';
 import { PANELS } from '../src/config/pricing';
 import { parseQuoteInputs, priceFromInputs } from '../src/lib/quoteInputs';
+import { RETAIL, COOP, MUNICIPAL, BLURRY_PHOTO } from './fixtures/bills/observed';
 
 /**
  * The Phase 4 shell: a full-bleed map that the page never scrolls under, a
@@ -630,6 +631,18 @@ test('a bill upload fills the table and sizes the array from it', async ({ page 
 
   await page.getByTestId('bill-confirm').click();
   await expect(page.getByTestId('bill-review')).toHaveCount(0);
+  await expect(page.getByTestId('bill-confirmed')).toBeVisible();
+
+  // The rate read off the bill takes over the field below, in the same box
+  // they would have typed it into.
+  await expect(page.getByTestId('rate-kwh')).toHaveValue('17');
+
+  // A refresh must not offer to do the work again.
+  await page.reload();
+  await waitForHydration(page);
+  await expect(page.getByTestId('bill-confirmed')).toBeVisible();
+  await expect(page.getByTestId('bill-upload')).toHaveCount(0);
+  await expect(page.getByTestId('bill-confirmed')).toContainText('17,700');
 
   // And the design is sized against it: 17,700 kWh is a much larger array than
   // the seeded $240 bill would have produced.
@@ -639,6 +652,57 @@ test('a bill upload fills the table and sizes the array from it', async ({ page 
 
   const kwText = (await page.getByTestId('stat-kw').textContent()) ?? '';
   expect(Number(kwText.replace(/[^\d.]/g, ''))).toBeGreaterThan(8);
+});
+
+test('discarding a bill puts sizing back on the typed figures', async ({ page }) => {
+  await page.route('**/api/bill/extract', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        ok: true,
+        extraction: {
+          months: [{ month: 'Jan 2026', kwh: 3000, cost: null }],
+          ratePerKwh: 0.17,
+          confidence: 'high',
+        },
+      }),
+    })
+  );
+
+  await mockGeocoding(page);
+  await gotoStep(page, 1);
+
+  // A deliberately huge bill, so sizing against it is unmistakable.
+  await page.getByTestId('bill-file').setInputFiles('e2e/fixtures/bill.png');
+  await expect(page.getByTestId('bill-review')).toBeVisible();
+  await page.getByTestId('bill-confirm').click();
+
+  const withBill = Number(
+    ((await page.getByTestId('annual-target').textContent()) ?? '').replace(/[^\d]/g, '')
+  );
+  expect(withBill).toBeGreaterThan(30_000);
+
+  // Throw it away and type a figure in instead.
+  await page.getByTestId('bill-edit').click();
+  await page.getByTestId('bill-discard').click();
+  await expect(page.getByTestId('bill-upload')).toBeVisible();
+
+  const bill = page.getByTestId('avg-bill');
+  await bill.fill('180');
+  await bill.blur();
+
+  const manual = Number(
+    ((await page.getByTestId('annual-target').textContent()) ?? '').replace(/[^\d]/g, '')
+  );
+  expect(manual, 'the discarded bill was still driving the target').toBeLessThan(withBill);
+  expect(manual).toBeGreaterThan(0);
+
+  // And it stays discarded across a refresh.
+  await page.reload();
+  await waitForHydration(page);
+  await expect(page.getByTestId('bill-upload')).toBeVisible();
+  await expect(page.getByTestId('bill-confirmed')).toHaveCount(0);
 });
 
 test('an unreadable bill lands on the manual fields, not a dead end', async ({ page }) => {
@@ -670,6 +734,99 @@ test('an unreadable bill lands on the manual fields, not a dead end', async ({ p
   // And the funnel still moves on.
   await gotoStep(page, 3);
   await expect(page.getByTestId('stat-panels')).toBeAttached();
+});
+
+test.describe('real bills, as the deployed extractor read them', () => {
+  /** Replays a captured response for whichever fixture is uploaded. */
+  async function withExtraction(page: Page, extraction: unknown) {
+    await page.route('**/api/bill/extract', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ ok: true, extraction }),
+      })
+    );
+    await mockGeocoding(page);
+    await gotoStep(page, 1);
+  }
+
+  test('a retailer chart of thirteen months keeps the newest twelve', async ({ page }) => {
+    await withExtraction(page, RETAIL);
+    await page.getByTestId('bill-file').setInputFiles('e2e/fixtures/bills/bill-retail.png');
+    await expect(page.getByTestId('bill-review')).toBeVisible();
+
+    // Twelve rows, and the newest is among them. The bill lists oldest first,
+    // so a naive take-the-first-twelve drops August 2026 — the month that
+    // matters most.
+    await expect(page.getByTestId('bill-kwh-11')).toBeVisible();
+    await expect(page.getByTestId('bill-kwh-12')).toHaveCount(0);
+    await expect(page.getByTestId('bill-review')).toContainText('Aug 26');
+    await expect(page.getByTestId('bill-review')).not.toContainText('Aug 25');
+
+    // A full year, so no scaling note.
+    await expect(page.getByTestId('bill-scaled')).toHaveCount(0);
+    // 1842+2040+1710+1490+1375+1280+1195+1080+950+910+980+1045 = 15,897
+    await expect(page.getByTestId('bill-annual')).toContainText('15,897');
+
+    // The rate it read: 12.9c energy. Editable, because on this bill the
+    // delivery charge is separate and the all-in rate is nearer 16c.
+    await expect(page.getByTestId('bill-rate')).toHaveValue('13');
+  });
+
+  test('a cooperative table of twelve months needs no scaling', async ({ page }) => {
+    await withExtraction(page, COOP);
+    await page.getByTestId('bill-file').setInputFiles('e2e/fixtures/bills/bill-coop.png');
+    await expect(page.getByTestId('bill-review')).toBeVisible();
+
+    await expect(page.getByTestId('bill-kwh-0')).toHaveValue('2315');
+    await expect(page.getByTestId('bill-kwh-11')).toHaveValue('1260');
+    await expect(page.getByTestId('bill-scaled')).toHaveCount(0);
+    // The period total is shown against its month, read-only.
+    await expect(page.getByTestId('bill-cost-0')).toContainText('312.77');
+    await expect(page.getByTestId('bill-cost-1')).toHaveText('—');
+    await expect(page.getByTestId('bill-annual')).toContainText('18,610');
+  });
+
+  test('a municipal statement gives one month and says it scaled', async ({ page }) => {
+    await withExtraction(page, MUNICIPAL);
+    await page.getByTestId('bill-file').setInputFiles('e2e/fixtures/bills/bill-municipal.png');
+    await expect(page.getByTestId('bill-review')).toBeVisible();
+
+    await expect(page.getByTestId('bill-kwh-0')).toHaveValue('1560');
+    await expect(page.getByTestId('bill-kwh-1')).toHaveCount(0);
+    // One month is a projection, and the screen says so.
+    await expect(page.getByTestId('bill-scaled')).toBeVisible();
+    await expect(page.getByTestId('bill-annual')).toContainText('18,720');
+  });
+
+  test('a photo of that statement on a worktop reads the same figures', async ({ page }) => {
+    // Predicted to fail to manual entry; it did not. Kept as the case it
+    // turned out to be rather than the one that was expected.
+    await withExtraction(page, BLURRY_PHOTO);
+    await page.getByTestId('bill-file').setInputFiles('e2e/fixtures/bills/bill-photo-blurry.png');
+    await expect(page.getByTestId('bill-review')).toBeVisible();
+
+    await expect(page.getByTestId('bill-kwh-0')).toHaveValue('1560');
+    await expect(page.getByTestId('bill-annual')).toContainText('18,720');
+  });
+
+  test('an unreadable photo would still land on manual entry', async ({ page }) => {
+    // The path the blurry fixture was expected to take, kept because it is the
+    // one that matters: no dead end when the model genuinely cannot read it.
+    await page.route('**/api/bill/extract', (route) =>
+      route.fulfill({
+        status: 422,
+        contentType: 'application/json',
+        body: JSON.stringify({ ok: false, reason: "Couldn't read that one. Type it in instead." }),
+      })
+    );
+    await mockGeocoding(page);
+    await gotoStep(page, 1);
+
+    await page.getByTestId('bill-file').setInputFiles('e2e/fixtures/bills/bill-photo-blurry.png');
+    await expect(page.getByTestId('bill-failed')).toBeVisible();
+    await expect(page.getByTestId('bill-review')).toHaveCount(0);
+  });
 });
 
 test('the revealed price is the one the server filed, not the page estimate', async ({

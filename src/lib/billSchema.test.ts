@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import {
   BILL_TOOL_SCHEMA,
+  MAX_MONTHS,
+  monthOrder,
   BILL_PROMPT,
   schemaFieldNames,
   schemaRequestsPii,
@@ -89,5 +91,128 @@ describe('sanitising what comes back', () => {
     expect(sanitiseExtraction({}).confidence).toBe('low');
     expect(sanitiseExtraction({ confidence: 'HIGH' }).confidence).toBe('low');
     expect(sanitiseExtraction({ confidence: 'high' }).confidence).toBe('high');
+  });
+});
+
+describe('twelve months, the most recent twelve', () => {
+  const month = (label: string, kwh: number) => ({ month: label, kwh, cost: null });
+
+  it('keeps the latest twelve and drops the oldest', () => {
+    // Thirteen months of history, oldest last. Jan 2025 is the one that goes:
+    // sizing against thirteen months would inflate the array by a twelfth, and
+    // sizing against the wrong twelve would use a year the customer has left
+    // behind.
+    const thirteen = [
+      month('Jan 2026', 1300),
+      month('Dec 2025', 1200),
+      month('Nov 2025', 1100),
+      month('Oct 2025', 1000),
+      month('Sep 2025', 1520),
+      month('Aug 2025', 1900),
+      month('Jul 2025', 2000),
+      month('Jun 2025', 1800),
+      month('May 2025', 1400),
+      month('Apr 2025', 1000),
+      month('Mar 2025', 900),
+      month('Feb 2025', 950),
+      month('Jan 2025', 1250),
+    ];
+
+    const kept = sanitiseExtraction({ months: thirteen, ratePerKwh: null, confidence: 'high' })
+      .months.map((m) => m.month);
+
+    expect(kept).toHaveLength(MAX_MONTHS);
+    expect(kept, 'the oldest month should have been dropped').not.toContain('Jan 2025');
+    expect(kept).toContain('Jan 2026');
+    expect(kept).toContain('Feb 2025');
+  });
+
+  it('drops the oldest even when the bill lists them oldest first', () => {
+    const ascending = [
+      month('Jan 2025', 1250),
+      month('Feb 2025', 950),
+      month('Mar 2025', 900),
+      month('Apr 2025', 1000),
+      month('May 2025', 1400),
+      month('Jun 2025', 1800),
+      month('Jul 2025', 2000),
+      month('Aug 2025', 1900),
+      month('Sep 2025', 1520),
+      month('Oct 2025', 1000),
+      month('Nov 2025', 1100),
+      month('Dec 2025', 1200),
+      month('Jan 2026', 1300),
+    ];
+
+    const kept = sanitiseExtraction({ months: ascending, ratePerKwh: null, confidence: 'high' })
+      .months.map((m) => m.month);
+
+    expect(kept).toHaveLength(MAX_MONTHS);
+    expect(kept).not.toContain('Jan 2025');
+    expect(kept[0]).toBe('Jan 2026');
+  });
+
+  it('falls back to the given order when the labels cannot be dated', () => {
+    // The model is told most-recent-first, so that order is the best guess
+    // available — better than inventing a sequence from unreadable labels.
+    const odd = Array.from({ length: 13 }, (_, i) => month(`Period ${i + 1}`, 1000 + i));
+    const kept = sanitiseExtraction({ months: odd, ratePerKwh: null, confidence: 'high' }).months;
+
+    expect(kept).toHaveLength(MAX_MONTHS);
+    expect(kept[0].month).toBe('Period 1');
+    expect(kept.map((m) => m.month)).not.toContain('Period 13');
+  });
+
+  it('reads the month labels bills actually use', () => {
+    expect(monthOrder('Jan 2026')).toBeGreaterThan(monthOrder('Dec 2025')!);
+    expect(monthOrder('January 2026')).toBe(monthOrder('Jan 2026'));
+    expect(monthOrder('12/2025')).toBe(monthOrder('Dec 2025'));
+    expect(monthOrder('2025-12')).toBe(monthOrder('Dec 2025'));
+    expect(monthOrder('Jul 1 - Jul 31, 2026')).toBe(monthOrder('Jul 2026'));
+    expect(monthOrder('Billing period 4')).toBeNull();
+  });
+
+  it('reads the two-digit labels a usage chart uses', () => {
+    // Found by running a real bill through: a usage-history chart labels its
+    // bars "Aug 25", "Jul 26". Unreadable labels fall back to the order the
+    // model returned them in — and that model returned oldest first, so the
+    // newest month was the one dropped.
+    expect(monthOrder('Aug 25')).toBe(monthOrder('Aug 2025'));
+    expect(monthOrder('Jul 26')).toBe(monthOrder('Jul 2026'));
+    expect(monthOrder('Jul 26')).toBeGreaterThan(monthOrder('Aug 25')!);
+  });
+
+  it('keeps the newest twelve of a chart listed oldest first', () => {
+    // The exact shape the live retail bill returned.
+    const chart = [
+      'Aug 25', 'Sep 25', 'Oct 25', 'Nov 25', 'Dec 25', 'Jan 26',
+      'Feb 26', 'Mar 26', 'Apr 26', 'May 26', 'Jun 26', 'Jul 26', 'Aug 26',
+    ].map((label, i) => month(label, 1000 + i * 10));
+
+    const kept = sanitiseExtraction({ months: chart, ratePerKwh: null, confidence: 'high' })
+      .months.map((m) => m.month);
+
+    expect(kept).toHaveLength(MAX_MONTHS);
+    expect(kept, 'the most recent month was dropped').toContain('Aug 26');
+    expect(kept, 'the oldest month was kept').not.toContain('Aug 25');
+  });
+});
+
+describe('a month the bill did not price', () => {
+  it('stays null rather than becoming a free month', () => {
+    // Number(null) is 0, and a zero here would show the customer a month that
+    // cost them nothing.
+    const result = sanitiseExtraction({
+      months: [
+        { month: 'Jan 2026', kwh: 1450, cost: null },
+        { month: 'Dec 2025', kwh: 1310 },
+        { month: 'Nov 2025', kwh: 1200, cost: 0 },
+        { month: 'Oct 2025', kwh: 1100, cost: 188.2 },
+      ],
+      ratePerKwh: null,
+      confidence: 'high',
+    });
+
+    expect(result.months.map((m) => m.cost)).toEqual([null, null, 0, 188.2]);
   });
 });

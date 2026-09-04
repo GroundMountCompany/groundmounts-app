@@ -11,6 +11,9 @@ import { TX_FALLBACK_CURVE, type ProductionCurve } from '@/lib/production';
 import { resetSiteIntel } from '@/lib/siteIntel';
 import type { BillMonth } from '@/lib/billSchema';
 
+/** none -> reading -> review -> confirmed, with failure returning to none. */
+export type BillPhase = 'none' | 'reading' | 'review' | 'confirmed';
+
 export interface Coordinates {
   latitude: number;
   longitude: number;
@@ -76,6 +79,17 @@ interface QuoteState {
    */
   billMonths: BillMonth[] | null;
   billAnnualKwh: number | null;
+  /**
+   * How far the upload got.
+   *
+   * In the store rather than the component because a customer who refreshes
+   * after confirming their bill should see that it is confirmed, not a fresh
+   * upload button offering to do the work again.
+   */
+  billPhase: BillPhase;
+  /** What was read but not yet confirmed, so a refresh mid-review keeps it. */
+  billDraft: BillMonth[] | null;
+  billDraftRate: number | null;
   slopePercent: number | null;
   slopeTier: SlopeTier;
   /**
@@ -144,6 +158,10 @@ interface QuoteActions {
   /** Months the customer confirmed off their own bill, and the year they imply. */
   setBillMonths: (months: BillMonth[], annualKwh: number) => void;
   clearBillMonths: () => void;
+  /** Where the upload has got to. Persisted so a refresh does not lose it. */
+  setBillPhase: (phase: BillPhase) => void;
+  /** What we read, before the customer has confirmed it. */
+  setBillDraft: (months: BillMonth[], ratePerKwh: number | null) => void;
   setHighestValue: (v: number) => void;
   setPercentage: (v: number) => void;
   setPaymentMethod: (v: PaymentMethod) => void;
@@ -216,6 +234,9 @@ const initialState: QuoteState = {
   trenchFeet: 0,
   billMonths: null,
   billAnnualKwh: null,
+  billPhase: 'none',
+  billDraft: null,
+  billDraftRate: null,
   slopePercent: null,
   slopeTier: 'Unknown',
   slopeSource: null,
@@ -261,8 +282,21 @@ export const useQuoteStore = create<QuoteStore>()(
       setTotalPanels: (totalPanels) => set({ totalPanels }),
       setAvgValue: (avgValue) => set({ avgValue }),
 
-      setBillMonths: (billMonths, billAnnualKwh) => set({ billMonths, billAnnualKwh }),
-      clearBillMonths: () => set({ billMonths: null, billAnnualKwh: null }),
+      setBillMonths: (billMonths, billAnnualKwh) =>
+        set({ billMonths, billAnnualKwh, billPhase: 'confirmed' }),
+
+      clearBillMonths: () =>
+        set({
+          billMonths: null,
+          billAnnualKwh: null,
+          billDraft: null,
+          billDraftRate: null,
+          billPhase: 'none',
+        }),
+
+      setBillPhase: (billPhase) => set({ billPhase }),
+      setBillDraft: (billDraft, billDraftRate) =>
+        set({ billDraft, billDraftRate, billPhase: 'review' }),
       setHighestValue: (highestValue) => set({ highestValue }),
       setPercentage: (percentage) => set({ percentage }),
       setPaymentMethod: (paymentMethod) => set({ paymentMethod }),
@@ -377,6 +411,9 @@ export const useQuoteStore = create<QuoteStore>()(
         trenchFeet: state.trenchFeet,
         billMonths: state.billMonths,
         billAnnualKwh: state.billAnnualKwh,
+        billPhase: state.billPhase,
+        billDraft: state.billDraft,
+        billDraftRate: state.billDraftRate,
         slopePercent: state.slopePercent,
         slopeTier: state.slopeTier,
         slopeSource: state.slopeSource,

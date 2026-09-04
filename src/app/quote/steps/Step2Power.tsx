@@ -47,15 +47,27 @@ export default function Step2Power() {
   return (
     <div className="space-y-5">
       <BillUpload
-        onConfirm={(months, annualKwh) => {
+        onConfirm={(months, annualKwh, ratePerKwh) => {
           setBillMonths(months, annualKwh);
+
+          // A rate read off their own bill beats the Texas average, so it
+          // takes over the field below — visibly, in the same box they would
+          // have typed it into.
+          const cents = ratePerKwh ? Math.round(ratePerKwh * 100) : rateCents;
+          if (ratePerKwh) {
+            setRateCents(cents);
+            setRateText(String(cents));
+          }
+
           // Keep the manual field honest: show what the bill implies per month
-          // at their rate, so the two halves of this screen agree.
-          const monthly = Math.round(
-            ((annualKwh / 12) * dollarsPerKwhFromCents(rateCents))
-          );
+          // at that rate, so the two halves of this screen agree.
+          const monthly = Math.round((annualKwh / 12) * dollarsPerKwhFromCents(cents));
           setAvgValue(monthly);
           setBillText(String(monthly));
+        }}
+        onDiscard={() => {
+          // Sizing returns to whatever is typed in below. Nothing else is
+          // touched: their bill figure and rate stay as they left them.
         }}
       />
 

@@ -2,7 +2,8 @@
 
 import { useRef, useState } from 'react';
 import { UI } from '@/config/copy';
-import type { BillMonth } from '@/lib/billSchema';
+import { useQuoteStore } from '@/store/quoteStore';
+import { MAX_MONTHS, sanitiseExtraction, type BillMonth } from '@/lib/billSchema';
 
 /**
  * Upload a bill, then check what we read.
@@ -15,22 +16,31 @@ import type { BillMonth } from '@/lib/billSchema';
  * Nothing is used unreviewed either: the extracted months are shown in an
  * editable table and only reach the sizing maths when the customer presses the
  * button that says so.
+ *
+ * The phase and the draft live in the store, not here. Somebody who confirms
+ * their bill and then refreshes — or comes back tomorrow to a persisted
+ * funnel — should see that it is confirmed, with a way to change it, rather
+ * than an upload button offering to do the work again.
  */
-
-type Phase = 'idle' | 'reading' | 'review' | 'confirmed' | 'failed';
 
 export interface BillUploadProps {
   /** Called with the months the customer confirmed, and the annual total. */
-  onConfirm: (months: BillMonth[], annualKwh: number, scaled: boolean) => void;
+  onConfirm: (months: BillMonth[], annualKwh: number, ratePerKwh: number | null) => void;
+  /** Called when they throw it away, so sizing goes back to the typed figures. */
+  onDiscard: () => void;
 }
 
 /** A year's usage from however many months we have. */
 export function annualFromMonths(months: BillMonth[]): { annual: number; scaled: boolean } {
-  const usable = months.filter((m) => Number.isFinite(m.kwh) && m.kwh > 0);
+  // Capped as well as sorted upstream: a year is twelve months wherever the
+  // count is added up, so no path can size against thirteen.
+  const usable = months
+    .filter((m) => Number.isFinite(m.kwh) && m.kwh > 0)
+    .slice(0, MAX_MONTHS);
   if (!usable.length) return { annual: 0, scaled: false };
 
   const total = usable.reduce((sum, m) => sum + m.kwh, 0);
-  if (usable.length >= 12) return { annual: Math.round(total), scaled: false };
+  if (usable.length >= MAX_MONTHS) return { annual: Math.round(total), scaled: false };
 
   // Fewer than twelve months is a partial picture, and a partial picture
   // scaled up is a guess — so it is scaled, and the screen says so rather than
@@ -38,13 +48,29 @@ export function annualFromMonths(months: BillMonth[]): { annual: number; scaled:
   return { annual: Math.round((total / usable.length) * 12), scaled: true };
 }
 
-export default function BillUpload({ onConfirm }: BillUploadProps) {
-  const [phase, setPhase] = useState<Phase>('idle');
+const money = (amount: number) =>
+  amount.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
+
+export default function BillUpload({ onConfirm, onDiscard }: BillUploadProps) {
+  const phase = useQuoteStore((s) => s.billPhase);
+  const setPhase = useQuoteStore((s) => s.setBillPhase);
+  const draft = useQuoteStore((s) => s.billDraft);
+  const draftRate = useQuoteStore((s) => s.billDraftRate);
+  const setDraft = useQuoteStore((s) => s.setBillDraft);
+  const confirmed = useQuoteStore((s) => s.billMonths);
+  const confirmedAnnual = useQuoteStore((s) => s.billAnnualKwh);
+  const clearBill = useQuoteStore((s) => s.clearBillMonths);
+
+  // Only the failure message is local: it describes one attempt, not the
+  // funnel's state, and it should not survive a refresh.
   const [reason, setReason] = useState(UI.billFailed);
-  const [months, setMonths] = useState<BillMonth[]>([]);
+  const [failed, setFailed] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
+  const months = draft ?? [];
+
   const upload = async (file: File) => {
+    setFailed(false);
     setPhase('reading');
     try {
       const form = new FormData();
@@ -55,26 +81,46 @@ export default function BillUpload({ onConfirm }: BillUploadProps) {
 
       if (!res.ok || !json?.ok || !json.extraction?.months?.length) {
         setReason(typeof json?.reason === 'string' ? json.reason : UI.billFailed);
-        setPhase('failed');
+        setFailed(true);
+        setPhase('none');
         return;
       }
 
-      setMonths(json.extraction.months as BillMonth[]);
-      setPhase('review');
+      // Sanitised again here, with the same function the route uses. The
+      // route caps and orders what the model returns; this caps and orders
+      // what arrives over the network, so the table can never show a
+      // thirteenth month whatever the response says.
+      const clean = sanitiseExtraction(json.extraction);
+      if (!clean.months.length) {
+        setReason(UI.billFailed);
+        setFailed(true);
+        setPhase('none');
+        return;
+      }
+      setDraft(clean.months, clean.ratePerKwh);
     } catch {
       setReason(UI.billFailed);
-      setPhase('failed');
+      setFailed(true);
+      setPhase('none');
     }
   };
 
   const editKwh = (index: number, raw: string) => {
     const kwh = Number(raw.replace(/[^\d]/g, ''));
-    setMonths((current) =>
-      current.map((m, i) => (i === index ? { ...m, kwh: Number.isFinite(kwh) ? kwh : 0 } : m))
+    setDraft(
+      months.map((m, i) => (i === index ? { ...m, kwh: Number.isFinite(kwh) ? kwh : 0 } : m)),
+      draftRate
     );
   };
 
+  /** Typed in cents, stored in dollars — the same units the rate field uses. */
+  const editRate = (raw: string) => {
+    const cents = Number(raw.replace(/[^\d.]/g, ''));
+    setDraft(months, Number.isFinite(cents) && cents > 0 ? cents / 100 : null);
+  };
+
   const { annual, scaled } = annualFromMonths(months);
+  const rateCentsText = draftRate ? String(Math.round(draftRate * 100)) : '';
 
   return (
     <div className="space-y-2">
@@ -101,12 +147,12 @@ export default function BillUpload({ onConfirm }: BillUploadProps) {
           className="flex items-center justify-between gap-3 rounded-xl border border-neutral-200 px-4 py-3"
         >
           <span className="text-[16px] text-neutral-800">
-            {UI.billConfirmed} {annual.toLocaleString()} {UI.billAnnualSuffix}
+            {UI.billConfirmed} {(confirmedAnnual ?? 0).toLocaleString()} {UI.billAnnualSuffix}
           </span>
           <button
             type="button"
             data-testid="bill-edit"
-            onClick={() => setPhase('review')}
+            onClick={() => setDraft(confirmed ?? [], draftRate)}
             className="min-h-[44px] shrink-0 text-[16px] font-semibold text-neutral-900 underline"
           >
             {UI.billEditAgain}
@@ -126,19 +172,22 @@ export default function BillUpload({ onConfirm }: BillUploadProps) {
             {phase === 'reading' ? UI.billReading : UI.billUpload}
           </span>
           <span className="block text-[15px] text-neutral-500">
-            {phase === 'failed' ? reason : UI.billUploadNote}
+            {failed ? reason : UI.billUploadNote}
           </span>
         </button>
       )}
 
-      {phase === 'failed' && (
+      {failed && phase === 'none' && (
         <p data-testid="bill-failed" className="text-[15px] text-neutral-600">
           {reason}
         </p>
       )}
 
       {phase === 'review' && (
-        <div data-testid="bill-review" className="space-y-3 rounded-xl border border-neutral-200 p-3">
+        <div
+          data-testid="bill-review"
+          className="space-y-3 rounded-xl border border-neutral-200 p-3"
+        >
           <div>
             <p className="text-[17px] font-semibold text-neutral-900">{UI.billMonthsTitle}</p>
             <p className="text-[15px] text-neutral-600">{UI.billMonthsNote}</p>
@@ -147,21 +196,43 @@ export default function BillUpload({ onConfirm }: BillUploadProps) {
           <div className="space-y-2">
             <div className="flex gap-3 text-[15px] uppercase tracking-wide text-neutral-500">
               <span className="flex-1">{UI.billMonthHeader}</span>
-              <span className="w-28 text-right">{UI.billKwhHeader}</span>
+              <span className="w-20 text-right">{UI.billCostHeader}</span>
+              <span className="w-24 text-right">{UI.billKwhHeader}</span>
             </div>
             {months.map((month, i) => (
               <div key={`${month.month}-${i}`} className="flex items-center gap-3">
                 <span className="flex-1 text-[17px] text-neutral-900">{month.month}</span>
+                {/* Read-only: the cost helps them recognise the month, and the
+                    sizing does not use it. */}
+                <span
+                  data-testid={`bill-cost-${i}`}
+                  className="w-20 text-right text-[16px] text-neutral-500"
+                >
+                  {month.cost === null ? UI.billNoCost : money(month.cost)}
+                </span>
                 <input
                   data-testid={`bill-kwh-${i}`}
                   inputMode="numeric"
+                  aria-label={`${month.month} ${UI.billKwhHeader}`}
                   value={month.kwh === 0 ? '' : String(month.kwh)}
                   onChange={(e) => editKwh(i, e.target.value)}
-                  className="h-12 w-28 rounded-lg border border-neutral-300 px-3 text-right text-[17px]"
+                  className="h-12 w-24 rounded-lg border border-neutral-300 px-3 text-right text-[17px]"
                 />
               </div>
             ))}
           </div>
+
+          <label className="flex items-center gap-3">
+            <span className="flex-1 text-[16px] text-neutral-700">{UI.billRateLabel}</span>
+            <input
+              data-testid="bill-rate"
+              inputMode="decimal"
+              value={rateCentsText}
+              placeholder={UI.billRatePlaceholder}
+              onChange={(e) => editRate(e.target.value)}
+              className="h-12 w-24 rounded-lg border border-neutral-300 px-3 text-right text-[17px]"
+            />
+          </label>
 
           <p data-testid="bill-annual" className="text-[16px] text-neutral-700">
             {UI.billAnnualPrefix} {annual.toLocaleString()} {UI.billAnnualSuffix}
@@ -176,13 +247,7 @@ export default function BillUpload({ onConfirm }: BillUploadProps) {
             <button
               type="button"
               data-testid="bill-confirm"
-              onClick={() => {
-                // Collapse to a line the customer can re-open. Leaving the
-                // table up after "Use these numbers" gives them no signal that
-                // anything happened, and two places showing usage at once.
-                setPhase('confirmed');
-                onConfirm(months, annual, scaled);
-              }}
+              onClick={() => onConfirm(months, annual, draftRate)}
               className="min-h-[56px] flex-1 rounded-xl bg-neutral-900 px-4 text-[17px] font-semibold text-white"
             >
               {UI.billMonthsUse}
@@ -191,8 +256,11 @@ export default function BillUpload({ onConfirm }: BillUploadProps) {
               type="button"
               data-testid="bill-discard"
               onClick={() => {
-                setMonths([]);
-                setPhase('idle');
+                // Back to the typed figures entirely: the stored months go, and
+                // so does the annual total that was overriding them.
+                clearBill();
+                setFailed(false);
+                onDiscard();
               }}
               className="min-h-[56px] rounded-xl border border-neutral-300 px-4 text-[17px] font-medium text-neutral-900"
             >

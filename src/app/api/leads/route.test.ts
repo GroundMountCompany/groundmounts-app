@@ -489,9 +489,10 @@ describe('one request does the whole submit', () => {
 
     expect(body).toMatchObject({ ok: true, leadFiled: true, emailSent: true });
     expect(written, 'a resend wrote a second Airtable record').toHaveLength(1);
-    // The customer's copy only: the owner was notified the first time.
     expect(notifications.filter((n) => n.react)).toHaveLength(1);
-    expect(notifications.filter((n) => n.html)).toHaveLength(0);
+    // The owner's copy failed with the customer's the first time round, so the
+    // resend finishes both halves.
+    expect(notifications.filter((n) => n.html)).toHaveLength(1);
   });
 });
 
@@ -874,5 +875,68 @@ describe('a resend touches nothing but the stored record', () => {
     expect(curveCalls, 'an unknown resend hit the site lookup').toHaveLength(0);
     expect(written).toHaveLength(0);
     expect(notifications).toHaveLength(0);
+  });
+});
+
+describe('telling the owner a lead arrived', () => {
+  /** The owner's notification is the HTML one; the customer's is React. */
+  const ownerEmails = () => notifications.filter((n) => n.html);
+
+  it('records that it went', async () => {
+    await POST(post(validLead()));
+
+    expect(ownerEmails()).toHaveLength(1);
+    expect(await (await POST(post(validLead()))).json()).toMatchObject({ ownerNotified: true });
+  });
+
+  it('records a failure instead of swallowing it', async () => {
+    // It used to be fire-and-forget in a try/catch: Resend could be down and
+    // the lead would be filed with nobody told about it.
+    failEmail = true;
+    await POST(post(validLead()));
+
+    const stored = store.get('gm:submit:lead-1234-5678') as { ownerNotified: boolean };
+    expect(stored.ownerNotified).toBe(false);
+  });
+
+  it('retries it on the resend that finishes the customer email', async () => {
+    failEmail = true;
+    await POST(post(validLead()));
+    notifications.length = 0;
+
+    failEmail = false;
+    __resetRateLimits();
+    const res = await POST(post({ ...validLead(), resend: true }));
+
+    expect(await res.json()).toMatchObject({ emailSent: true, ownerNotified: true });
+    expect(ownerEmails(), 'the owner was not told on the retry').toHaveLength(1);
+  });
+
+  it('retries it on a replay when only the owner copy failed', async () => {
+    // The customer has their quote; the owner does not. A repeat of the submit
+    // is the only thing that will come along, so it finishes the job.
+    await POST(post(validLead()));
+    const stored = store.get('gm:submit:lead-1234-5678') as Record<string, unknown>;
+    store.set('gm:submit:lead-1234-5678', { ...stored, ownerNotified: false });
+    notifications.length = 0;
+
+    __resetRateLimits();
+    const res = await POST(post(validLead()));
+
+    expect(await res.json()).toMatchObject({ duplicate: true, ownerNotified: true });
+    expect(ownerEmails()).toHaveLength(1);
+    // And still no second record, and no second customer email.
+    expect(written).toHaveLength(1);
+    expect(notifications.filter((n) => n.react)).toHaveLength(0);
+  });
+
+  it('does not send it twice on a replay when it already went', async () => {
+    await POST(post(validLead()));
+    notifications.length = 0;
+
+    __resetRateLimits();
+    await POST(post(validLead()));
+
+    expect(ownerEmails()).toHaveLength(0);
   });
 });

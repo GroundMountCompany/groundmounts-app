@@ -65,6 +65,16 @@ interface SubmitRecord {
   priceHigh: number;
   lineItems: Array<{ key: string; label: string; detail?: string; amount: number }>;
   airtableId?: string;
+  /**
+   * Whether the owner's "new lead" email went.
+   *
+   * Recorded because it can fail on its own, and a lead nobody was told about
+   * is a lead nobody calls. Retried on the next resend or replay.
+   */
+  ownerNotified: boolean;
+  /** What the owner's notification needs, so a retry does not re-derive it. */
+  notifySubject?: string;
+  notifyHtml?: string;
   /** Everything needed to send the email again, and nothing from the caller. */
   email: string;
   address: string;
@@ -86,6 +96,7 @@ function replyFrom(record: SubmitRecord, extra: Record<string, unknown> = {}) {
     priceHigh: record.priceHigh,
     lineItems: record.lineItems,
     airtableId: record.airtableId,
+    ownerNotified: record.ownerNotified,
     ...extra,
   };
 }
@@ -159,6 +170,46 @@ function validateLead(data: unknown): LeadPayload {
     ttc_ms: obj.ttc_ms as number,
     mapScreenshot: obj.mapScreenshot as string | undefined,
   };
+}
+
+/**
+ * Tell the owner a lead arrived.
+ *
+ * Returns whether it went. It used to be fire-and-forget inside a try/catch
+ * that logged and moved on, so a Resend outage meant the record existed and
+ * nobody knew about it.
+ */
+async function sendOwnerNotification(
+  leadId: string,
+  subject: string,
+  html: string
+): Promise<boolean> {
+  try {
+    const resend = getResendOrThrow();
+    const { error } = await resend.emails.send(
+      {
+        from: 'Ground Mounts <leads@groundmounts.com>',
+        to: NOTIFICATION_EMAIL,
+        subject,
+        html,
+      },
+      {
+        // Same reasoning as the customer's copy: a retried submit must not put
+        // a second "New Solar Lead" in the owner's inbox.
+        idempotencyKey: ownerNotifyKey(leadId),
+      }
+    );
+
+    if (error) {
+      console.error('[LEAD_EMAIL_ERROR]', error);
+      return false;
+    }
+    console.log('[LEAD_EMAIL_SENT]', NOTIFICATION_EMAIL);
+    return true;
+  } catch (error) {
+    console.error('[LEAD_EMAIL_ERROR]', error instanceof Error ? error.message : error);
+    return false;
+  }
 }
 
 /** Stable per lead, so a repeat of the same send is recognised as one. */
@@ -420,7 +471,23 @@ export async function POST(req: NextRequest) {
       }
 
       if (stored.emailSent) {
-        // Already done. Say so rather than sending a second copy.
+        // The customer has their quote. The owner may still not have theirs.
+        if (!stored.ownerNotified && stored.notifySubject && stored.notifyHtml) {
+          const ownerNotified = await sendOwnerNotification(
+            lead.id,
+            stored.notifySubject,
+            stored.notifyHtml
+          );
+          if (ownerNotified) {
+            const updated = { ...stored, ownerNotified };
+            try {
+              await storeSet(submitKey, updated, SUBMIT_TTL_SECONDS);
+            } catch (error) {
+              console.warn('[LEAD_RESEND_FLAG]', lead.id, error);
+            }
+            return NextResponse.json(replyFrom(updated, { duplicate: true }));
+          }
+        }
         return NextResponse.json(replyFrom(stored, { duplicate: true }));
       }
 
@@ -445,6 +512,18 @@ export async function POST(req: NextRequest) {
 
       if (emailSent) {
         const updated: SubmitRecord = { ...stored, emailSent: true, ok: true };
+
+        // The owner's copy can be the half that failed, and a lead nobody was
+        // told about is a lead nobody calls. Retried from the stored message,
+        // and deduplicated by the same key as the original attempt.
+        if (!stored.ownerNotified && stored.notifySubject && stored.notifyHtml) {
+          updated.ownerNotified = await sendOwnerNotification(
+            lead.id,
+            stored.notifySubject,
+            stored.notifyHtml
+          );
+        }
+
         try {
           await storeSet(submitKey, updated, SUBMIT_TTL_SECONDS);
         } catch (error) {
@@ -485,9 +564,30 @@ export async function POST(req: NextRequest) {
       throw error;
     }
 
-    // A repeat of a completed submit replays it and does nothing else.
+    // A repeat of a completed submit replays it and writes nothing.
     if (stored) {
       console.log('[LEADS_DUPLICATE] replaying stored result for', lead.id);
+
+      // With one exception: if the owner was never told about this lead, a
+      // repeat is the only thing that will come along to finish the job. The
+      // idempotency key stops it arriving twice.
+      if (!stored.ownerNotified && stored.notifySubject && stored.notifyHtml) {
+        const ownerNotified = await sendOwnerNotification(
+          lead.id,
+          stored.notifySubject,
+          stored.notifyHtml
+        );
+        if (ownerNotified) {
+          const updated = { ...stored, ownerNotified };
+          try {
+            await storeSet(submitKey, updated, SUBMIT_TTL_SECONDS);
+          } catch (error) {
+            console.warn('[LEAD_NOTIFY_FLAG]', lead.id, error);
+          }
+          return NextResponse.json(replyFrom(updated, { duplicate: true }));
+        }
+      }
+
       return NextResponse.json(replyFrom(stored, { duplicate: true }));
     }
 
@@ -658,6 +758,7 @@ export async function POST(req: NextRequest) {
       ok: true,
       leadFiled: true,
       emailSent: false,
+      ownerNotified: false,
       // The screen reveals these, not its own arithmetic. The customer must be
       // shown the number that was filed and emailed, even if this page has
       // somehow computed a different one.
@@ -695,42 +796,30 @@ export async function POST(req: NextRequest) {
       ? await sendQuoteEmail(lead.id, lead.email, lead.address ?? '', lead.brand, inputs, priced)
       : false;
 
-    if (emailSent) {
-      record.emailSent = true;
-      try {
-        await storeSet(SUBMIT_PREFIX + lead.id, record, SUBMIT_TTL_SECONDS);
-      } catch (error) {
-        // At worst the customer gets one duplicate quote from a resend.
-        console.warn('[LEAD_RECORD_FLAG]', lead.id, error);
-      }
-    }
+    record.emailSent = emailSent;
 
-    // Send notification email (don't fail request if email fails)
-    try {
-      const resend = getResendOrThrow();
-      const airtableUrl = AIRTABLE_TABLE_ID
+    // The owner's notification. Built here and stored with the record, so a
+    // retry sends the same message rather than rebuilding it from state that
+    // may have moved on.
+    const airtableUrl = AIRTABLE_TABLE_ID
         ? `https://airtable.com/${AIRTABLE_BASE_ID}/${AIRTABLE_TABLE_ID}/${result.id}`
         : `https://airtable.com/${AIRTABLE_BASE_ID}`;
-      const cityDisplay = addressParts.city || 'Unknown City';
-      const stateDisplay = addressParts.state || lead.state || 'TX';
+    const cityDisplay = addressParts.city || 'Unknown City';
+    const stateDisplay = addressParts.state || lead.state || 'TX';
 
       // Everything below is attacker-controlled; escape before it enters HTML.
-      const kw = priced.systemSizeKw;
-      const panels = inputs.panelCount;
-      const avgBill = lead.quote?.avgBill;
-      const trenchFt = inputs.trenchFeet;
-      const equipment = midpoint(priced.equipment.low, priced.equipment.high);
-      const trenchCost = midpoint(priced.trench.low, priced.trench.high);
-      const total = midpoint(priced.quote.low, priced.quote.high);
+    const kw = priced.systemSizeKw;
+    const panels = inputs.panelCount;
+    const avgBill = lead.quote?.avgBill;
+    const trenchFt = inputs.trenchFeet;
+    const equipment = midpoint(priced.equipment.low, priced.equipment.high);
+    const trenchCost = midpoint(priced.trench.low, priced.trench.high);
+    const total = midpoint(priced.quote.low, priced.quote.high);
 
-      await resend.emails.send(
-        {
-          from: 'Ground Mounts <leads@groundmounts.com>',
-          to: NOTIFICATION_EMAIL,
-          subject: headerSafe(
+    const notifySubject = headerSafe(
             `New Solar Lead: ${headerSafe(lead.name, 'Unknown')} - ${headerSafe(cityDisplay)}, ${headerSafe(stateDisplay)}`
-          ),
-          html: `
+          );
+    const notifyHtml = `
             <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto;">
               <h2 style="color: #16a34a; margin-bottom: 24px;">New Lead Received</h2>
 
@@ -801,18 +890,20 @@ export async function POST(req: NextRequest) {
                 Received: ${new Date().toLocaleString('en-US', { timeZone: 'America/Chicago' })} CT
               </p>
             </div>
-          `,
-        },
-        {
-          // Same reasoning as the customer's copy: a retried submit must not
-          // put a second "New Solar Lead" in the owner's inbox.
-          idempotencyKey: ownerNotifyKey(lead.id),
-        }
-      );
-      console.log("[LEAD_EMAIL_SENT]", NOTIFICATION_EMAIL);
-    } catch (emailError) {
-      console.error("[LEAD_EMAIL_ERROR]", emailError instanceof Error ? emailError.message : emailError);
-      // Don't throw - lead was still captured successfully
+          `;
+
+    // Stored with the record so a retry sends the same message rather than
+    // rebuilding it from state that may have moved on.
+    record.notifySubject = notifySubject;
+    record.notifyHtml = notifyHtml;
+    record.ownerNotified = await sendOwnerNotification(lead.id, notifySubject, notifyHtml);
+
+    try {
+      await storeSet(SUBMIT_PREFIX + lead.id, record, SUBMIT_TTL_SECONDS);
+    } catch (error) {
+      // Both sends are done; losing the flags costs at most one duplicate that
+      // Resend's idempotency key will swallow anyway.
+      console.warn('[LEAD_RECORD_FLAGS]', lead.id, error);
     }
 
     // The work is committed and the record is written; the lease has done its

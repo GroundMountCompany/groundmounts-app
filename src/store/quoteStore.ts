@@ -29,6 +29,12 @@ export const DEFAULT_COORDINATES: Coordinates = {
 
 export const STORAGE_KEY = 'gmq:v3';
 
+/** Texas average, in cents per kWh. Prefilled so the field is never empty. */
+export const DEFAULT_RATE_CENTS = 14;
+/** Plausible range for a residential rate. Outside this we nudge, not block. */
+export const RATE_CENTS_MIN = 5;
+export const RATE_CENTS_MAX = 40;
+
 interface QuoteState {
   hydrated: boolean;
   currentStepIndex: number;
@@ -61,8 +67,13 @@ interface QuoteState {
   trenchFeet: number;
   slopePercent: number | null;
   slopeTier: SlopeTier;
-  /** $/kWh from the customer's bill. 0 means "use the Texas default". */
-  ratePerKwh: number;
+  /**
+   * The customer's rate in whole cents per kWh.
+   *
+   * Cents, not dollars: a dollars field means typing "0." mid-entry, which
+   * parsed to NaN and poisoned every number downstream.
+   */
+  rateCentsPerKwh: number;
   /** Manual panel adjustment on the design step, added to the sized count. */
   panelAdjust: number;
   /**
@@ -114,7 +125,7 @@ interface QuoteActions {
   setPanelTier: (v: PanelTier) => void;
   setTrenchFeet: (v: number) => void;
   setSlope: (percent: number | null, tier: SlopeTier) => void;
-  setRatePerKwh: (v: number) => void;
+  setRateCentsPerKwh: (v: number) => void;
   setPanelAdjust: (v: number) => void;
   setMapReady: (v: boolean) => void;
   setLeadFiled: (leadId: string | null) => void;
@@ -151,7 +162,7 @@ const initialState: QuoteState = {
   trenchFeet: 0,
   slopePercent: null,
   slopeTier: 'Unknown',
-  ratePerKwh: 0,
+  rateCentsPerKwh: DEFAULT_RATE_CENTS,
   panelAdjust: 0,
   mapReady: false,
   leadFiled: null,
@@ -241,7 +252,7 @@ export const useQuoteStore = create<QuoteStore>()(
           additionalCost: Math.max(0, Math.round(trenchFeet) * TRENCHING_COST_PER_FT),
         }),
       setSlope: (slopePercent, slopeTier) => set({ slopePercent, slopeTier }),
-      setRatePerKwh: (ratePerKwh) => set({ ratePerKwh }),
+      setRateCentsPerKwh: (rateCentsPerKwh) => set({ rateCentsPerKwh }),
       setPanelAdjust: (panelAdjust) => set({ panelAdjust }),
       setMapReady: (mapReady) => set({ mapReady }),
       setLeadFiled: (leadFiled) => set({ leadFiled }),
@@ -284,7 +295,7 @@ export const useQuoteStore = create<QuoteStore>()(
         trenchFeet: state.trenchFeet,
         slopePercent: state.slopePercent,
         slopeTier: state.slopeTier,
-        ratePerKwh: state.ratePerKwh,
+        rateCentsPerKwh: state.rateCentsPerKwh,
         panelAdjust: state.panelAdjust,
         leadFiled: state.leadFiled,
         emailSent: state.emailSent,

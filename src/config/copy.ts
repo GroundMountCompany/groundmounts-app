@@ -139,7 +139,7 @@ export const UI = {
   billUploadStub: 'Upload a photo of your bill',
   billUploadNote: 'Coming next. Type your numbers in for now.',
   monthlyBill: 'Average monthly bill',
-  ratePerKwh: 'Price per kWh',
+  ratePerKwh: 'Your rate (cents per kWh)',
   offset: 'How much of your power should solar cover?',
   panels: 'Panels',
   systemSize: 'System size',
@@ -156,7 +156,9 @@ export const UI = {
   bookCall: 'Book a call',
 
   // Step 2
-  ratePerKwhHint: 'Look for "price per kWh" on your bill. Leave it be if you are not sure.',
+  ratePerKwhHint:
+    'On your bill, look for cents per kWh. Most of Texas runs 12 to 18. Leave it be if you are not sure.',
+  rateOutOfRange: 'That is unusual for Texas. Worth a second look at your bill.',
   annualTargetPrefix: 'That is about',
   annualTargetSuffix: 'a year to cover.',
   offsetSliderLabel: 'Offset percentage',
@@ -188,6 +190,7 @@ export const UI = {
   emailFailedAfterSave: 'Your design is saved. The email did not send — try again.',
   lockedContactNote: 'These are on file with your design.',
   startOver: 'Not you? Start over',
+  designLocked: 'Start over to change your design',
 
   // Shell
   sheetLabel: 'Controls',

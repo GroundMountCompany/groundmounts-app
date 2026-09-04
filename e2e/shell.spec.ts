@@ -109,12 +109,21 @@ test('the page never scrolls under the map, on any step', async ({ page }, testI
 
     expect(await scrollTop(page), `step ${step} on load`).toBe(0);
 
-    // Open the sheet fully and scroll its content: the page must not move.
-    await page.getByTestId('sheet-handle').click();
-    await page.getByTestId('sheet-handle').click();
-    await page.getByTestId('sheet-content').evaluate((el) => {
+    // Scroll the sheet's own content. On steps with no map the sheet is
+    // full-height and there is real overflow, so this must actually move —
+    // asserting the document stayed put means nothing if nothing scrolled.
+    const handle = page.getByTestId('sheet-handle');
+    if (await handle.count()) {
+      await handle.click();
+      await handle.click();
+    }
+    const sheetScroll = await page.getByTestId('sheet-content').evaluate((el) => {
       el.scrollTop = 600;
+      return { top: el.scrollTop, overflow: el.scrollHeight - el.clientHeight };
     });
+    if (sheetScroll.overflow > 0) {
+      expect(sheetScroll.top, `step ${step} sheet did not scroll`).toBeGreaterThan(0);
+    }
     expect(await scrollTop(page), `step ${step} with the sheet open`).toBe(0);
 
     // And a deliberate attempt to scroll the window changes nothing.
@@ -312,9 +321,13 @@ test('every interactive control is at least 44px, on every step', async ({
       page.getByRole('heading', { name: STEP_HEADINGS[step] })
     ).toBeVisible({ timeout: 10_000 });
 
-    // Open the sheet fully so the step's own controls are laid out, not clipped.
-    await page.getByTestId('sheet-handle').click();
-    await page.getByTestId('sheet-handle').click();
+    // Open the sheet fully so the step's own controls are laid out, not
+    // clipped. Steps with no map have no handle: the sheet is already full.
+    const handle = page.getByTestId('sheet-handle');
+    if (await handle.count()) {
+      await handle.click();
+      await handle.click();
+    }
     await page.waitForTimeout(400);
 
     for (const offence of await auditDom()) offences.push(`step ${step} — ${offence}`);
@@ -423,4 +436,187 @@ test('a failed lead write sends no email at all', async ({ page }) => {
   expect(leadCalls, 'the lead should have been retried').toBe(2);
   expect(emailCalls, 'an email was sent despite the lead failing').toBe(0);
   await expect(page.getByTestId('success-screen')).toHaveCount(0);
+});
+
+test('inputs and the button stay visible with a keyboard up', async ({ page }, testInfo) => {
+  test.skip(!testInfo.project.name.startsWith('mobile'), 'phone layout');
+
+  // The owner's finding: the primary button sat at the top of the sheet
+  // content, covering the fields, so with the keyboard up you had to scroll
+  // around hunting for the inputs.
+  const KEYBOARD_PX = 300;
+  await page.setViewportSize({ width: 390, height: 844 - KEYBOARD_PX });
+
+  await page.addInitScript(() => {
+    const pending = window.sessionStorage.getItem('e2e:seed');
+    if (pending) window.localStorage.setItem('gmq:v3', pending);
+  });
+
+  const seed = JSON.stringify({
+    state: {
+      currentStepIndex: 1,
+      address: '123 Main St, Fort Worth, TX 76131',
+      coordinates: { latitude: 32.7555, longitude: -97.3208 },
+      electricalMeterPosition: [-97.3208, 32.7556],
+      arrayCenter: [-97.3208, 32.7553],
+      avgValue: 240,
+      percentage: 100,
+      totalPanels: 31,
+      trenchFeet: 42,
+      leadId: 'keyboard-test',
+      startedAt: Date.now() - 600_000,
+    },
+    version: 1,
+  });
+
+  await mockGeocoding(page);
+  await page.goto('/quote');
+  await page.evaluate((v) => window.sessionStorage.setItem('e2e:seed', v), seed);
+
+  const visibleInViewport = async (selector: string) => {
+    const box = await page.locator(selector).boundingBox();
+    const size = page.viewportSize()!;
+    if (!box) return false;
+    return box.y >= 0 && box.y + box.height <= size.height;
+  };
+
+  // Step 2: both bill fields and the button, without scrolling.
+  await page.goto('/quote?step=1');
+  await waitForHydration(page);
+  await expect(page.getByRole('heading', { name: 'Your power use' })).toBeVisible();
+
+  expect(await visibleInViewport('#avg-bill'), 'bill field hidden').toBe(true);
+  expect(await visibleInViewport('#rate-kwh'), 'rate field hidden').toBe(true);
+  expect(await visibleInViewport('[data-testid="primary-cta"]'), 'button hidden').toBe(true);
+
+  // Step 6: the three contact fields and the submit button.
+  await page.goto('/quote?step=5');
+  await waitForHydration(page);
+  await expect(page.getByRole('heading', { name: 'Get your number' })).toBeVisible();
+
+  for (const field of ['#name', '#email', '#phone']) {
+    // The contact fields scroll within the sheet, so bring each into view the
+    // way focusing it does, then check it cleared the keyboard.
+    await page.locator(field).scrollIntoViewIfNeeded();
+    expect(await visibleInViewport(field), `${field} hidden`).toBe(true);
+  }
+  expect(await visibleInViewport('[data-testid="submit-lead"]'), 'submit hidden').toBe(true);
+});
+
+test('no stray text renders outside the sheet on a map-less step', async ({ page }, testInfo) => {
+  test.skip(!testInfo.project.name.startsWith('mobile'), 'phone layout');
+
+  // The owner saw a ghost line of the step description above the sheet's top
+  // edge: the map column was rendering its own copy of the intro into the blank
+  // band left by a half-height sheet.
+  await mockGeocoding(page);
+  await page.goto('/quote?step=1');
+  await waitForHydration(page);
+
+  const strays = await page.evaluate(() => {
+    const sheet = document.querySelector('[data-testid="bottom-sheet"]');
+    const out: string[] = [];
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+
+    while (walker.nextNode()) {
+      const node = walker.currentNode as Text;
+      const text = node.textContent?.trim() ?? '';
+      if (text.length < 3) continue;
+
+      const el = node.parentElement;
+      if (!el || sheet?.contains(el)) continue;
+      if (el.closest('.mapboxgl-ctrl')) continue; // vendor attribution
+
+      const style = getComputedStyle(el);
+      if (style.display === 'none' || style.visibility === 'hidden') continue;
+      const r = el.getBoundingClientRect();
+      if (r.width === 0 || r.height === 0) continue;
+
+      out.push(text.slice(0, 60));
+    }
+    return out;
+  });
+
+  expect(strays, `text outside the sheet:\n${strays.join('\n')}`).toEqual([]);
+});
+
+test('the sheet fills the screen on steps with no map', async ({ page }, testInfo) => {
+  test.skip(!testInfo.project.name.startsWith('mobile'), 'phone layout');
+
+  await mockGeocoding(page);
+  for (const step of [1, 4, 5]) {
+    await page.goto(`/quote?step=${step}`);
+    await waitForHydration(page);
+
+    const box = (await page.getByTestId('bottom-sheet').boundingBox())!;
+    const size = page.viewportSize()!;
+
+    // No dead white band above it, and no snap handle to drag.
+    expect(box.y, `step ${step} sheet does not reach the top`).toBeLessThanOrEqual(1);
+    expect(box.height, `step ${step} sheet is not full height`).toBeGreaterThanOrEqual(
+      size.height - 2
+    );
+    await expect(page.getByTestId('sheet-handle')).toHaveCount(0);
+  }
+});
+
+test('a filed lead restores read-only contact details, and Start over clears them', async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    const pending = window.sessionStorage.getItem('e2e:seed');
+    if (pending) window.localStorage.setItem('gmq:v3', pending);
+  });
+
+  await page.route('**/api/leads', (route) =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: '{"ok":true}' })
+  );
+  await page.route('**/api/sendEmail', (route) =>
+    route.fulfill({ status: 500, contentType: 'application/json', body: '{"error":"boom"}' })
+  );
+
+  await mockGeocoding(page);
+  await page.goto('/quote');
+  await page.evaluate(
+    (v) => window.sessionStorage.setItem('e2e:seed', v),
+    JSON.stringify(contactStepSeed('restore-test'))
+  );
+  await page.goto('/quote?step=5');
+  await waitForHydration(page);
+  // Drop the seed so the reload below keeps what the app persisted rather than
+  // re-seeding over it.
+  await page.evaluate(() => window.sessionStorage.removeItem('e2e:seed'));
+
+  await page.locator('#name').fill('Bert Ortiz');
+  await page.locator('#email').fill('bert@example.com');
+  await page.locator('#phone').fill('(469) 555-0100');
+  await page.getByTestId('submit-lead').click();
+
+  // The lead is filed; the email failed, which is what keeps us on this screen.
+  await expect(page.getByTestId('contact-locked')).toBeVisible();
+
+  await page.reload();
+  await waitForHydration(page);
+
+  // Restored, and not editable: the email must go where the record says.
+  await expect(page.locator('#name')).toHaveValue('Bert Ortiz');
+  await expect(page.locator('#email')).toHaveValue('bert@example.com');
+  await expect(page.locator('#phone')).toHaveValue('(469) 555-0100');
+  for (const field of ['#name', '#email', '#phone']) {
+    expect(await page.locator(field).getAttribute('readonly')).not.toBeNull();
+  }
+
+  const before = await page.evaluate(
+    () => JSON.parse(window.localStorage.getItem('gmq:v3') ?? '{}').state?.leadId
+  );
+
+  await page.getByTestId('start-over').click();
+  await waitForHydration(page);
+
+  await expect(page.getByRole('heading', { name: 'Find your property' })).toBeVisible();
+
+  const after = await page.evaluate(
+    () => JSON.parse(window.localStorage.getItem('gmq:v3') ?? '{}').state?.leadId ?? null
+  );
+  expect(after, 'Start over did not issue a new leadId').not.toBe(before);
 });

@@ -6,7 +6,7 @@ import MapSlot from '@/components/map/MapSlot';
 import BottomSheet, { type Snap } from '@/components/shell/BottomSheet';
 import PrimaryButton from '@/components/shell/PrimaryButton';
 import { STEPS, UI } from '@/config/copy';
-import { useQuoteStore } from '@/store/quoteStore';
+import { useQuoteStore, clearPersistedQuote } from '@/store/quoteStore';
 import { useStepUrl, MAX_STEP } from '@/lib/useStepUrl';
 import { captureAndAdvance } from '@/lib/leadPayload';
 import { useSizing } from './steps/useSizing';
@@ -46,6 +46,17 @@ export default function FunnelShell() {
   const meter = useQuoteStore((s) => s.electricalMeterPosition);
   const totalPanels = useQuoteStore((s) => s.totalPanels);
   const hydrated = useQuoteStore((s) => s.hydrated);
+  const leadFiled = useQuoteStore((s) => s.leadFiled);
+  const leadId = useQuoteStore((s) => s.leadId);
+  const resetQuote = useQuoteStore((s) => s.resetQuote);
+
+  /**
+   * Once the lead is in Airtable the design behind it is fixed. Editing the
+   * meter or the array afterwards would leave the record describing something
+   * the customer no longer sees. Phase 7's server-side upsert relaxes this.
+   */
+  const designLocked = leadFiled !== null && leadFiled === leadId;
+  const [lockNotice, setLockNotice] = useState(false);
 
   const [snap, setSnap] = useState<Snap>('peek');
 
@@ -80,6 +91,20 @@ export default function FunnelShell() {
     return false;
   }, [step, address, coordinates, avgValue, meter, totalPanels]);
 
+  const goToStep = useCallback(
+    (index: number) => {
+      if (index >= step) return; // forward only ever happens via Continue
+      // Steps 2 to 4 are the design; those are settled once the lead is filed.
+      if (designLocked && index >= 2) {
+        setLockNotice(true);
+        return;
+      }
+      setLockNotice(false);
+      setStep(index);
+    },
+    [step, designLocked, setStep]
+  );
+
   const advance = useCallback(() => {
     if (blocked) return;
     // Leaving the design step always captures the map first.
@@ -96,20 +121,22 @@ export default function FunnelShell() {
     <Step6Quote key="6" />,
   ][Math.min(step, MAX_STEP)];
 
-  const peek = (
+  const header = (
     <div className="space-y-3">
-      <ProgressRow step={step} onPick={setStep} />
+      <ProgressRow step={step} onPick={goToStep} />
       <div>
         <h2 className="text-[20px] font-semibold leading-tight text-neutral-900">{copy.title}</h2>
         <p className="mt-0.5 text-[16px] leading-snug text-neutral-600">{copy.intro}</p>
       </div>
-      {step < MAX_STEP && (
-        <PrimaryButton onClick={advance} disabled={blocked}>
-          {copy.cta}
-        </PrimaryButton>
-      )}
     </div>
   );
+
+  const footer =
+    step < MAX_STEP ? (
+      <PrimaryButton onClick={advance} disabled={blocked}>
+        {copy.cta}
+      </PrimaryButton>
+    ) : null;
 
   return (
     <div
@@ -126,10 +153,14 @@ export default function FunnelShell() {
       {/* Map: full-bleed on a phone, the left 60% on a desktop. */}
       {/* The map canvas is a body-level portal underneath this shell, so the map
           column must let touches through to it. Anything drawn on top of the map
-          re-enables pointer events for itself. */}
+          re-enables pointer events for itself.
+
+          On steps with no map the column collapses on a phone — the sheet fills
+          the screen instead of leaving a white band with a stray line of text
+          floating in it. */}
       <div
-        className={`relative min-h-0 flex-1 md:w-[60%] md:flex-none ${
-          showsMap ? 'pointer-events-none' : 'bg-neutral-100'
+        className={`relative min-h-0 md:w-[60%] md:flex-none ${
+          showsMap ? 'pointer-events-none flex-1' : 'hidden bg-neutral-100 md:block'
         }`}
       >
         {showsMap ? (
@@ -162,7 +193,31 @@ export default function FunnelShell() {
 
       {/* Controls: bottom sheet on a phone, right 40% on a desktop. */}
       <div className="pointer-events-auto md:flex md:w-[40%] md:flex-col md:overflow-y-auto md:border-l md:border-neutral-200 md:px-6 md:py-6">
-        <BottomSheet snap={snap} onSnapChange={setSnap} peek={peek}>
+        <BottomSheet
+          snap={snap}
+          onSnapChange={setSnap}
+          header={header}
+          footer={footer}
+          fullHeight={!showsMap}
+        >
+          {lockNotice && (
+            <div data-testid="design-locked" className="mb-4 space-y-2">
+              <p className="text-[17px] text-neutral-800">{UI.designLocked}</p>
+              <button
+                type="button"
+                data-testid="locked-start-over"
+                onClick={() => {
+                  resetQuote();
+                  clearPersistedQuote();
+                  setLockNotice(false);
+                  setStep(0);
+                }}
+                className="min-h-[48px] text-[17px] font-semibold text-blue-700 underline underline-offset-2"
+              >
+                {UI.startOver}
+              </button>
+            </div>
+          )}
           {body}
         </BottomSheet>
       </div>

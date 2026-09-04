@@ -4,8 +4,15 @@ import * as Slider from '@radix-ui/react-slider';
 import '../sliderStyle.css';
 import EducationCard from '@/components/shell/EducationCard';
 import { STEPS, UI } from '@/config/copy';
-import { useQuoteStore } from '@/store/quoteStore';
-import { BILL_PER_KWH, estimateMonthlyKWh } from '@/lib/solar';
+import { useState } from 'react';
+import {
+  useQuoteStore,
+  DEFAULT_RATE_CENTS,
+  RATE_CENTS_MIN,
+  RATE_CENTS_MAX,
+} from '@/store/quoteStore';
+import { dollarsPerKwhFromCents, estimateMonthlyKWh } from '@/lib/solar';
+import { sanitizeNumeric, parseIntegerField } from '@/lib/numericField';
 
 /**
  * Bill inputs.
@@ -16,13 +23,19 @@ import { BILL_PER_KWH, estimateMonthlyKWh } from '@/lib/solar';
 export default function Step2Power() {
   const avgValue = useQuoteStore((s) => s.avgValue);
   const setAvgValue = useQuoteStore((s) => s.setAvgValue);
-  const rate = useQuoteStore((s) => s.ratePerKwh);
-  const setRate = useQuoteStore((s) => s.setRatePerKwh);
+  const rateCents = useQuoteStore((s) => s.rateCentsPerKwh);
+  const setRateCents = useQuoteStore((s) => s.setRateCentsPerKwh);
   const percentage = useQuoteStore((s) => s.percentage);
   const setPercentage = useQuoteStore((s) => s.setPercentage);
 
-  const monthlyKwh = estimateMonthlyKWh(avgValue, rate || BILL_PER_KWH);
+  // Both fields hold a string while being typed and commit on blur, so a
+  // half-finished entry can never reach the maths as NaN.
+  const [billText, setBillText] = useState(avgValue === 0 ? '' : String(avgValue));
+  const [rateText, setRateText] = useState(String(rateCents));
+
+  const monthlyKwh = estimateMonthlyKWh(avgValue, dollarsPerKwhFromCents(rateCents));
   const annualTarget = Math.round(monthlyKwh * 12 * (percentage / 100));
+  const rateLooksOdd = rateCents < RATE_CENTS_MIN || rateCents > RATE_CENTS_MAX;
 
   return (
     <div className="space-y-5">
@@ -51,10 +64,12 @@ export default function Step2Power() {
             inputMode="decimal"
             autoComplete="off"
             placeholder={UI.billPlaceholder}
-            value={avgValue === 0 ? '' : String(avgValue)}
-            onChange={(e) => {
-              const digits = e.target.value.replace(/[^0-9.]/g, '');
-              setAvgValue(digits === '' ? 0 : Number(digits));
+            value={billText}
+            onChange={(e) => setBillText(sanitizeNumeric(e.target.value, true))}
+            onBlur={() => {
+              const value = parseIntegerField(billText, 0);
+              setAvgValue(value);
+              setBillText(value === 0 ? '' : String(value));
             }}
             className="h-14 w-full rounded-xl border border-neutral-300 pl-9 pr-4 text-[17px] outline-none focus:border-neutral-500"
           />
@@ -64,27 +79,29 @@ export default function Step2Power() {
       <label className="block">
         <span className="block text-[17px] font-medium text-neutral-900">{UI.ratePerKwh}</span>
         <div className="relative mt-1">
-          <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-[17px] text-neutral-500">
-            $
-          </span>
           <input
             id="rate-kwh"
             data-testid="rate-kwh"
             type="text"
             inputMode="decimal"
             autoComplete="off"
-            placeholder={String(BILL_PER_KWH)}
-            value={rate === 0 ? '' : String(rate)}
-            onChange={(e) => {
-              const digits = e.target.value.replace(/[^0-9.]/g, '');
-              setRate(digits === '' ? 0 : Number(digits));
+            placeholder={String(DEFAULT_RATE_CENTS)}
+            value={rateText}
+            onChange={(e) => setRateText(sanitizeNumeric(e.target.value))}
+            onBlur={() => {
+              const value = parseIntegerField(rateText, DEFAULT_RATE_CENTS);
+              setRateCents(value);
+              setRateText(String(value));
             }}
-            className="h-14 w-full rounded-xl border border-neutral-300 pl-9 pr-4 text-[17px] outline-none focus:border-neutral-500"
+            className="h-14 w-full rounded-xl border border-neutral-300 px-4 text-[17px] outline-none focus:border-neutral-500"
           />
         </div>
-        <span className="mt-1 block text-[15px] text-neutral-500">
-          {UI.ratePerKwhHint}
-        </span>
+        <span className="mt-1 block text-[15px] text-neutral-500">{UI.ratePerKwhHint}</span>
+        {rateLooksOdd && (
+          <span data-testid="rate-nudge" className="mt-1 block text-[15px] text-amber-700">
+            {UI.rateOutOfRange}
+          </span>
+        )}
       </label>
 
       <div>

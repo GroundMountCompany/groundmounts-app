@@ -24,11 +24,21 @@ const ORDER: Snap[] = ['peek', 'half', 'full'];
 /** Movement beyond this counts as a drag rather than a tap. */
 const DRAG_THRESHOLD_PX = 6;
 
+/** Rounding slack so the footer never lands a pixel below the viewport. */
+const PEEK_SLACK_PX = 8;
+
 interface Props {
   snap: Snap;
   onSnapChange: (snap: Snap) => void;
-  /** Always visible, at every snap point. */
-  peek: React.ReactNode;
+  /** Progress and heading. Pinned to the top, never scrolls. */
+  header: React.ReactNode;
+  /** The primary button. Pinned to the bottom, above the keyboard. */
+  footer: React.ReactNode;
+  /**
+   * Fill the viewport and drop the snap points entirely. Used on steps with no
+   * map, where a half-height sheet just leaves dead white space above it.
+   */
+  fullHeight?: boolean;
   children: React.ReactNode;
 }
 
@@ -44,11 +54,20 @@ function heightFor(snap: Snap, viewport: number, peekPx: number): number {
  * everything outside the sheet, the sheet's scroll owns its content, and only
  * the handle resizes it. Nothing has to guess what the finger meant.
  */
-export default function BottomSheet({ snap, onSnapChange, peek, children }: Props) {
+export default function BottomSheet({
+  snap,
+  onSnapChange,
+  header,
+  footer,
+  fullHeight = false,
+  children,
+}: Props) {
   const [viewport, setViewport] = useState(0);
   const [isPhone, setIsPhone] = useState(false);
   const [peekPx, setPeekPx] = useState(MIN_PEEK_PX);
   const headRef = useRef<HTMLDivElement>(null);
+  const footRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
   const [dragPx, setDragPx] = useState<number | null>(null);
   const dragStart = useRef<{ y: number; height: number } | null>(null);
   /** Set when a pointer moved far enough to count as a drag, not a tap. */
@@ -71,15 +90,32 @@ export default function BottomSheet({ snap, onSnapChange, peek, children }: Prop
     };
   }, []);
 
-  // Measure the handle plus the always-visible peek row. Whatever the copy or
-  // the progress row do, the button stays on screen at peek.
+  // Peek has to fit the header AND the footer, because the primary button lives
+  // in the footer now. Measuring only the header left the button below the fold
+  // — the exact "hunting for the button" this layout exists to prevent.
   useEffect(() => {
-    const el = headRef.current;
-    if (!el) return;
-    const measure = () => setPeekPx(Math.max(MIN_PEEK_PX, Math.ceil(el.scrollHeight)));
+    const head = headRef.current;
+    const foot = footRef.current;
+    if (!head) return;
+
+    // offsetHeight, not scrollHeight: the footer has a top border and safe-area
+    // padding, and scrollHeight leaves the border out — enough to push the
+    // button a few pixels under the fold.
+    const measure = () =>
+      setPeekPx(
+        Math.max(
+          MIN_PEEK_PX,
+          // A few pixels of slack for sub-pixel rounding and the footer's
+          // border. Without it the button lands a hair under the fold, which
+          // is the whole failure this measurement exists to prevent.
+          Math.ceil(head.offsetHeight + (foot?.offsetHeight ?? 0)) + PEEK_SLACK_PX
+        )
+      );
     measure();
+
     const observer = new ResizeObserver(measure);
-    observer.observe(el);
+    observer.observe(head);
+    if (foot) observer.observe(foot);
     return () => observer.disconnect();
   }, []);
 
@@ -143,6 +179,29 @@ export default function BottomSheet({ snap, onSnapChange, peek, children }: Prop
   );
 
   /**
+   * Bring a focused field above the on-screen keyboard.
+   *
+   * iOS shrinks the visual viewport when the keyboard opens but does not move
+   * a fixed-position sheet, so a field near the bottom ends up underneath it.
+   */
+  useEffect(() => {
+    const el = contentRef.current;
+    if (!el) return;
+
+    const onFocusIn = (e: FocusEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (!target?.matches('input, textarea, select')) return;
+      // A frame's delay: the keyboard has to resize the viewport first.
+      setTimeout(() => {
+        target.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      }, 150);
+    };
+
+    el.addEventListener('focusin', onFocusIn);
+    return () => el.removeEventListener('focusin', onFocusIn);
+  }, []);
+
+  /**
    * Tap cycles the sheet open. Suppressed after a drag: the click that follows
    * a pointer sequence used to fire straight after the snap and undo it, so a
    * drag to half immediately became full.
@@ -158,11 +217,13 @@ export default function BottomSheet({ snap, onSnapChange, peek, children }: Prop
   return (
     <section
       data-testid="bottom-sheet"
-      data-snap={snap}
+      data-snap={fullHeight ? 'full' : snap}
       aria-label={UI.sheetLabel}
-      className="fixed inset-x-0 bottom-0 z-40 flex flex-col rounded-t-2xl border-t border-neutral-200 bg-white shadow-[0_-8px_24px_rgba(0,0,0,0.12)] md:static md:h-full md:rounded-none md:border-0 md:shadow-none"
+      className={`fixed inset-x-0 bottom-0 z-40 flex flex-col border-t border-neutral-200 bg-white shadow-[0_-8px_24px_rgba(0,0,0,0.12)] md:static md:h-full md:rounded-none md:border-0 md:shadow-none ${
+        fullHeight ? 'top-0 rounded-none' : 'rounded-t-2xl'
+      }`}
       style={
-        isPhone
+        isPhone && !fullHeight
           ? {
               height: viewport ? height : undefined,
               transition: dragPx === null ? 'height 220ms ease' : 'none',
@@ -171,29 +232,48 @@ export default function BottomSheet({ snap, onSnapChange, peek, children }: Prop
       }
     >
       <div ref={headRef} className="shrink-0">
-      {/* Grab handle. The only thing that resizes the sheet. */}
-      <button
-        type="button"
-        data-testid="sheet-handle"
-        aria-label={UI.sheetHandleLabel}
-        onPointerDown={onPointerDown}
-        onPointerMove={onPointerMove}
-        onPointerUp={onPointerUp}
-        onPointerCancel={onPointerUp}
-        onClick={onClick}
-        className="flex h-12 w-full shrink-0 touch-none items-center justify-center md:hidden"
-      >
-        <span className="h-1.5 w-12 rounded-full bg-neutral-300" />
-      </button>
+        {/* Grab handle. The only thing that resizes the sheet, and pointless
+            when the sheet already fills the screen. */}
+        {!fullHeight && (
+          <button
+            type="button"
+            data-testid="sheet-handle"
+            aria-label={UI.sheetHandleLabel}
+            onPointerDown={onPointerDown}
+            onPointerMove={onPointerMove}
+            onPointerUp={onPointerUp}
+            onPointerCancel={onPointerUp}
+            onClick={onClick}
+            className="flex h-12 w-full shrink-0 touch-none items-center justify-center md:hidden"
+          >
+            <span className="h-1.5 w-12 rounded-full bg-neutral-300" />
+          </button>
+        )}
 
-      <div className="px-5 pb-3 md:px-0 md:pt-2">{peek}</div>
+        <div
+          className={`px-5 pb-3 md:px-0 md:pt-2 ${fullHeight ? 'pt-[max(12px,env(safe-area-inset-top))]' : ''}`}
+        >
+          {header}
+        </div>
       </div>
 
       <div
+        ref={contentRef}
         data-testid="sheet-content"
-        className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 pb-[max(20px,env(safe-area-inset-bottom))] md:px-0"
+        className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 pb-4 md:px-0"
       >
         {children}
+      </div>
+
+      {/* The primary button sits below the content, not on top of it. It used
+          to be inside the header, which covered the fields it was asking the
+          customer to fill in. */}
+      <div
+        ref={footRef}
+        data-testid="sheet-footer"
+        className="shrink-0 border-t border-neutral-100 bg-white px-5 pb-[max(12px,env(safe-area-inset-bottom))] pt-3 md:px-0"
+      >
+        {footer}
       </div>
     </section>
   );

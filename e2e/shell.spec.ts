@@ -755,9 +755,10 @@ test.describe('real bills, as the deployed extractor read them', () => {
     await page.getByTestId('bill-file').setInputFiles('e2e/fixtures/bills/bill-retail.png');
     await expect(page.getByTestId('bill-review')).toBeVisible();
 
-    // Twelve rows, and the newest is among them. The bill lists oldest first,
-    // so a naive take-the-first-twelve drops August 2026 — the month that
-    // matters most.
+    // Twelve rows, and the newest is among them. The bill's chart runs
+    // oldest-to-newest, and both the model and the sort had to be corrected
+    // before August 2026 — the month that matters most — stopped being the
+    // one dropped.
     await expect(page.getByTestId('bill-kwh-11')).toBeVisible();
     await expect(page.getByTestId('bill-kwh-12')).toHaveCount(0);
     await expect(page.getByTestId('bill-review')).toContainText('Aug 26');

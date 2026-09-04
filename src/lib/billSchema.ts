@@ -38,7 +38,8 @@ export const BILL_TOOL_SCHEMA = {
   properties: {
     months: {
       type: 'array',
-      description: 'Up to twelve billing periods, most recent first.',
+      description:
+        'Up to twelve billing periods, newest first. If the bill shows more, send the twelve most recent — never the twelve oldest.',
       maxItems: 12,
       items: {
         type: 'object',
@@ -91,6 +92,11 @@ Extract only:
 - each billing period's usage in kWh, labelled as the bill labels it
 - the dollar cost of each period, if the bill shows it
 - the price per kWh, if the bill states it
+
+Return at most twelve periods, and if the document shows more than twelve,
+return the twelve MOST RECENT ones, newest first. A usage-history chart is
+usually printed oldest-on-the-left, so the last bar is normally the newest —
+do not leave it out.
 
 Do not extract, transcribe, infer or mention the account holder's name, the
 service address, the account number, the meter number, or any phone number or

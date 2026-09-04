@@ -31,11 +31,14 @@ vi.mock('@/lib/server/redis', async () => {
     },
     acquireLease: async (key: string) => {
       failIfDown('lease');
-      if (store.has(key)) return false;
-      store.set(key, '1');
-      return true;
+      if (store.has(key)) return null;
+      const token = `token-${store.size}`;
+      store.set(key, token);
+      return token;
     },
-    releaseLease: async (key: string) => void store.delete(key),
+    releaseLease: async (key: string, token: string) => {
+      if (store.get(key) === token) store.delete(key);
+    },
     cacheGet: async () => null,
     cacheSet: async () => undefined,
   };
@@ -57,6 +60,7 @@ const notifications: Array<{
   to?: unknown;
   from?: string;
   replyTo?: string;
+  idempotencyKey?: string;
 }> = [];
 
 /** The customer's quote email is the one sent as a React element. */
@@ -79,15 +83,18 @@ vi.mock('@/lib/airtable', async () => {
 vi.mock('@/lib/resendSafe', () => ({
   getResendOrThrow: () => ({
     emails: {
-      send: async (args: {
-        html?: string;
-        subject: string;
-        react?: ReactElement;
-        to?: unknown;
-        from?: string;
-        replyTo?: string;
-      }) => {
-        notifications.push(args);
+      send: async (
+        args: {
+          html?: string;
+          subject: string;
+          react?: ReactElement;
+          to?: unknown;
+          from?: string;
+          replyTo?: string;
+        },
+        options?: { idempotencyKey?: string }
+      ) => {
+        notifications.push({ ...args, idempotencyKey: options?.idempotencyKey });
         if (failEmail) return { data: null, error: { message: 'resend is down' } };
         return { data: { id: 'note' }, error: null };
       },
@@ -791,5 +798,81 @@ describe('lease, then commit', () => {
     await holder;
     expect([409, 200]).toContain(rival.status);
     expect(written, 'two concurrent submits wrote two records').toHaveLength(1);
+  });
+});
+
+describe('sending the same email twice', () => {
+  it('gives the customer copy a key derived from the lead', async () => {
+    await POST(post(validLead()));
+
+    const quote = quoteEmail() as unknown as { idempotencyKey?: string };
+    expect(quote.idempotencyKey).toBe('gm:quote:lead-1234-5678');
+
+    const owner = notifications.find((n) => n.html);
+    expect(owner?.idempotencyKey).toBe('gm:owner-notify:lead-1234-5678');
+  });
+
+  it('reuses the key when the flag write fails after the send', async () => {
+    // The window this closes: Resend accepted the email, then the store went
+    // away before emailSent could be recorded. The lead looks unsent, the
+    // customer asks again, and without a key Resend would deliver a second
+    // copy of the same quote.
+    await POST(post(validLead()));
+    const firstKey = (quoteEmail() as unknown as { idempotencyKey?: string }).idempotencyKey;
+
+    // Rewind the stored record to the state a crash would have left behind.
+    const record = store.get('gm:submit:lead-1234-5678') as { emailSent: boolean };
+    store.set('gm:submit:lead-1234-5678', { ...record, emailSent: false });
+    notifications.length = 0;
+
+    __resetRateLimits();
+    await POST(post({ ...validLead(), resend: true }));
+
+    const resent = quoteEmail() as unknown as { idempotencyKey?: string };
+    expect(resent.idempotencyKey).toBe(firstKey);
+    expect(resent.idempotencyKey).toBe('gm:quote:lead-1234-5678');
+  });
+});
+
+describe('a resend touches nothing but the stored record', () => {
+  it('succeeds with a garbage body when the stored record is good', async () => {
+    failEmail = true;
+    await POST(post(validLead()));
+    notifications.length = 0;
+    curveCalls.length = 0;
+
+    failEmail = false;
+    __resetRateLimits();
+    const res = await POST(
+      post({
+        id: 'lead-1234-5678',
+        state: 'TX',
+        ts: 1_700_000_000_000,
+        ttc_ms: 60_000,
+        resend: true,
+        // Everything below is nonsense. None of it is read.
+        quote: { inputs: { panelCount: 'many', tier: 'unobtainium', trenchFeet: -5 } },
+        email: 'attacker@example.com',
+      })
+    );
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ leadFiled: true, emailSent: true });
+    expect(quoteEmail()!.to).toEqual(['bert@example.com']);
+    // A garbage design would have failed validation had it been parsed.
+    expect(curveCalls, 'a resend looked the site up again').toHaveLength(0);
+  });
+
+  it('costs nothing at all for a lead id it does not know', async () => {
+    curveCalls.length = 0;
+
+    const res = await POST(post({ ...validLead(), id: 'unknown-lead-9999', resend: true }));
+
+    expect(res.status).toBe(404);
+    // No PVWatts, no SSURGO, no Tilequery: an unauthenticated caller must not
+    // be able to spend upstream calls by inventing ids.
+    expect(curveCalls, 'an unknown resend hit the site lookup').toHaveLength(0);
+    expect(written).toHaveLength(0);
+    expect(notifications).toHaveLength(0);
   });
 });

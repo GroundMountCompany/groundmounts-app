@@ -159,6 +159,15 @@ function validateLead(data: unknown): LeadPayload {
   };
 }
 
+/** Stable per lead, so a repeat of the same send is recognised as one. */
+function quoteEmailKey(leadId: string): string {
+  return `gm:quote:${leadId}`;
+}
+
+function ownerNotifyKey(leadId: string): string {
+  return `gm:owner-notify:${leadId}`;
+}
+
 /**
  * The customer's quote email.
  *
@@ -167,6 +176,7 @@ function validateLead(data: unknown): LeadPayload {
  * rather than by two routes agreeing.
  */
 async function sendQuoteEmail(
+  leadId: string,
   to: string,
   address: string,
   brandKey: string | undefined,
@@ -207,13 +217,25 @@ async function sendQuoteEmail(
       brandColor: brand.primaryColor,
     }) as ReactElement;
 
-    const { error } = await resend.emails.send({
-      from: brand.fromEmail,
-      replyTo: brand.replyTo,
-      to: [to],
-      subject: `Your ${brand.name} estimate`,
-      react: template,
-    });
+    const { error } = await resend.emails.send(
+      {
+        from: brand.fromEmail,
+        replyTo: brand.replyTo,
+        to: [to],
+        subject: `Your ${brand.name} estimate`,
+        react: template,
+      },
+      {
+        // Resend deduplicates on this for 24 hours.
+        //
+        // The window that matters is between the send returning and the
+        // emailSent flag being written: a crash in there leaves a lead that
+        // looks unsent, and the resend that follows would put a second copy of
+        // the same quote in the customer's inbox. With the key, Resend
+        // recognises the repeat and does not deliver it twice.
+        idempotencyKey: quoteEmailKey(leadId),
+      }
+    );
 
     if (error) {
       console.error('[QUOTE_EMAIL_ERROR]', error);
@@ -302,8 +324,9 @@ async function savePartial(raw: Record<string, unknown>): Promise<NextResponse> 
 }
 
 export async function POST(req: NextRequest) {
-  // Hoisted so an unexpected throw anywhere below still gives the lease back.
-  let heldLease: string | null = null;
+  // Hoisted so an unexpected throw anywhere below still gives the lease back —
+  // and only ours, never a newer holder's.
+  let heldLease: { key: string; token: string } | null = null;
 
   try {
     const body = await req.json();
@@ -350,36 +373,14 @@ export async function POST(req: NextRequest) {
     const lead = validateLead(body);
     console.log("[LEADS_VALIDATED]", lead.id);
 
-    // Price the design here, not on the customer's phone.
-    //
-    // The record the owner quotes from must be one this server computed. A
-    // browser can describe its design; it cannot name its own price, and a
-    // payload that tries is priced from its inputs like any other.
-    let priced;
-    let inputs;
-    let facts;
-    let conditions;
-    try {
-      inputs = parseQuoteInputs(lead.quote?.inputs);
-      // One lookup for this array: curve, soil and slope, all for the same
-      // coordinates out of the same cache entry. Everything the ground
-      // contributes to the price is decided here, not in the payload.
-      facts = await siteFactsForArray(inputs.arrayCenter);
-      conditions = resolveSiteConditions(inputs, facts);
-      priced = priceFromInputs({ ...inputs, ...conditions }, facts.curve);
-    } catch (error) {
-      if (error instanceof InvalidQuoteInputs) {
-        console.log('[LEADS_BLOCKED] Invalid quote inputs:', error.message);
-        return NextResponse.json(
-          { ok: false, leadFiled: false, emailSent: false, error: 'invalid_inputs' },
-          { status: 400 }
-        );
-      }
-      throw error;
-    }
-
     const submitKey = SUBMIT_PREFIX + lead.id;
     const leaseKey = LEASE_PREFIX + lead.id;
+
+    // The stored record is read before anything is parsed, priced or looked
+    // up, because a resend must not touch the request body at all — and an
+    // unknown lead id must cost nothing. Pricing a resend would mean an
+    // unauthenticated caller could spend a PVWatts and an SSURGO call per
+    // request just by inventing ids.
 
     /**
      * What the server already knows about this submit.
@@ -422,6 +423,7 @@ export async function POST(req: NextRequest) {
       }
 
       const emailSent = await sendQuoteEmail(
+        lead.id,
         stored.email,
         stored.address,
         stored.brand,
@@ -453,6 +455,34 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(replyFrom({ ...stored, ok: false }), { status: 502 });
     }
 
+    // Price the design here, not on the customer's phone.
+    //
+    // The record the owner quotes from must be one this server computed. A
+    // browser can describe its design; it cannot name its own price, and a
+    // payload that tries is priced from its inputs like any other.
+    let priced;
+    let inputs;
+    let facts;
+    let conditions;
+    try {
+      inputs = parseQuoteInputs(lead.quote?.inputs);
+      // One lookup for this array: curve, soil and slope, all for the same
+      // coordinates out of the same cache entry. Everything the ground
+      // contributes to the price is decided here, not in the payload.
+      facts = await siteFactsForArray(inputs.arrayCenter);
+      conditions = resolveSiteConditions(inputs, facts);
+      priced = priceFromInputs({ ...inputs, ...conditions }, facts.curve);
+    } catch (error) {
+      if (error instanceof InvalidQuoteInputs) {
+        console.log('[LEADS_BLOCKED] Invalid quote inputs:', error.message);
+        return NextResponse.json(
+          { ok: false, leadFiled: false, emailSent: false, error: 'invalid_inputs' },
+          { status: 400 }
+        );
+      }
+      throw error;
+    }
+
     // A repeat of a completed submit replays it and does nothing else.
     if (stored) {
       console.log('[LEADS_DUPLICATE] replaying stored result for', lead.id);
@@ -468,9 +498,9 @@ export async function POST(req: NextRequest) {
      * after the write succeeds — it is a record of what happened, not a claim
      * that it is about to.
      */
-    let leased: boolean;
+    let leaseToken: string | null;
     try {
-      leased = await acquireLease(leaseKey, LEASE_TTL_SECONDS);
+      leaseToken = await acquireLease(leaseKey, LEASE_TTL_SECONDS);
     } catch (error) {
       console.error('[LEADS_STORE_DOWN]', lead.id, error);
       return NextResponse.json(
@@ -479,10 +509,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    heldLease = leaseKey;
-
-    if (!leased) {
-      heldLease = null;
+    if (!leaseToken) {
       // Another request for this same lead is mid-write. Dropping is right:
       // that one is going to finish the job.
       console.log('[LEADS_IN_PROGRESS]', lead.id);
@@ -491,6 +518,8 @@ export async function POST(req: NextRequest) {
         { status: 409 }
       );
     }
+
+    heldLease = { key: leaseKey, token: leaseToken };
 
     // Upload map screenshot to Vercel Blob if provided
     let mapScreenshotUrl: string | undefined;
@@ -598,7 +627,7 @@ export async function POST(req: NextRequest) {
     try {
       result = await upsertLeadByLeadId(cleanFields, lead.id);
     } catch (error) {
-      await releaseLease(leaseKey);
+      await releaseLease(leaseKey, leaseToken);
       heldLease = null;
       console.error('[LEAD_WRITE_FAILED]', lead.id, error instanceof Error ? error.message : error);
       return NextResponse.json(
@@ -655,7 +684,7 @@ export async function POST(req: NextRequest) {
     // failure here is reported in the response rather than failing the request:
     // the client retries the email alone, through `resend`.
     const emailSent = lead.email
-      ? await sendQuoteEmail(lead.email, lead.address ?? '', lead.brand, inputs, priced)
+      ? await sendQuoteEmail(lead.id, lead.email, lead.address ?? '', lead.brand, inputs, priced)
       : false;
 
     if (emailSent) {
@@ -686,85 +715,92 @@ export async function POST(req: NextRequest) {
       const trenchCost = midpoint(priced.trench.low, priced.trench.high);
       const total = midpoint(priced.quote.low, priced.quote.high);
 
-      await resend.emails.send({
-        from: 'Ground Mounts <leads@groundmounts.com>',
-        to: NOTIFICATION_EMAIL,
-        subject: headerSafe(
-          `New Solar Lead: ${headerSafe(lead.name, 'Unknown')} - ${headerSafe(cityDisplay)}, ${headerSafe(stateDisplay)}`
-        ),
-        html: `
-          <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto;">
-            <h2 style="color: #16a34a; margin-bottom: 24px;">New Lead Received</h2>
+      await resend.emails.send(
+        {
+          from: 'Ground Mounts <leads@groundmounts.com>',
+          to: NOTIFICATION_EMAIL,
+          subject: headerSafe(
+            `New Solar Lead: ${headerSafe(lead.name, 'Unknown')} - ${headerSafe(cityDisplay)}, ${headerSafe(stateDisplay)}`
+          ),
+          html: `
+            <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto;">
+              <h2 style="color: #16a34a; margin-bottom: 24px;">New Lead Received</h2>
 
-            <table style="width: 100%; border-collapse: collapse;">
-              <tr>
-                <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5; color: #666; width: 140px;">Name</td>
-                <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5; font-weight: 600;">${escapeOr(lead.name, 'Not provided')}</td>
-              </tr>
-              <tr>
-                <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5; color: #666;">Email</td>
-                <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5;"><a href="mailto:${escapeHtml(lead.email)}" style="color: #2563eb;">${escapeOr(lead.email, 'Not provided')}</a></td>
-              </tr>
-              <tr>
-                <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5; color: #666;">Phone</td>
-                <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5;"><a href="tel:${escapeHtml(lead.phone)}" style="color: #2563eb;">${escapeOr(lead.phone, 'Not provided')}</a></td>
-              </tr>
-              <tr>
-                <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5; color: #666;">Address</td>
-                <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5;">${escapeOr(lead.address, 'Not provided')}</td>
-              </tr>
-              <tr>
-                <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5; color: #666;">System Size</td>
-                <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5;">${kw ? `${escapeHtml(kw)} kW` : 'N/A'}</td>
-              </tr>
-              <tr>
-                <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5; color: #666;">Panels</td>
-                <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5;">${panels ? escapeHtml(panels) : 'N/A'}</td>
-              </tr>
-              <tr>
-                <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5; color: #666;">Monthly Bill (Avg)</td>
-                <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5;">${avgBill ? `$${escapeHtml(avgBill)}` : 'N/A'}</td>
-              </tr>
-              <tr>
-                <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5; color: #666;">Trenching Distance</td>
-                <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5;">${trenchFt ? `${escapeHtml(trenchFt)} ft` : 'N/A'}</td>
-              </tr>
-              <tr>
-                <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5; color: #666;">Equipment Cost</td>
-                <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5;">${typeof equipment === 'number' ? `$${escapeHtml(equipment.toLocaleString())}` : 'N/A'}</td>
-              </tr>
-              <tr>
-                <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5; color: #666;">Trenching Cost</td>
-                <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5;">${typeof trenchCost === 'number' ? `$${escapeHtml(trenchCost.toLocaleString())}` : 'N/A'}</td>
-              </tr>
-              <tr>
-                <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5; color: #666; font-weight: 600;">Total Investment</td>
-                <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5; font-weight: 600; color: #16a34a;">${typeof total === 'number' ? `$${escapeHtml(total.toLocaleString())}` : 'N/A'}</td>
-              </tr>
-              <tr>
-                <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5; color: #666;">Source</td>
-                <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5;">${escapeOr(lead.source, 'Direct')}</td>
-              </tr>
-            </table>
+              <table style="width: 100%; border-collapse: collapse;">
+                <tr>
+                  <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5; color: #666; width: 140px;">Name</td>
+                  <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5; font-weight: 600;">${escapeOr(lead.name, 'Not provided')}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5; color: #666;">Email</td>
+                  <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5;"><a href="mailto:${escapeHtml(lead.email)}" style="color: #2563eb;">${escapeOr(lead.email, 'Not provided')}</a></td>
+                </tr>
+                <tr>
+                  <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5; color: #666;">Phone</td>
+                  <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5;"><a href="tel:${escapeHtml(lead.phone)}" style="color: #2563eb;">${escapeOr(lead.phone, 'Not provided')}</a></td>
+                </tr>
+                <tr>
+                  <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5; color: #666;">Address</td>
+                  <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5;">${escapeOr(lead.address, 'Not provided')}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5; color: #666;">System Size</td>
+                  <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5;">${kw ? `${escapeHtml(kw)} kW` : 'N/A'}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5; color: #666;">Panels</td>
+                  <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5;">${panels ? escapeHtml(panels) : 'N/A'}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5; color: #666;">Monthly Bill (Avg)</td>
+                  <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5;">${avgBill ? `$${escapeHtml(avgBill)}` : 'N/A'}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5; color: #666;">Trenching Distance</td>
+                  <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5;">${trenchFt ? `${escapeHtml(trenchFt)} ft` : 'N/A'}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5; color: #666;">Equipment Cost</td>
+                  <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5;">${typeof equipment === 'number' ? `$${escapeHtml(equipment.toLocaleString())}` : 'N/A'}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5; color: #666;">Trenching Cost</td>
+                  <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5;">${typeof trenchCost === 'number' ? `$${escapeHtml(trenchCost.toLocaleString())}` : 'N/A'}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5; color: #666; font-weight: 600;">Total Investment</td>
+                  <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5; font-weight: 600; color: #16a34a;">${typeof total === 'number' ? `$${escapeHtml(total.toLocaleString())}` : 'N/A'}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5; color: #666;">Source</td>
+                  <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5;">${escapeOr(lead.source, 'Direct')}</td>
+                </tr>
+              </table>
 
-            ${mapScreenshotUrl ? `
-            <div style="margin-top: 24px;">
-              <h3 style="color: #374151; margin-bottom: 12px; font-size: 14px;">Panel Placement Map</h3>
-              <img src="${escapeHtml(mapScreenshotUrl)}" alt="Panel placement map" style="max-width: 100%; border-radius: 8px; border: 1px solid #e5e5e5;" />
+              ${mapScreenshotUrl ? `
+              <div style="margin-top: 24px;">
+                <h3 style="color: #374151; margin-bottom: 12px; font-size: 14px;">Panel Placement Map</h3>
+                <img src="${escapeHtml(mapScreenshotUrl)}" alt="Panel placement map" style="max-width: 100%; border-radius: 8px; border: 1px solid #e5e5e5;" />
+              </div>
+              ` : ''}
+
+              <div style="margin-top: 24px;">
+                <a href="${escapeHtml(airtableUrl)}" style="display: inline-block; background: #16a34a; color: white; padding: 12px 24px; text-decoration: none; border-radius: 8px; font-weight: 600;">View in Airtable</a>
+              </div>
+
+              <p style="margin-top: 24px; color: #999; font-size: 12px;">
+                Lead ID: ${escapeHtml(lead.id)}<br>
+                Received: ${new Date().toLocaleString('en-US', { timeZone: 'America/Chicago' })} CT
+              </p>
             </div>
-            ` : ''}
-
-            <div style="margin-top: 24px;">
-              <a href="${escapeHtml(airtableUrl)}" style="display: inline-block; background: #16a34a; color: white; padding: 12px 24px; text-decoration: none; border-radius: 8px; font-weight: 600;">View in Airtable</a>
-            </div>
-
-            <p style="margin-top: 24px; color: #999; font-size: 12px;">
-              Lead ID: ${escapeHtml(lead.id)}<br>
-              Received: ${new Date().toLocaleString('en-US', { timeZone: 'America/Chicago' })} CT
-            </p>
-          </div>
-        `,
-      });
+          `,
+        },
+        {
+          // Same reasoning as the customer's copy: a retried submit must not
+          // put a second "New Solar Lead" in the owner's inbox.
+          idempotencyKey: ownerNotifyKey(lead.id),
+        }
+      );
       console.log("[LEAD_EMAIL_SENT]", NOTIFICATION_EMAIL);
     } catch (emailError) {
       console.error("[LEAD_EMAIL_ERROR]", emailError instanceof Error ? emailError.message : emailError);
@@ -773,7 +809,7 @@ export async function POST(req: NextRequest) {
 
     // The work is committed and the record is written; the lease has done its
     // job and the next request should be answered from the record.
-    await releaseLease(leaseKey);
+    await releaseLease(leaseKey, leaseToken);
     heldLease = null;
 
     return NextResponse.json(replyFrom(record));
@@ -788,7 +824,7 @@ export async function POST(req: NextRequest) {
     // the explicit checks above, so anything reaching here is ours to fix and
     // theirs to retry. A store that is down says so specifically.
     // Give the lease back so the retry is not told it is already in progress.
-    if (heldLease) await releaseLease(heldLease);
+    if (heldLease) await releaseLease(heldLease.key, heldLease.token);
 
     const status = e instanceof StoreUnavailable ? 503 : 502;
     return NextResponse.json(

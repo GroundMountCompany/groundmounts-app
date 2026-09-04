@@ -70,11 +70,38 @@ describe('with no store configured', () => {
   });
 
   it('gives a lease to one caller and refuses the next', async () => {
-    expect(await acquireLease('gm:test:lease', 60)).toBe(true);
-    expect(await acquireLease('gm:test:lease', 60)).toBe(false);
+    const mine = await acquireLease('gm:test:lease', 60);
+    expect(mine).toBeTruthy();
+    expect(await acquireLease('gm:test:lease', 60)).toBeNull();
 
-    await releaseLease('gm:test:lease');
-    expect(await acquireLease('gm:test:lease', 60)).toBe(true);
+    await releaseLease('gm:test:lease', mine!);
+    expect(await acquireLease('gm:test:lease', 60)).toBeTruthy();
+  });
+
+  it('will not let a stale holder delete a newer holder\'s lease', async () => {
+    // The race this exists for: A takes the lease and stalls, the lease
+    // expires, B takes it, then A finishes and tries to tidy up. With a plain
+    // DEL, A would free B's lease and a second writer would think it was
+    // alone.
+    const stale = await acquireLease('gm:test:handover', 60);
+    expect(stale).toBeTruthy();
+
+    // The lease expires and somebody else takes it.
+    __resetRedis();
+    const fresh = await acquireLease('gm:test:handover', 60);
+    expect(fresh).toBeTruthy();
+    expect(fresh).not.toBe(stale);
+
+    // The original holder tries to release. It must not touch the new one.
+    await releaseLease('gm:test:handover', stale!);
+    expect(
+      await acquireLease('gm:test:handover', 60),
+      'a stale holder released the current lease'
+    ).toBeNull();
+
+    // The real holder can still release it.
+    await releaseLease('gm:test:handover', fresh!);
+    expect(await acquireLease('gm:test:handover', 60)).toBeTruthy();
   });
 });
 
@@ -113,6 +140,6 @@ describe('when the store is unreachable', () => {
 
   it('never throws when giving a lease back', async () => {
     // The caller is already handling a failure; an unreleased lease expires.
-    await expect(releaseLease('gm:submit:lease:x')).resolves.toBeUndefined();
+    await expect(releaseLease('gm:submit:lease:x', 'token')).resolves.toBeUndefined();
   });
 });

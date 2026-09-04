@@ -1,4 +1,5 @@
 import { Redis } from '@upstash/redis';
+import { randomUUID } from 'node:crypto';
 
 /**
  * The durable store, when there is one.
@@ -115,39 +116,51 @@ export async function storeSet(key: string, value: unknown, ttlSeconds: number):
 /**
  * Take a key nobody else holds, for a TTL in seconds.
  *
- * True for the caller that got there first, false for everyone else. Used as a
- * lease around the submit: two taps on Get my quote can land on two instances,
- * and only one of them may write.
+ * Returns a token identifying *this* holder, or null when somebody else has
+ * it. Used as a lease around the submit: two taps on Get my quote can land on
+ * two instances, and only one of them may write.
  */
-export async function acquireLease(key: string, ttlSeconds: number): Promise<boolean> {
+export async function acquireLease(key: string, ttlSeconds: number): Promise<string | null> {
+  const token = randomUUID();
   const store = redis();
+
   if (!store) {
-    if (memoryGet(key) !== null) return false;
-    memory.set(key, { value: '1', expiresAt: Date.now() + ttlSeconds * 1000 });
-    return true;
+    if (memoryGet(key) !== null) return null;
+    memory.set(key, { value: token, expiresAt: Date.now() + ttlSeconds * 1000 });
+    return token;
   }
+
   try {
-    return (await store.set(key, '1', { nx: true, ex: ttlSeconds })) === 'OK';
+    return (await store.set(key, token, { nx: true, ex: ttlSeconds })) === 'OK' ? token : null;
   } catch (error) {
     throw new StoreUnavailable('lease', error);
   }
 }
 
 /**
- * Give a lease back before it expires.
+ * Delete a lease, but only if this caller still holds it.
  *
- * Called on every path that fails before the work is committed, so a customer
- * whose submit hit a broken Airtable can press the button again immediately
- * rather than staring at "already in progress" for a minute.
+ * A plain DEL is a bug waiting for a slow request: holder A stalls past the
+ * TTL, the lease expires, holder B takes it, A finishes and deletes B's lease,
+ * and now two writers think they are alone. Compare-and-delete makes releasing
+ * somebody else's lease impossible rather than unlikely.
  */
-export async function releaseLease(key: string): Promise<void> {
+const RELEASE_IF_MINE = `
+if redis.call("get", KEYS[1]) == ARGV[1] then
+  return redis.call("del", KEYS[1])
+else
+  return 0
+end
+`;
+
+export async function releaseLease(key: string, token: string): Promise<void> {
   const store = redis();
   if (!store) {
-    memory.delete(key);
+    if (memoryGet(key) === token) memory.delete(key);
     return;
   }
   try {
-    await store.del(key);
+    await store.eval(RELEASE_IF_MINE, [key], [token]);
   } catch (error) {
     // A lease that cannot be released will expire on its own. Nothing is lost
     // except a minute, and the caller is already handling a failure.

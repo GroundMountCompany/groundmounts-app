@@ -1007,15 +1007,28 @@ describe('what a hostile payload can put in the record', () => {
     ]) {
       __resetRateLimits();
       const res = await POST(post({ ...validLead(), id }));
-      expect(res.status, id.slice(0, 20)).toBeGreaterThanOrEqual(400);
+      // 4xx specifically: the queue drops these, and retrying a payload that
+      // can never work helps nobody.
+      expect(res.status, id.slice(0, 20)).toBe(400);
+      expect((await res.json()).error).toBe('bad_request');
     }
     expect(written).toHaveLength(0);
   });
 
   it('refuses a lead id long enough to be an attack on the key space', async () => {
     const res = await POST(post({ ...validLead(), id: 'x'.repeat(5000) }));
-    expect(res.status).toBeGreaterThanOrEqual(400);
+    expect(res.status).toBe(400);
     expect(written).toHaveLength(0);
+  });
+
+  it('keeps 5xx for failures that are ours', async () => {
+    // The queue retries these, which is the whole point of telling them apart.
+    failWrite = true;
+    expect((await POST(post(validLead()))).status).toBe(502);
+
+    __resetRateLimits();
+    storeDown = true;
+    expect((await POST(post(validLead()))).status).toBe(503);
   });
 });
 

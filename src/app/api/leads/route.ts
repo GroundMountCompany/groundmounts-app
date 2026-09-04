@@ -263,13 +263,13 @@ function validateContext(quote: unknown): LeadPayload['quote'] {
 function validateLead(data: unknown): LeadPayload {
   const obj = data as Record<string, unknown>;
   if (!isLeadId(obj.id)) {
-    throw new Error('Invalid lead ID');
+    throw new InvalidEnvelope('Invalid lead ID');
   }
   if (!obj.state || typeof obj.state !== 'string') {
-    throw new Error('Invalid state');
+    throw new InvalidEnvelope('Invalid state');
   }
   if (typeof obj.ts !== 'number') {
-    throw new Error('Invalid timestamp');
+    throw new InvalidEnvelope('Invalid timestamp');
   }
 
   return {
@@ -1182,10 +1182,19 @@ export async function POST(req: NextRequest) {
     console.error("[LEADS_ROUTE_ERROR]", msg);
     if (stack) console.error("[LEADS_ROUTE_STACK]", stack);
 
-    // Something broke on this side. A 400 here told the client its payload was
-    // bad and the queue dropped the lead; a malformed request is rejected by
-    // the explicit checks above, so anything reaching here is ours to fix and
-    // theirs to retry. A store that is down says so specifically.
+    // Whose fault is this?
+    //
+    // An unreadable envelope is the caller's, and a 4xx tells the queue to
+    // drop it — retrying a malformed payload forever helps nobody. Anything
+    // else reaching here is ours, so it is a 5xx and the lead is kept.
+    if (e instanceof InvalidEnvelope) {
+      console.log('[LEADS_BLOCKED] Invalid envelope:', msg);
+      return NextResponse.json(
+        { ok: false, leadFiled: false, emailSent: false, error: 'bad_request' },
+        { status: 400 }
+      );
+    }
+
     // Give the lease back so the retry is not told it is already in progress.
     if (heldLease) await releaseLease(heldLease.key, heldLease.token);
 

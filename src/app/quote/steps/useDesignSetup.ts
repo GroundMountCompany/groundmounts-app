@@ -6,7 +6,7 @@ import { mapRef } from '@/store/mapRefs';
 import { autoPlaceArray } from '@/lib/geo/place';
 import { scheduleAutoPlacement } from '@/lib/geo/placementScheduler';
 import { slopeAt } from '@/lib/slope';
-import { refreshSiteIntel } from '@/lib/siteIntel';
+import { hasAskedSiteIntel, refreshSiteIntel } from '@/lib/siteIntel';
 
 /**
  * Everything the design step needs on entry: drop the array somewhere sensible
@@ -78,7 +78,10 @@ export function useDesignSetup() {
   // and the piles actually go. Later moves are handled by the debounced refresh
   // on dragend inside the map, which shares the slope lookup's timer.
   useEffect(() => {
-    if (!arrayCenter) return;
+    // First placement only. `arrayCenter` changes on every frame of a drag, so
+    // leaving this ungated would fire the lookup mid-gesture; once the array
+    // exists, MapCanvas owns the refresh and does it on dragend, debounced.
+    if (!arrayCenter || hasAskedSiteIntel()) return;
     void refreshSiteIntel(arrayCenter);
   }, [arrayCenter]);
 

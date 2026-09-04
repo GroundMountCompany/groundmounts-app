@@ -26,6 +26,11 @@ export function siteCellKey([lng, lat]: LngLat): string {
  */
 let lastKey: string | null = null;
 
+/** Whether this funnel has asked about anywhere yet. */
+export function hasAskedSiteIntel(): boolean {
+  return lastKey !== null;
+}
+
 /** Test seam, and what a fresh funnel needs so the next lookup is not skipped. */
 export function resetSiteIntel(): void {
   lastKey = null;

@@ -762,6 +762,81 @@ test.describe('design step gestures', () => {
     expect(after.panels, 'rotation re-sized the array').toBe(before.panels);
   });
 
+  test('dragging the array re-asks about the ground under it', async ({ page }) => {
+    // The lookup is keyed on the array, not the meter: the panels can end up
+    // hundreds of feet from the house, on different soil and a different slope.
+    const asked: Array<{ lat: number; lng: number }> = [];
+    await page.route('**/api/site*', (route) => {
+      const url = new URL(route.request().url());
+      asked.push({
+        lat: Number(url.searchParams.get('lat')),
+        lng: Number(url.searchParams.get('lng')),
+      });
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          ok: true,
+          curve: { 90: 900, 135: 1000, 180: 1100, 225: 1000, 270: 900 },
+          curveSource: 'pvwatts',
+          soilClass: 'rock outcrop',
+          soilSource: 'ssurgo',
+        }),
+      });
+    });
+
+    await openDesignStep(page);
+    await waitForArray(page, 15_000);
+    await bringMapIntoView(page);
+
+    await expect.poll(() => asked.length, { timeout: 10_000 }).toBeGreaterThan(0);
+    const firstAsk = asked.length;
+    const client = await page.context().newCDPSession(page);
+
+    // One drag at the design zoom covers a few tens of metres, and the lookup
+    // is deliberately keyed to ~100 m so nudging the array costs no requests.
+    // So drag repeatedly in one direction until the array has genuinely left
+    // its cell — which is the behaviour worth asserting anyway.
+    const before = await page.evaluate(() => window.__gmTest.state().arrayCenter!);
+    for (let attempt = 0; attempt < 10 && asked.length === firstAsk; attempt++) {
+      const grab = await findArrayGrab(page);
+      if (!grab) {
+        await page.waitForTimeout(300);
+        continue;
+      }
+
+      await touchStart(client, [{ x: grab[0], y: grab[1], id: 1 }]);
+      for (let i = 1; i <= 10; i++) {
+        await touchMove(client, [{ x: grab[0] + i * 10, y: grab[1] + i * 6, id: 1 }]);
+      }
+      await touchEnd(client);
+
+      // The refresh is debounced behind the slope lookup's timer.
+      await page.waitForTimeout(900);
+      await page.waitForFunction(() => !window.__gmTest.isMoving(), null, { timeout: 10_000 });
+    }
+
+    const after = await page.evaluate(() => window.__gmTest.state().arrayCenter!);
+    expect(
+      Math.hypot(after[0] - before[0], after[1] - before[1]),
+      'the array never moved, so nothing should have been re-asked'
+    ).toBeGreaterThan(0);
+
+    expect(asked.length, 'the drag did not trigger a second lookup').toBeGreaterThan(firstAsk);
+
+    // And it asked about where the array ended up, not where the meter is.
+    // Compared as distances rather than exact equality: the ask is dispatched
+    // on the debounce, and the array can settle a few metres further before
+    // this assertion reads it.
+    const last = asked[asked.length - 1];
+    const toArray = Math.hypot(last.lng - after[0], last.lat - after[1]);
+    const meter = await page.evaluate(() => window.__gmTest.state().electricalMeterPosition!);
+    const toMeter = Math.hypot(last.lng - meter[0], last.lat - meter[1]);
+
+    expect(toArray, 'the lookup was nowhere near the array').toBeLessThan(1e-4);
+    expect(toMeter / toArray, 'it asked about the meter, not the array').toBeGreaterThan(5);
+  });
+
   test('screenshot survives a reload on the contact form and reaches the lead', async ({
     page,
   }) => {

@@ -8,6 +8,7 @@ import { TRENCH } from '@/config/pricing';
 import type { PanelTier } from '@/config/pricing';
 import type { SlopeTier } from '@/lib/slope';
 import { TX_FALLBACK_CURVE, type ProductionCurve } from '@/lib/production';
+import { resetSiteIntel } from '@/lib/siteIntel';
 
 export interface Coordinates {
   latitude: number;
@@ -321,6 +322,9 @@ export const useQuoteStore = create<QuoteStore>()(
         set({ productionCurve: curve, curveSource, soilClass }),
 
       resetQuote: () => {
+        // A fresh funnel is a fresh place: let the site lookup ask again rather
+        // than reusing the last visitor's cell.
+        resetSiteIntel();
         set({ ...initialState, hydrated: true, leadId: uuid(), startedAt: Date.now() });
       },
     }),

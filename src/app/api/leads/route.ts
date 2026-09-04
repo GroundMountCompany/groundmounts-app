@@ -122,6 +122,8 @@ interface LeadPayload {
     percentage?: number;
     avgBill?: number;
     highBill?: number;
+    billMonths?: Array<{ month: string; kwh: number; cost: number | null }> | null;
+    billAnnualKwh?: number | null;
   };
   ts: number;
   honeypot?: string;
@@ -580,6 +582,12 @@ export async function POST(req: NextRequest) {
       'Monthly Bill Avg': lead.quote?.avgBill,
       'Monthly Bill High': lead.quote?.highBill,
       'Offset Percentage': lead.quote?.percentage,
+      // Recorded so the owner can see what the sizing was based on, and only
+      // the usage figures the customer confirmed — never the document.
+      'Bill Upload': Array.isArray(lead.quote?.billMonths) && lead.quote.billMonths.length > 0,
+      'Monthly kWh JSON': Array.isArray(lead.quote?.billMonths) && lead.quote.billMonths.length
+        ? JSON.stringify(lead.quote.billMonths)
+        : undefined,
       'Trenching Distance ft': inputs.trenchFeet,
       // Legacy columns, kept for the owner's existing views. Midpoints of the
       // same priced figures rather than a second calculation.

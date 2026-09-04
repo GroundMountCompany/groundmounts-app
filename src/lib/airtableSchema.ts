@@ -39,6 +39,10 @@ export const LEAD_SCHEMA = {
   'Monthly Bill Avg': 'currency',
   'Monthly Bill High': 'currency',
   'Offset Percentage': 'number',
+  /** Whether the customer uploaded a bill rather than typing their usage in. */
+  'Bill Upload': 'checkbox',
+  /** The months they confirmed, so the owner can see what it was sized on. */
+  'Monthly kWh JSON': 'longText',
   'Trenching Distance ft': 'number',
   'Trenching Cost': 'currency',
   'Equipment Cost': 'currency',

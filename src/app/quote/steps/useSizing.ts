@@ -27,18 +27,24 @@ export function useSizing() {
   const curve = useQuoteStore((s) => s.productionCurve);
   const sizedPanels = useQuoteStore((s) => s.sizedPanels);
   const sizedAzimuth = useQuoteStore((s) => s.sizedAzimuth);
+  const billAnnualKwh = useQuoteStore((s) => s.billAnnualKwh);
 
   // Re-size when the inputs to sizing change, or on first arrival at the
   // design step. Azimuth is not in the dependency list on purpose.
   useEffect(() => {
     if (step < 3) return;
 
-    const target = annualTargetKwh(avgValue, dollarsPerKwhFromCents(rateCents), percentage);
+    // A year read off their own bill beats a monthly dollar figure divided by
+    // an assumed rate, so it wins when we have one.
+    const target =
+      billAnnualKwh && billAnnualKwh > 0
+        ? billAnnualKwh * (percentage / 100)
+        : annualTargetKwh(avgValue, dollarsPerKwhFromCents(rateCents), percentage);
     const sized = panelsForTarget(curve, target, sizedAzimuth, tier);
     if (sized <= 0 || sized === sizedPanels) return;
 
     useQuoteStore.getState().setSized(sized, sizedAzimuth);
-  }, [step, avgValue, rateCents, percentage, tier, curve, sizedPanels, sizedAzimuth]);
+  }, [step, avgValue, rateCents, percentage, tier, curve, sizedPanels, sizedAzimuth, billAnnualKwh]);
 
   // The count the rest of the app sees: what sizing produced, plus whatever the
   // customer added or removed by hand.

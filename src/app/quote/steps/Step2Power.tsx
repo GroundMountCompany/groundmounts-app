@@ -14,6 +14,7 @@ import {
 import { dollarsPerKwhFromCents } from '@/lib/rate';
 import { annualTargetKwh } from '@/lib/sizing';
 import { sanitizeNumeric, parseIntegerField, parseNumericField } from '@/lib/numericField';
+import BillUpload from './BillUpload';
 
 /**
  * Bill inputs.
@@ -28,6 +29,8 @@ export default function Step2Power() {
   const setRateCents = useQuoteStore((s) => s.setRateCentsPerKwh);
   const percentage = useQuoteStore((s) => s.percentage);
   const setPercentage = useQuoteStore((s) => s.setPercentage);
+  const setBillMonths = useQuoteStore((s) => s.setBillMonths);
+  const billAnnualKwh = useQuoteStore((s) => s.billAnnualKwh);
 
   // Both fields hold a string while being typed and commit on blur, so a
   // half-finished entry can never reach the maths as NaN.
@@ -35,23 +38,26 @@ export default function Step2Power() {
   const [rateText, setRateText] = useState(String(rateCents));
 
   const annualTarget = Math.round(
-    annualTargetKwh(avgValue, dollarsPerKwhFromCents(rateCents), percentage)
+    billAnnualKwh && billAnnualKwh > 0
+      ? billAnnualKwh * (percentage / 100)
+      : annualTargetKwh(avgValue, dollarsPerKwhFromCents(rateCents), percentage)
   );
   const rateLooksOdd = rateCents < RATE_CENTS_MIN || rateCents > RATE_CENTS_MAX;
 
   return (
     <div className="space-y-5">
-      <button
-        type="button"
-        data-testid="bill-upload-stub"
-        disabled
-        className="min-h-[48px] w-full rounded-xl border border-dashed border-neutral-300 px-4 py-3 text-left"
-      >
-        <span className="block text-[17px] font-semibold text-neutral-500">
-          {UI.billUploadStub}
-        </span>
-        <span className="block text-[15px] text-neutral-400">{UI.billUploadNote}</span>
-      </button>
+      <BillUpload
+        onConfirm={(months, annualKwh) => {
+          setBillMonths(months, annualKwh);
+          // Keep the manual field honest: show what the bill implies per month
+          // at their rate, so the two halves of this screen agree.
+          const monthly = Math.round(
+            ((annualKwh / 12) * dollarsPerKwhFromCents(rateCents))
+          );
+          setAvgValue(monthly);
+          setBillText(String(monthly));
+        }}
+      />
 
       <label className="block">
         <span className="block text-[17px] font-medium text-neutral-900">{UI.monthlyBill}</span>

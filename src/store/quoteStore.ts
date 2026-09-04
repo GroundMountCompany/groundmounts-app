@@ -9,6 +9,7 @@ import type { PanelTier } from '@/config/pricing';
 import type { SlopeTier } from '@/lib/slope';
 import { TX_FALLBACK_CURVE, type ProductionCurve } from '@/lib/production';
 import { resetSiteIntel } from '@/lib/siteIntel';
+import type { BillMonth } from '@/lib/billSchema';
 
 export interface Coordinates {
   latitude: number;
@@ -67,6 +68,14 @@ interface QuoteState {
   panelTier: PanelTier;
   /** Live trench length in feet, from the array edge to the meter. */
   trenchFeet: number;
+  /**
+   * Read off the customer's own bill and confirmed by them.
+   *
+   * When present this is what the array is sized against: a year of measured
+   * usage beats a monthly bill divided by an assumed rate.
+   */
+  billMonths: BillMonth[] | null;
+  billAnnualKwh: number | null;
   slopePercent: number | null;
   slopeTier: SlopeTier;
   /**
@@ -132,6 +141,9 @@ interface QuoteActions {
   setQuotation: (v: number) => void;
   setTotalPanels: (v: number) => void;
   setAvgValue: (v: number) => void;
+  /** Months the customer confirmed off their own bill, and the year they imply. */
+  setBillMonths: (months: BillMonth[], annualKwh: number) => void;
+  clearBillMonths: () => void;
   setHighestValue: (v: number) => void;
   setPercentage: (v: number) => void;
   setPaymentMethod: (v: PaymentMethod) => void;
@@ -202,6 +214,8 @@ const initialState: QuoteState = {
   azimuth: 180,
   panelTier: 'standard',
   trenchFeet: 0,
+  billMonths: null,
+  billAnnualKwh: null,
   slopePercent: null,
   slopeTier: 'Unknown',
   slopeSource: null,
@@ -246,6 +260,9 @@ export const useQuoteStore = create<QuoteStore>()(
       setQuotation: (quotation) => set({ quotation }),
       setTotalPanels: (totalPanels) => set({ totalPanels }),
       setAvgValue: (avgValue) => set({ avgValue }),
+
+      setBillMonths: (billMonths, billAnnualKwh) => set({ billMonths, billAnnualKwh }),
+      clearBillMonths: () => set({ billMonths: null, billAnnualKwh: null }),
       setHighestValue: (highestValue) => set({ highestValue }),
       setPercentage: (percentage) => set({ percentage }),
       setPaymentMethod: (paymentMethod) => set({ paymentMethod }),
@@ -358,6 +375,8 @@ export const useQuoteStore = create<QuoteStore>()(
         azimuth: state.azimuth,
         panelTier: state.panelTier,
         trenchFeet: state.trenchFeet,
+        billMonths: state.billMonths,
+        billAnnualKwh: state.billAnnualKwh,
         slopePercent: state.slopePercent,
         slopeTier: state.slopeTier,
         slopeSource: state.slopeSource,

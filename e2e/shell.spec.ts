@@ -589,6 +589,89 @@ function pricesIn(text: string): number[] {
   return (text.match(/\$[\d,]+/g) ?? []).map((m) => Number(m.replace(/[$,]/g, '')));
 }
 
+test('a bill upload fills the table and sizes the array from it', async ({ page }) => {
+  // The shortcut past typing numbers in. The extraction itself is mocked —
+  // this is about the customer's path through it: upload, check what we read,
+  // correct it, and carry that into the design.
+  await page.route('**/api/bill/extract', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        ok: true,
+        extraction: {
+          months: [
+            { month: 'Jan 2026', kwh: 1450, cost: 203.5 },
+            { month: 'Dec 2025', kwh: 1310, cost: 188.2 },
+          ],
+          ratePerKwh: 0.17,
+          confidence: 'high',
+        },
+      }),
+    })
+  );
+
+  await mockGeocoding(page);
+  await gotoStep(page, 1);
+
+  await page.getByTestId('bill-file').setInputFiles('e2e/fixtures/bill.png');
+  await expect(page.getByTestId('bill-review')).toBeVisible();
+
+  // What we read, editable, before anything is used.
+  await expect(page.getByTestId('bill-kwh-0')).toHaveValue('1450');
+  await expect(page.getByTestId('bill-kwh-1')).toHaveValue('1310');
+  // Two months is a partial year, and it says so rather than presenting a
+  // projection as a reading.
+  await expect(page.getByTestId('bill-scaled')).toBeVisible();
+
+  // The customer corrects a misread digit.
+  await page.getByTestId('bill-kwh-1').fill('1500');
+  await expect(page.getByTestId('bill-annual')).toContainText('17,700');
+
+  await page.getByTestId('bill-confirm').click();
+  await expect(page.getByTestId('bill-review')).toHaveCount(0);
+
+  // And the design is sized against it: 17,700 kWh is a much larger array than
+  // the seeded $240 bill would have produced.
+  await gotoStep(page, 3);
+  const panels = Number((await page.getByTestId('stat-panels').textContent()) ?? '0');
+  expect(panels).toBeGreaterThan(0);
+
+  const kwText = (await page.getByTestId('stat-kw').textContent()) ?? '';
+  expect(Number(kwText.replace(/[^\d.]/g, ''))).toBeGreaterThan(8);
+});
+
+test('an unreadable bill lands on the manual fields, not a dead end', async ({ page }) => {
+  await page.route('**/api/bill/extract', (route) =>
+    route.fulfill({
+      status: 422,
+      contentType: 'application/json',
+      body: JSON.stringify({ ok: false, reason: "Couldn't read that one. Type it in instead." }),
+    })
+  );
+
+  await mockGeocoding(page);
+  await gotoStep(page, 1);
+
+  await page.getByTestId('bill-file').setInputFiles('e2e/fixtures/bill.png');
+
+  await expect(page.getByTestId('bill-failed')).toHaveText(
+    "Couldn't read that one. Type it in instead."
+  );
+  // No review table, and no spinner left running.
+  await expect(page.getByTestId('bill-review')).toHaveCount(0);
+
+  // The manual path is right there, working, with nothing to dismiss first.
+  const bill = page.getByTestId('avg-bill');
+  await bill.fill('265');
+  await bill.blur();
+  await expect(bill).toHaveValue('265');
+
+  // And the funnel still moves on.
+  await gotoStep(page, 3);
+  await expect(page.getByTestId('stat-panels')).toBeAttached();
+});
+
 test('the revealed price is the one the server filed, not the page estimate', async ({
   page,
 }) => {

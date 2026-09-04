@@ -41,3 +41,20 @@ export function tilequeryUrl(lng: number, lat: number, token: string): string {
     `?layers=contour&limit=50&access_token=${token}`
   );
 }
+
+export const ANTHROPIC = {
+  host: 'api.anthropic.com',
+  path: '/v1/messages',
+  /** Overridable so a model change is an env var, not a deploy. */
+  model: process.env.ANTHROPIC_MODEL || 'claude-sonnet-5',
+  version: '2023-06-01',
+  /** A bill is a page of numbers; the answer is small. */
+  maxTokens: 1024,
+  /**
+   * Long enough for a photo of a bill, short enough that a customer does not
+   * sit watching a spinner wondering whether to start again.
+   */
+  timeoutMs: 20_000,
+} as const;
+
+export const ANTHROPIC_URL = `https://${ANTHROPIC.host}${ANTHROPIC.path}`;

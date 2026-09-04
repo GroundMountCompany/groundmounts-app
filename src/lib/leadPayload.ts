@@ -25,6 +25,9 @@ export interface LeadQuote {
   percentage: number;
   avgBill: number;
   highBill: number;
+  /** Present only when they uploaded a bill and confirmed what we read. */
+  billMonths: Array<{ month: string; kwh: number; cost: number | null }> | null;
+  billAnnualKwh: number | null;
   coordinates: { latitude: number; longitude: number };
   arrayCenter: [number, number] | null;
   meter: [number, number] | null;
@@ -109,6 +112,8 @@ export function buildLeadPayload(
       percentage: s.percentage,
       avgBill: s.avgValue,
       highBill: s.highestValue,
+      billMonths: s.billMonths,
+      billAnnualKwh: s.billAnnualKwh,
       coordinates: s.coordinates,
       arrayCenter: s.arrayCenter,
       meter: s.electricalMeterPosition,

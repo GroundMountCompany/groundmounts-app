@@ -10,6 +10,15 @@
  */
 
 export interface PanelProduct {
+  /**
+   * Whether customers may choose this.
+   *
+   * A placeholder price is not a quote. An option whose numbers the owner has
+   * not confirmed does not appear on the options step, is not priced, and does
+   * not reach the lead — rather than being shown with a figure nobody stands
+   * behind.
+   */
+  enabled: boolean;
   name: string;
   watts: number;
   /** Short edge, inches. */
@@ -24,6 +33,7 @@ export type PanelTier = 'standard' | 'premium';
 
 export const PANELS: Record<PanelTier, PanelProduct> = {
   standard: {
+    enabled: true,
     name: 'Mission Solar MSX10-435HN0B',
     watts: 435,
     widthIn: 44.7,
@@ -33,6 +43,8 @@ export const PANELS: Record<PanelTier, PanelProduct> = {
   },
   premium: {
     // PLACEHOLDER - owner to confirm make, wattage, dimensions and price.
+    // Off until they do.
+    enabled: false,
     name: 'Premium 460W (TBD)',
     watts: 460,
     widthIn: 44.6,
@@ -132,6 +144,8 @@ export const TRENCH: TrenchConfig = {
 // --- Battery ---------------------------------------------------------------
 
 export interface BatteryConfig {
+  /** Off until the owner confirms the product and the price. */
+  enabled: boolean;
   name: string;
   kwh: number;
   pricePerUnit: number;
@@ -140,6 +154,7 @@ export interface BatteryConfig {
 
 export const BATTERY: BatteryConfig = {
   // PLACEHOLDER - owner to confirm make, capacity and price.
+  enabled: false,
   name: 'Home battery (TBD)',
   kwh: 13.5,
   pricePerUnit: 12500,
@@ -168,6 +183,8 @@ export interface SiteConfig {
   /** Used when the soil lookup fails or returns something unrecognised. */
   defaultSoilAdderPct: number;
   vegetationClearing: {
+    /** Whether site prep is offered as a choice on the options step. */
+    enabled: boolean;
     /** Charged on the array footprint plus a working margin. */
     perAcre: number;
     /** Minimum charge for any clearing at all. */
@@ -195,6 +212,8 @@ export const SITE: SiteConfig = {
   },
   defaultSoilAdderPct: 0,
   vegetationClearing: {
+    // The one option whose numbers are close enough to offer today.
+    enabled: true,
     perAcre: 3200,
     minimum: 850,
     marginFt: 15,

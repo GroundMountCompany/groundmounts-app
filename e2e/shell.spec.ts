@@ -1,9 +1,10 @@
 import { test, expect, type Page } from '@playwright/test';
 import './gmTest';
 import { TX_FALLBACK_CURVE } from '../src/lib/production';
-import { PANELS } from '../src/config/pricing';
+import { PANELS, BATTERY, SITE } from '../src/config/pricing';
 import { parseQuoteInputs, priceFromInputs } from '../src/lib/quoteInputs';
 import { RETAIL, COOP, MUNICIPAL, BLURRY_PHOTO } from './fixtures/bills/observed';
+import { DEFAULT_RATE_CENTS } from '../src/store/quoteStore';
 
 /**
  * The Phase 4 shell: a full-bleed map that the page never scrolls under, a
@@ -461,7 +462,30 @@ test('the design step and the quote report the same production', async ({ page }
   expect(Math.abs(kwh - kw * TX_FALLBACK_CURVE[180])).toBeGreaterThan(1_000);
 });
 
+test('options the owner has not switched on are not offered', async ({ page }) => {
+  // Premium panels and batteries ship disabled: their prices are placeholders,
+  // and a card quoting a number nobody stands behind is worse than no card.
+  await page.addInitScript((payload) => {
+    if (window.localStorage.getItem('gmq:v3')) return;
+    window.localStorage.setItem('gmq:v3', JSON.stringify(payload));
+  }, siteCurveSeed(4));
+
+  await mockGeocoding(page);
+  await gotoStep(page, 4);
+
+  await expect(page.getByTestId('option-panels')).toHaveCount(PANELS.premium.enabled ? 1 : 0);
+  await expect(page.getByTestId('option-battery')).toHaveCount(BATTERY.enabled ? 1 : 0);
+  await expect(page.getByTestId('option-siteprep')).toHaveCount(
+    SITE.vegetationClearing.enabled ? 1 : 0
+  );
+
+  // Whatever is on offer, the step is not empty.
+  await expect(page.getByTestId('option-siteprep')).toBeVisible();
+});
+
 test('the premium delta is the change the customer actually gets', async ({ page }) => {
+  test.skip(!PANELS.premium.enabled, 'premium panels are switched off in pricing.ts');
+
   // Choosing premium re-sizes the array: fewer, stronger panels for the same
   // bill. The card used to price the current count at the premium rate, which
   // quoted an increase nobody was ever charged.
@@ -633,9 +657,10 @@ test('a bill upload fills the table and sizes the array from it', async ({ page 
   await expect(page.getByTestId('bill-review')).toHaveCount(0);
   await expect(page.getByTestId('bill-confirmed')).toBeVisible();
 
-  // The rate read off the bill takes over the field below, in the same box
-  // they would have typed it into.
-  await expect(page.getByTestId('rate-kwh')).toHaveValue('17');
+  // The rate takes over the field below, in the same box they would have typed
+  // it into — and it is the blended one, $203.50 over 1,450 kWh, not the 17c
+  // the mock states. A Texas bill's printed rate is only the energy half.
+  await expect(page.getByTestId('rate-kwh')).toHaveValue('14');
 
   // A refresh must not offer to do the work again.
   await page.reload();
@@ -652,6 +677,70 @@ test('a bill upload fills the table and sizes the array from it', async ({ page 
 
   const kwText = (await page.getByTestId('stat-kw').textContent()) ?? '';
   expect(Number(kwText.replace(/[^\d.]/g, ''))).toBeGreaterThan(8);
+});
+
+test('a bill survives confirm, reload, edit, discard and reload again', async ({ page }) => {
+  // The whole lifecycle in one go, because each transition persists something
+  // different and the bugs live in the handovers.
+  await page.route('**/api/bill/extract', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ ok: true, extraction: MUNICIPAL }),
+    })
+  );
+
+  await mockGeocoding(page);
+  await gotoStep(page, 1);
+
+  // CONFIRM
+  await page.getByTestId('bill-file').setInputFiles('e2e/fixtures/bills/bill-municipal.png');
+  await expect(page.getByTestId('bill-review')).toBeVisible();
+  await expect(page.getByTestId('bill-kwh-0')).toHaveValue('1560');
+  await page.getByTestId('bill-confirm').click();
+  await expect(page.getByTestId('bill-confirmed')).toBeVisible();
+
+  const confirmedTarget = Number(
+    ((await page.getByTestId('annual-target').textContent()) ?? '').replace(/[^\d]/g, '')
+  );
+  expect(confirmedTarget).toBeGreaterThan(18_000);
+
+  // RELOAD — still confirmed, no upload button offering to redo the work.
+  await page.reload();
+  await waitForHydration(page);
+  await expect(page.getByTestId('bill-confirmed')).toBeVisible();
+  await expect(page.getByTestId('bill-upload')).toHaveCount(0);
+  await expect(page.getByTestId('annual-target')).toContainText(
+    confirmedTarget.toLocaleString()
+  );
+
+  // EDIT — back to the table with the confirmed figures in it.
+  await page.getByTestId('bill-edit').click();
+  await expect(page.getByTestId('bill-review')).toBeVisible();
+  await expect(page.getByTestId('bill-kwh-0')).toHaveValue('1560');
+  await page.getByTestId('bill-kwh-0').fill('2000');
+  await expect(page.getByTestId('bill-annual')).toContainText('24,000');
+  await page.getByTestId('bill-confirm').click();
+  await expect(page.getByTestId('bill-confirmed')).toContainText('24,000');
+
+  // DISCARD — sizing returns to the typed figures and the rate to the default.
+  await page.getByTestId('bill-edit').click();
+  await page.getByTestId('bill-discard').click();
+  await expect(page.getByTestId('bill-upload')).toBeVisible();
+  await expect(page.getByTestId('bill-confirmed')).toHaveCount(0);
+  await expect(page.getByTestId('rate-kwh')).toHaveValue(String(DEFAULT_RATE_CENTS));
+
+  const manualTarget = Number(
+    ((await page.getByTestId('annual-target').textContent()) ?? '').replace(/[^\d]/g, '')
+  );
+  expect(manualTarget, 'the discarded bill was still driving the target').not.toBe(24_000);
+
+  // RELOAD — and it is still discarded.
+  await page.reload();
+  await waitForHydration(page);
+  await expect(page.getByTestId('bill-upload')).toBeVisible();
+  await expect(page.getByTestId('bill-confirmed')).toHaveCount(0);
+  await expect(page.getByTestId('annual-target')).toContainText(manualTarget.toLocaleString());
 });
 
 test('discarding a bill puts sizing back on the typed figures', async ({ page }) => {

@@ -66,8 +66,11 @@ export default function Step2Power() {
           setBillText(String(monthly));
         }}
         onDiscard={() => {
-          // Sizing returns to whatever is typed in below. Nothing else is
-          // touched: their bill figure and rate stay as they left them.
+          // Sizing returns to whatever is typed in below, and the rate goes
+          // back to the Texas default: a rate read off a bill they have just
+          // thrown away should not keep pricing their quote.
+          setRateCents(DEFAULT_RATE_CENTS);
+          setRateText(String(DEFAULT_RATE_CENTS));
         }}
       />
 

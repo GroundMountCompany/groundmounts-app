@@ -13,6 +13,7 @@
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "verify:airtable": "tsx scripts/verify-airtable.ts",
+    "eval:bills": "tsx scripts/eval-bills.ts",
     "analyze": "ANALYZE=true next build"
   },
   "dependencies": {

@@ -73,6 +73,20 @@ export default defineConfig({
       // is why the drag and pinch paths went unverified until now.
       name: 'interaction',
       testMatch: /interaction\.spec\.ts/,
+      /**
+       * Runs last, on its own.
+       *
+       * This project renders a real WebGL scene through SwiftShader, which is
+       * CPU rasterisation — there is no GPU doing the work. Playwright runs
+       * projects concurrently, so it was sharing four workers with three other
+       * browser projects, and under that load waiting for the map's first idle
+       * frame missed a 30 s budget that takes 2 s when it runs alone.
+       *
+       * `dependencies` makes it wait for the others to finish rather than
+       * compete with them. The alternative was a longer timeout, which would
+       * have hidden the contention rather than removed it.
+       */
+      dependencies: ['mobile', 'desktop', 'mobile-chromium'],
       use: {
         ...devices['Desktop Chrome'],
         viewport: { width: 390, height: 844 },

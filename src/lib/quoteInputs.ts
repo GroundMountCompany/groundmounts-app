@@ -4,7 +4,7 @@ import {
   type PanelTier,
   type SlopeTierName,
 } from '@/config/pricing';
-import { priceQuote, subtotals, spread, type Quote } from './pricing';
+import { availableOnly, priceQuote, subtotals, spread, type Quote } from './pricing';
 import { TX_FALLBACK_CURVE, annualKwh, type ProductionCurve } from './production';
 
 /**
@@ -147,9 +147,16 @@ export function priceFromInputs(
   inputs: QuoteInputs,
   curve: ProductionCurve = TX_FALLBACK_CURVE
 ): PricedQuote {
-  const quote = priceQuote(
+  // Normalised once, here, so the systemSizeKw below and the record that gets
+  // written describe the same design the price describes.
+  const buildable = availableOnly(
     { panelCount: inputs.panelCount, tier: inputs.tier, trenchFeet: inputs.trenchFeet },
-    { batteryUnits: inputs.batteryUnits, needsClearing: inputs.needsClearing },
+    { batteryUnits: inputs.batteryUnits, needsClearing: inputs.needsClearing }
+  );
+
+  const quote = priceQuote(
+    buildable.design,
+    buildable.options,
     {
       slopePercent: inputs.slopePercent,
       slopeTier: inputs.slopeTier,
@@ -161,9 +168,20 @@ export function priceFromInputs(
 
   return {
     quote,
-    systemSizeKw: Number(((inputs.panelCount * PANELS[inputs.tier].watts) / 1000).toFixed(2)),
+    systemSizeKw: Number(
+      ((buildable.design.panelCount * PANELS[buildable.design.tier].watts) / 1000).toFixed(2)
+    ),
     annualProductionKwh: annualKwh(curve, quote.systemKw, inputs.azimuth),
     equipment: spread(parts.equipment),
     trench: spread(parts.trench),
   };
+}
+
+/** What the server will actually build, after disabled options are dropped. */
+export function buildableInputs(inputs: QuoteInputs): QuoteInputs {
+  const { design, options } = availableOnly(
+    { panelCount: inputs.panelCount, tier: inputs.tier, trenchFeet: inputs.trenchFeet },
+    { batteryUnits: inputs.batteryUnits, needsClearing: inputs.needsClearing }
+  );
+  return { ...inputs, ...design, ...options };
 }

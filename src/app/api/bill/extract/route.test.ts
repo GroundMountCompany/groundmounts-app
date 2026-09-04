@@ -87,7 +87,8 @@ describe('POST /api/bill/extract', () => {
     expect(body.ok).toBe(true);
     expect(body.extraction.months).toHaveLength(2);
     expect(body.extraction.months[0]).toEqual({ month: 'Jan 2026', kwh: 1450, cost: 203.5 });
-    expect(body.extraction.ratePerKwh).toBe(0.17);
+    // The blended rate: $203.50 over 1,450 kWh, not the 17c the bill printed.
+    expect(body.extraction.ratePerKwh).toBe(0.1403);
   });
 
   it('forces the tool call rather than hoping for JSON in prose', async () => {

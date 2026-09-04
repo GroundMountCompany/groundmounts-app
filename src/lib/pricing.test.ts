@@ -10,6 +10,15 @@ import {
 } from './pricing';
 import { PANELS, TRENCH, BATTERY, SITE, RANGE_SPREAD_PCT } from '@/config/pricing';
 
+/**
+ * These cases price options the owner ships switched off.
+ *
+ * The gating is asserted in optionGating.test.ts; here the question is whether
+ * the arithmetic is right when an option *is* on offer, so availability is
+ * passed in explicitly rather than read from the shipped config.
+ */
+const ALL_ON = { premiumPanels: true, battery: true, sitePrep: true };
+
 /** The worked example from the brief. */
 const EXAMPLE = {
   design: { panelCount: 16, tier: 'standard' as const, trenchFeet: 113 },
@@ -158,7 +167,8 @@ describe('options change the price', () => {
     const withBattery = priceQuote(
       EXAMPLE.design,
       { batteryUnits: 1, needsClearing: false },
-      EXAMPLE.site
+      EXAMPLE.site,
+      ALL_ON
     );
     const line = withBattery.lineItems.find((i) => i.key === 'battery')!;
     expect(line.amount).toBe(BATTERY.pricePerUnit);
@@ -166,8 +176,18 @@ describe('options change the price', () => {
   });
 
   it('two batteries cost twice one', () => {
-    const one = priceQuote(EXAMPLE.design, { batteryUnits: 1, needsClearing: false }, EXAMPLE.site);
-    const two = priceQuote(EXAMPLE.design, { batteryUnits: 2, needsClearing: false }, EXAMPLE.site);
+    const one = priceQuote(
+      EXAMPLE.design,
+      { batteryUnits: 1, needsClearing: false },
+      EXAMPLE.site,
+      ALL_ON
+    );
+    const two = priceQuote(
+      EXAMPLE.design,
+      { batteryUnits: 2, needsClearing: false },
+      EXAMPLE.site,
+      ALL_ON
+    );
     const amount = (q: typeof one) => q.lineItems.find((i) => i.key === 'battery')!.amount;
     expect(amount(two)).toBe(amount(one) * 2);
   });
@@ -176,7 +196,8 @@ describe('options change the price', () => {
     const premium = priceQuote(
       { ...EXAMPLE.design, tier: 'premium' },
       EXAMPLE.options,
-      EXAMPLE.site
+      EXAMPLE.site,
+      ALL_ON
     );
     expect(subtotals(premium).equipment).toBeGreaterThan(subtotals(base).equipment);
   });

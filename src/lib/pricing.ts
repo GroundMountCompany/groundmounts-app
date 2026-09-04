@@ -134,11 +134,61 @@ export function clearingAcres(
  * Pure, so it can be tested without a browser and audited by reading it. Every
  * number it uses comes from pricing.ts; nothing here is a literal.
  */
+/**
+ * The design as it can actually be built today.
+ *
+ * A disabled option cannot be priced, so a payload asking for one is treated
+ * as not having asked. This is the single place that decision is made, so the
+ * screen, the quote and the record cannot disagree about what was ordered.
+ */
+export interface OptionAvailability {
+  premiumPanels: boolean;
+  battery: boolean;
+  sitePrep: boolean;
+}
+
+/** What pricing.ts currently says is on offer. */
+export function currentAvailability(): OptionAvailability {
+  return {
+    premiumPanels: PANELS.premium.enabled,
+    battery: BATTERY.enabled,
+    sitePrep: SITE.vegetationClearing.enabled,
+  };
+}
+
+export function availableOnly(
+  design: { panelCount: number; tier: PanelTier; trenchFeet: number },
+  options: { batteryUnits: number; needsClearing: boolean },
+  // Injectable so both states can be tested without editing the config the
+  // rest of the suite asserts against.
+  available: OptionAvailability = currentAvailability()
+): {
+  design: { panelCount: number; tier: PanelTier; trenchFeet: number };
+  options: { batteryUnits: number; needsClearing: boolean };
+} {
+  const tierAvailable = design.tier === 'premium' ? available.premiumPanels : true;
+
+  return {
+    design: { ...design, tier: tierAvailable ? design.tier : 'standard' },
+    options: {
+      batteryUnits: available.battery ? options.batteryUnits : 0,
+      needsClearing: available.sitePrep ? options.needsClearing : false,
+    },
+  };
+}
+
 export function priceQuote(
-  design: PricingDesign,
-  options: PricingOptions,
-  site: PricingSite
+  rawDesign: PricingDesign,
+  rawOptions: PricingOptions,
+  site: PricingSite,
+  availability: OptionAvailability = currentAvailability()
 ): Quote {
+  // Whatever was asked for, priced as it can be built. An option the owner has
+  // not switched on is not a thing anybody can buy today.
+  const available = availableOnly(rawDesign, rawOptions, availability);
+  const design: PricingDesign = { ...rawDesign, ...available.design };
+  const options: PricingOptions = { ...rawOptions, ...available.options };
+
   const product = PANELS[design.tier];
   const systemKw = (design.panelCount * product.watts) / 1000;
   const hasBattery = options.batteryUnits > 0;

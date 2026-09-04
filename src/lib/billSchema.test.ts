@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   BILL_TOOL_SCHEMA,
+  deriveRate,
   MAX_MONTHS,
   monthOrder,
   BILL_PROMPT,
@@ -85,6 +86,46 @@ describe('sanitising what comes back', () => {
       .toBeNull();
     expect(sanitiseExtraction({ months: [], ratePerKwh: 0.19, confidence: 'high' }).ratePerKwh)
       .toBe(0.19);
+  });
+
+  describe('what a kilowatt-hour actually costs', () => {
+    const month = (kwh: number, cost: number | null) => ({ month: 'Aug 2026', kwh, cost });
+
+    it('divides the electricity total by the kilowatt-hours', () => {
+      // The Lone Star sample: $296.41 across 1,842 kWh is 16.1c, and the 12.9c
+      // printed on the bill is only the retailer's half of it.
+      expect(deriveRate([month(1842, 296.41)], 0.129)).toBe(0.1609);
+    });
+
+    it('does the same for the other two fixture bills', () => {
+      // Brazos Valley co-op: $312.77 across 2,315 kWh against 10.8c printed.
+      expect(deriveRate([month(2315, 312.77)], 0.108)).toBe(0.1351);
+      // Granbury municipal: $195.62 of electricity across 1,560 kWh.
+      expect(deriveRate([month(1560, 195.62)], 0.1145)).toBe(0.1254);
+    });
+
+    it('falls back to the printed rate when no cost was shown', () => {
+      expect(deriveRate([month(1842, null)], 0.129)).toBe(0.129);
+      expect(deriveRate([], 0.129)).toBe(0.129);
+    });
+
+    it('returns nothing when the bill gives neither', () => {
+      // The caller keeps the configured Texas default.
+      expect(deriveRate([month(1842, null)], null)).toBeNull();
+    });
+
+    it('ignores a division that could not be a tariff', () => {
+      // A misread cost of $5,000 on 1,842 kWh is $2.71/kWh. Not a rate.
+      expect(deriveRate([month(1842, 5000)], 0.129)).toBe(0.129);
+      expect(deriveRate([month(1842, 1)], 0.129)).toBe(0.129);
+    });
+
+    it('uses the first period that has both numbers', () => {
+      // A history table usually prices only the current period.
+      expect(
+        deriveRate([month(2315, null), { month: 'Jul', kwh: 2240, cost: 300 }], null)
+      ).toBe(0.1339);
+    });
   });
 
   it('treats anything but an explicit "high" as low confidence', () => {

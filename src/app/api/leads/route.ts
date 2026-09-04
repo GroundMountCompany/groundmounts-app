@@ -5,7 +5,12 @@ import { getResendOrThrow } from "@/lib/resendSafe";
 import { put } from "@vercel/blob";
 import { escapeHtml, escapeOr, headerSafe } from "@/lib/escape";
 import { sniffImage } from "@/lib/imageSniff";
-import { parseQuoteInputs, priceFromInputs, InvalidQuoteInputs } from "@/lib/quoteInputs";
+import {
+  parseQuoteInputs,
+  priceFromInputs,
+  buildableInputs,
+  InvalidQuoteInputs,
+} from "@/lib/quoteInputs";
 import { siteFactsForArray, resolveSiteConditions } from "@/lib/server/siteLookup";
 import EmailTemplate from "@/components/common/EmailTemplate";
 import type { ReactElement } from "react";
@@ -331,7 +336,7 @@ async function savePartial(raw: Record<string, unknown>): Promise<NextResponse> 
 
   // The design, if there is one yet. Step 1 has coordinates and nothing else.
   try {
-    const inputs = parseQuoteInputs(raw.inputs);
+    const inputs = buildableInputs(parseQuoteInputs(raw.inputs));
     const facts = await siteFactsForArray(inputs.arrayCenter);
     const conditions = resolveSiteConditions(inputs, facts);
     const priced = priceFromInputs({ ...inputs, ...conditions }, facts.curve);
@@ -546,7 +551,10 @@ export async function POST(req: NextRequest) {
     let facts;
     let conditions;
     try {
-      inputs = parseQuoteInputs(lead.quote?.inputs);
+      // Disabled options are dropped before anything is priced or recorded, so
+      // a payload asking for a battery we do not sell does not put one in the
+      // owner's Airtable.
+      inputs = buildableInputs(parseQuoteInputs(lead.quote?.inputs));
       // One lookup for this array: curve, soil and slope, all for the same
       // coordinates out of the same cache entry. Everything the ground
       // contributes to the price is decided here, not in the payload.

@@ -5,7 +5,7 @@ import { STEPS, UI, OPTION_CARDS } from '@/config/copy';
 import { useQuoteStore } from '@/store/quoteStore';
 import { useQuote } from './useQuote';
 import { priceQuote } from '@/lib/pricing';
-import { BATTERY, type PanelTier } from '@/config/pricing';
+import { BATTERY, PANELS, SITE, type PanelTier } from '@/config/pricing';
 import { annualTargetKwh, sizedCountForTier } from '@/lib/sizing';
 import { dollarsPerKwhFromCents } from '@/lib/rate';
 
@@ -110,8 +110,16 @@ export default function Step5Options() {
 
   const against = (over: Parameters<typeof priceWith>[0]) => priceWith(over) - current.estimate;
 
+  // An option the owner has not switched on is not shown at all. A card with a
+  // placeholder price on it is worse than no card: it quotes a number nobody
+  // stands behind.
+  const showPanels = PANELS.premium.enabled;
+  const showBattery = BATTERY.enabled;
+  const showClearing = SITE.vegetationClearing.enabled;
+
   return (
     <div className="space-y-5">
+      {showPanels && (
       <section data-testid="option-panels" className="space-y-2">
         <h3 className="text-[17px] font-semibold text-neutral-900">{OPTION_CARDS[0].title}</h3>
         <p className="text-[16px] leading-snug text-neutral-700">{OPTION_CARDS[0].body}</p>
@@ -132,7 +140,9 @@ export default function Step5Options() {
           />
         </div>
       </section>
+      )}
 
+      {showBattery && (
       <section data-testid="option-battery" className="space-y-2">
         <h3 className="text-[17px] font-semibold text-neutral-900">{OPTION_CARDS[1].title}</h3>
         <p className="text-[16px] leading-snug text-neutral-700">{OPTION_CARDS[1].body}</p>
@@ -155,7 +165,9 @@ export default function Step5Options() {
             ))}
         </div>
       </section>
+      )}
 
+      {showClearing && (
       <section data-testid="option-siteprep" className="space-y-2">
         <h3 className="text-[17px] font-semibold text-neutral-900">{OPTION_CARDS[2].title}</h3>
         <p className="text-[16px] leading-snug text-neutral-700">{OPTION_CARDS[2].body}</p>
@@ -176,6 +188,7 @@ export default function Step5Options() {
           />
         </div>
       </section>
+      )}
 
       <EducationCard copy={STEPS[4].education} />
     </div>

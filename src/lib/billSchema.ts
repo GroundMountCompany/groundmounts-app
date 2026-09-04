@@ -59,7 +59,8 @@ export const BILL_TOOL_SCHEMA = {
           },
           cost: {
             type: ['number', 'null'],
-            description: 'Total dollars for that period, or null if not shown.',
+            description:
+              'Total ELECTRICITY dollars for that period — energy, delivery and electric fixed charges added together. Exclude water, sewer, trash, gas and any other service on a combined statement. Null if the bill does not show it.',
             minimum: 0,
           },
         },
@@ -67,7 +68,8 @@ export const BILL_TOOL_SCHEMA = {
     },
     ratePerKwh: {
       type: ['number', 'null'],
-      description: 'Dollars per kWh if the bill states it, otherwise null.',
+      description:
+        'The per-kWh price the bill prints, if it prints one. On a bill that splits energy and delivery this is usually only part of what they pay, so send what is printed and let the caller work out the rest.',
       minimum: 0,
       maximum: 2,
     },
@@ -90,8 +92,13 @@ export const BILL_PROMPT = `You are reading a residential electricity bill for a
 
 Extract only:
 - each billing period's usage in kWh, labelled as the bill labels it
-- the dollar cost of each period, if the bill shows it
+- the electricity cost of each period, if the bill shows it
 - the price per kWh, if the bill states it
+
+The cost of a period means its ELECTRICITY charges only: energy, delivery and
+any electric fixed or customer charge, added together. On a combined municipal
+statement, exclude water, sewer, trash and anything else that is not
+electricity.
 
 Return at most twelve periods, and if the document shows more than twelve,
 return the twelve MOST RECENT ones, newest first. A usage-history chart is
@@ -232,10 +239,37 @@ export function sanitiseExtraction(raw: unknown): BillExtraction {
     .map((entry) => entry.row);
 
   const rate = Number(input.ratePerKwh);
+  const stated = Number.isFinite(rate) && rate > 0 && rate <= 2 ? rate : null;
 
   return {
     months,
-    ratePerKwh: Number.isFinite(rate) && rate > 0 && rate <= 2 ? rate : null,
+    ratePerKwh: deriveRate(months, stated),
     confidence: input.confidence === 'high' ? 'high' : 'low',
   };
+}
+
+/**
+ * What the customer actually pays per kWh.
+ *
+ * A Texas retail bill splits the price in two — the retailer's energy charge
+ * and the utility's delivery charge — and prints only the first as "¢/kWh".
+ * Sizing off that understates what a kilowatt-hour costs them by a third: on
+ * the Lone Star sample, 12.9c printed against 16.1c actually paid.
+ *
+ * So the current period's electricity total divided by its kilowatt-hours
+ * wins, because that is arithmetic on two numbers off their own bill. The
+ * printed rate is the fallback, and a null here means the caller keeps the
+ * Texas default.
+ */
+export function deriveRate(
+  months: BillMonth[],
+  statedRatePerKwh: number | null
+): number | null {
+  const current = months.find((m) => m.cost !== null && m.cost > 0 && m.kwh > 0);
+  if (current && current.cost !== null) {
+    const blended = current.cost / current.kwh;
+    // Sanity bounds: anything outside this is a misread, not a tariff.
+    if (blended > 0.02 && blended < 1) return Math.round(blended * 10000) / 10000;
+  }
+  return statedRatePerKwh;
 }

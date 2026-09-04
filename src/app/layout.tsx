@@ -29,7 +29,14 @@ export default function RootLayout({
   return (
     <html lang="en">
       <head>
-        <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+        {/*
+          No maximum-scale: it blocks pinch-zoom, and this funnel is built for
+          customers who are mostly over fifty. Somebody who needs to magnify a
+          trench figure must be able to. The usual reason for capping it —
+          iOS zooming when a small input takes focus — does not apply, because
+          every field here is at least 16px.
+        */}
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
       </head>
       <body className={`${geistSans.variable} ${geistMono.variable} antialiased touch-manipulation overscroll-contain`}>
         {children}

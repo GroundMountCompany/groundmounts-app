@@ -30,7 +30,7 @@ export default function EducationCard({ copy }: { copy: EducationCopy }) {
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
-        className="mt-2 min-h-[48px] text-[16px] font-semibold text-blue-700 underline underline-offset-2"
+        className="mt-2 min-h-[48px] text-[16px] font-semibold text-neutral-900 underline underline-offset-2"
       >
         {open ? UI.showLess : UI.learnMore}
       </button>

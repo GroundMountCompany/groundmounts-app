@@ -287,7 +287,7 @@ export default function Step6Quote() {
               clearPersistedQuote();
               setStep(0);
             }}
-            className="min-h-[48px] text-[17px] font-semibold text-blue-700 underline underline-offset-2"
+            className="min-h-[48px] text-[17px] font-semibold text-neutral-900 underline underline-offset-2"
           >
             {UI.startOver}
           </button>

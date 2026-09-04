@@ -140,3 +140,69 @@ export function diffLeadSchema(live: LiveField[]): SchemaDiff {
 export function schemaMatches(diff: SchemaDiff): boolean {
   return diff.missing.length === 0 && diff.mistyped.length === 0;
 }
+
+/**
+ * Choices for the single-select columns, matching exactly what the app writes.
+ *
+ * A select created without these accepts nothing, so every write 422s in a way
+ * that looks like a missing field. Declared here so field creation and the
+ * writer read the same list.
+ */
+export const SELECT_CHOICES: Partial<Record<LeadFieldName, string[]>> = {
+  // Lowercase because that is what PanelTier is in the code and what the route
+  // writes; Airtable select options are case-sensitive.
+  'Panel Tier': ['standard', 'premium'],
+  'Slope Tier': ['Flat', 'Rolling', 'Steep', 'Unknown'],
+  Status: ['Partial', 'New', 'Contacted', 'Quoted', 'Won', 'Lost'],
+};
+
+/** Decimal places for the numeric columns. Money is whole dollars. */
+const NUMBER_PRECISION: Partial<Record<LeadFieldName, number>> = {
+  'System Size kW': 2,
+  'Slope %': 1,
+};
+
+export interface AirtableFieldSpec {
+  name: string;
+  type: string;
+  options?: Record<string, unknown>;
+}
+
+/**
+ * What to POST to the Meta API to create a missing field.
+ *
+ * Creation only. Nothing here can describe an edit or a delete, because the
+ * owner's base is theirs: a script that could retype a column is a script that
+ * could lose their data.
+ */
+export function createSpecFor(name: LeadFieldName): AirtableFieldSpec {
+  const kind: FieldKind = LEAD_SCHEMA[name];
+  const precision = NUMBER_PRECISION[name] ?? 0;
+
+  switch (kind) {
+    case 'text':
+      return { name, type: 'singleLineText' };
+    case 'longText':
+      return { name, type: 'multilineText' };
+    case 'email':
+      return { name, type: 'email' };
+    case 'phone':
+      return { name, type: 'phoneNumber' };
+    case 'number':
+      return { name, type: 'number', options: { precision } };
+    case 'currency':
+      return { name, type: 'currency', options: { precision: 0, symbol: '$' } };
+    case 'checkbox':
+      return { name, type: 'checkbox', options: { icon: 'check', color: 'greenBright' } };
+    case 'attachment':
+      return { name, type: 'multipleAttachments' };
+    case 'select': {
+      const choices = SELECT_CHOICES[name];
+      if (!choices?.length) {
+        // Better to refuse than to create a select nothing can be written to.
+        throw new Error(`No select choices declared for "${name}"`);
+      }
+      return { name, type: 'singleSelect', options: { choices: choices.map((c) => ({ name: c })) } };
+    }
+  }
+}

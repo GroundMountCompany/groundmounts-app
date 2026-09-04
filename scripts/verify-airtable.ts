@@ -6,6 +6,14 @@
  * drifts. Run this before a deploy.
  *
  *   npm run verify:airtable
+ *   npm run verify:airtable -- --create-missing
+ *
+ * With --create-missing it also creates the columns the app needs and the base
+ * does not have, with the names, types and select options declared in
+ * airtableSchema.ts. It only ever POSTs new fields. Nothing in this script can
+ * edit or delete an existing column: a field that is present but the wrong type
+ * is reported for the owner to decide about, never retyped, because the data in
+ * it is theirs and a conversion can lose it.
  *
  * Exit codes: 0 the base matches, 1 the base does not, 2 it could not be
  * checked (missing key, network, no such table) — which is not the same thing
@@ -13,7 +21,13 @@
  */
 
 import { readFileSync } from 'node:fs';
-import { LEAD_SCHEMA, diffLeadSchema, schemaMatches } from '../src/lib/airtableSchema';
+import {
+  LEAD_SCHEMA,
+  createSpecFor,
+  diffLeadSchema,
+  schemaMatches,
+  type LeadFieldName,
+} from '../src/lib/airtableSchema';
 
 const TABLE_NAME = 'Leads';
 
@@ -53,19 +67,8 @@ function fail(message: string, code: 1 | 2): never {
   process.exit(code);
 }
 
-async function main(): Promise<void> {
-  loadEnvLocal();
-
-  const apiKey = process.env.AIRTABLE_API_KEY;
-  const baseId = process.env.AIRTABLE_BASE_ID;
-  if (!apiKey || !baseId) {
-    fail(
-      'Cannot check the schema: AIRTABLE_API_KEY and AIRTABLE_BASE_ID must both be set.\n' +
-        'The token needs the schema.bases:read scope.',
-      2
-    );
-  }
-
+/** Fetch the Leads table's live schema. */
+async function fetchTable(apiKey: string, baseId: string): Promise<MetaTable> {
   const res = await fetch(`https://api.airtable.com/v0/meta/bases/${baseId}/tables`, {
     headers: { Authorization: `Bearer ${apiKey}` },
   }).catch((error: unknown) => {
@@ -91,8 +94,98 @@ async function main(): Promise<void> {
       2
     );
   }
+  return table;
+}
 
-  const diff = diffLeadSchema(table.fields);
+/**
+ * Create one missing column.
+ *
+ * POST only. There is deliberately no code path in this file that PATCHes or
+ * DELETEs a field: the owner's columns and the data in them are theirs.
+ */
+async function createField(
+  apiKey: string,
+  baseId: string,
+  tableId: string,
+  name: LeadFieldName
+): Promise<{ ok: true } | { ok: false; reason: string }> {
+  let spec;
+  try {
+    spec = createSpecFor(name);
+  } catch (error) {
+    return { ok: false, reason: error instanceof Error ? error.message : String(error) };
+  }
+
+  try {
+    const res = await fetch(
+      `https://api.airtable.com/v0/meta/bases/${baseId}/tables/${tableId}/fields`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(spec),
+      }
+    );
+    if (!res.ok) {
+      return { ok: false, reason: `${res.status} ${(await res.text()).slice(0, 200)}` };
+    }
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, reason: String(error) };
+  }
+}
+
+async function main(): Promise<void> {
+  loadEnvLocal();
+
+  const createMissing = process.argv.includes('--create-missing');
+
+  const apiKey = process.env.AIRTABLE_API_KEY;
+  const baseId = process.env.AIRTABLE_BASE_ID;
+  if (!apiKey || !baseId) {
+    fail(
+      'Cannot check the schema: AIRTABLE_API_KEY and AIRTABLE_BASE_ID must both be set.\n' +
+        'The token needs the schema.bases:read scope.',
+      2
+    );
+  }
+
+  let table = await fetchTable(apiKey, baseId);
+  let diff = diffLeadSchema(table.fields);
+
+  if (createMissing && diff.missing.length) {
+    console.log(`Creating ${diff.missing.length} missing field(s) in "${TABLE_NAME}"...`);
+    const failures: string[] = [];
+
+    for (const { name, kind } of diff.missing) {
+      const result = await createField(apiKey, baseId, table.id, name as LeadFieldName);
+      if (result.ok) {
+        console.log(`  created  ${name} (${kind})`);
+      } else {
+        console.error(`  FAILED   ${name} (${kind}) - ${result.reason}`);
+        failures.push(name);
+      }
+    }
+
+    // Re-read the live schema rather than assuming the writes landed.
+    table = await fetchTable(apiKey, baseId);
+    diff = diffLeadSchema(table.fields);
+
+    if (failures.length) {
+      console.error(`\n${failures.length} field(s) could not be created: ${failures.join(', ')}`);
+    }
+  } else if (createMissing) {
+    console.log('Nothing to create: every field the app writes already exists.');
+  }
+
+  if (diff.mistyped.length) {
+    // Never touched, with or without --create-missing.
+    console.log(
+      `Existing columns with an unexpected type are left exactly as they are (${diff.mistyped.length}).`
+    );
+  }
 
   if (diff.unused.length) {
     // Not a failure: the owner keeps their own columns, formulas and notes.

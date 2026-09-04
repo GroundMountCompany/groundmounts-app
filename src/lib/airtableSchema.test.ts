@@ -2,8 +2,11 @@ import { describe, it, expect } from 'vitest';
 import {
   LEAD_SCHEMA,
   ACCEPTABLE_AIRTABLE_TYPES,
+  SELECT_CHOICES,
+  createSpecFor,
   diffLeadSchema,
   schemaMatches,
+  type LeadFieldName,
   type LiveField,
 } from './airtableSchema';
 
@@ -84,5 +87,65 @@ describe('the Airtable schema check', () => {
     const diff = diffLeadSchema([]);
     expect(schemaMatches(diff)).toBe(false);
     expect(diff.missing).toHaveLength(Object.keys(LEAD_SCHEMA).length);
+  });
+});
+
+describe('creating a field the base is missing', () => {
+  it('describes every field in the schema well enough to create it', () => {
+    for (const name of Object.keys(LEAD_SCHEMA) as LeadFieldName[]) {
+      const spec = createSpecFor(name);
+      expect(spec.name, name).toBe(name);
+      // Whatever we create must be a type the checker then accepts, or the
+      // script would create a field and immediately call it wrong.
+      expect(ACCEPTABLE_AIRTABLE_TYPES[LEAD_SCHEMA[name]], name).toContain(spec.type);
+    }
+  });
+
+  it('creates a base that passes its own check', () => {
+    // Round trip: create every field from the spec, diff the result, no news.
+    const created: LiveField[] = (Object.keys(LEAD_SCHEMA) as LeadFieldName[]).map((name) => {
+      const spec = createSpecFor(name);
+      return { name: spec.name, type: spec.type };
+    });
+    expect(schemaMatches(diffLeadSchema(created))).toBe(true);
+  });
+
+  it('gives the selects the exact options the app writes', () => {
+    const panelTier = createSpecFor('Panel Tier');
+    expect(panelTier.type).toBe('singleSelect');
+    expect(panelTier.options?.choices).toEqual([{ name: 'standard' }, { name: 'premium' }]);
+
+    const slopeTier = createSpecFor('Slope Tier');
+    expect(slopeTier.options?.choices).toEqual([
+      { name: 'Flat' },
+      { name: 'Rolling' },
+      { name: 'Steep' },
+      { name: 'Unknown' },
+    ]);
+
+    // Every select must have choices; one without them accepts no writes.
+    for (const [name, kind] of Object.entries(LEAD_SCHEMA)) {
+      if (kind === 'select') {
+        expect(SELECT_CHOICES[name as LeadFieldName], name).toBeTruthy();
+      }
+    }
+  });
+
+  it('asks for whole dollars on money and decimals where they matter', () => {
+    expect(createSpecFor('Price Low')).toEqual({
+      name: 'Price Low',
+      type: 'currency',
+      options: { precision: 0, symbol: '$' },
+    });
+    expect(createSpecFor('System Size kW').options).toEqual({ precision: 2 });
+    expect(createSpecFor('Slope %').options).toEqual({ precision: 1 });
+    expect(createSpecFor('Panels').options).toEqual({ precision: 0 });
+  });
+
+  it('gives a checkbox the options Airtable insists on', () => {
+    const spec = createSpecFor('Site Prep');
+    expect(spec.type).toBe('checkbox');
+    expect(spec.options).toHaveProperty('icon');
+    expect(spec.options).toHaveProperty('color');
   });
 });

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getClientIp, rateLimitOk } from '@/lib/guard';
 import { DEFAULTS } from '@/config/pricing';
 import { TX_FALLBACK_CURVE, type ProductionCurve } from '@/lib/production';
+import { pvwattsUrl, SSURGO_URL } from '@/config/apis';
 
 /**
  * What the design step needs to know about a location.
@@ -74,11 +75,17 @@ async function fetchCurve(lat: number, lng: number): Promise<ProductionCurve | n
   try {
     const results = await Promise.all(
       referenceAzimuths.map(async (azimuth) => {
-        const url =
-          `https://developer.nrel.gov/api/pvwatts/v8.json?api_key=${key}` +
-          `&lat=${lat}&lon=${lng}&system_capacity=1&azimuth=${azimuth}` +
-          `&tilt=${tiltDeg}&array_type=${arrayType}&module_type=${moduleType}` +
-          `&losses=${lossesPct}`;
+        const url = pvwattsUrl({
+          api_key: key,
+          lat,
+          lon: lng,
+          system_capacity: 1,
+          azimuth,
+          tilt: tiltDeg,
+          array_type: arrayType,
+          module_type: moduleType,
+          losses: lossesPct,
+        });
 
         const res = await fetch(url, { signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS) });
         if (!res.ok) throw new Error(`pvwatts ${res.status}`);
@@ -117,7 +124,7 @@ async function fetchSoil(lat: number, lng: number): Promise<string | null> {
   `;
 
   try {
-    const res = await fetch('https://sdmdataaccess.sc.egov.usda.gov/Tabular/post.rest', {
+    const res = await fetch(SSURGO_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ query, format: 'JSON' }),

@@ -4,6 +4,7 @@ import { GET } from './route';
 import { __resetRateLimits } from '@/lib/guard';
 import { TX_FALLBACK_CURVE } from '@/lib/production';
 import { DEFAULTS } from '@/config/pricing';
+import { PVWATTS, SSURGO } from '@/config/apis';
 
 /**
  * /api/site is advisory, and that is the whole point.
@@ -34,7 +35,7 @@ function routeFetch(handler: (url: string) => Response | Promise<Response>) {
   });
 }
 
-const isPvwatts = (url: string) => url.includes('developer.nrel.gov');
+const isPvwatts = (url: string) => url.includes(PVWATTS.host);
 
 beforeEach(() => {
   __resetRateLimits();
@@ -48,6 +49,33 @@ afterEach(() => {
 });
 
 describe('/api/site', () => {
+  it('calls PVWatts at the current host, once per reference azimuth', async () => {
+    // The lab renamed and the old hostname stopped resolving. A DNS failure
+    // looks exactly like a healthy fallback from the outside, so the host is
+    // asserted rather than assumed.
+    const urls: string[] = [];
+    routeFetch((url) => {
+      urls.push(url);
+      return isPvwatts(url) ? pvwattsOk(1650) : ssurgoOk('clay loam');
+    });
+
+    await GET(freshRequest());
+
+    const pvwatts = urls.filter(isPvwatts).map((u) => new URL(u));
+    expect(pvwatts).toHaveLength(DEFAULTS.pvwatts.referenceAzimuths.length);
+    for (const url of pvwatts) {
+      expect(url.host).toBe('developer.nlr.gov');
+      expect(url.host).not.toBe('developer.nrel.gov');
+      expect(url.pathname).toBe(PVWATTS.path);
+    }
+    expect(
+      pvwatts.map((u) => Number(u.searchParams.get('azimuth'))).sort((a, b) => a - b)
+    ).toEqual([...DEFAULTS.pvwatts.referenceAzimuths].sort((a, b) => a - b));
+
+    // And the soil lookup still goes where it always did.
+    expect(urls.some((u) => u.includes(SSURGO.host))).toBe(true);
+  });
+
   it('returns both lookups when both answer', async () => {
     routeFetch((url) => (isPvwatts(url) ? pvwattsOk(1650) : ssurgoOk('clay loam')));
 

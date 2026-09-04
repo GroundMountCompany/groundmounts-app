@@ -41,6 +41,37 @@ function jsonResponse(status: number, body: Record<string, unknown>): Response {
   } as unknown as Response;
 }
 
+/**
+ * Flush and wait for the handler to finish with the item.
+ *
+ * `flushQueue` takes the item off the queue *before* sending it, so the queue
+ * is momentarily empty whatever the outcome. Asserting straight after the call
+ * therefore passes for a drop and for a retry alike — which it did, silently,
+ * until a deliberate break failed to fail. This waits for the request to have
+ * been answered and the .then/.catch chain to have run, so what is asserted is
+ * where the item ended up rather than where it briefly was not.
+ */
+async function flushAndSettle(respond: (url: string) => Response | Promise<Response>) {
+  let called: () => void = () => {};
+  const requested = new Promise<void>((resolve) => (called = resolve));
+
+  vi.stubGlobal('fetch', async (url: string) => {
+    try {
+      return await respond(url);
+    } finally {
+      // Signalled on the way out either way: a thrown request is exactly the
+      // offline case, and it still needs to be waited for.
+      called();
+    }
+  });
+
+  flushQueue();
+  await requested;
+  // Let the response handler and its catch/finally run, without firing the
+  // backoff timer that a re-queued item would schedule.
+  await vi.advanceTimersByTimeAsync(0);
+}
+
 let flushQueue: typeof import('./leadQueue').flushQueue;
 let enqueueOrSend: typeof import('./leadQueue').enqueueOrSend;
 
@@ -60,14 +91,9 @@ afterEach(() => {
 describe('the queue after a half-successful submit', () => {
   it('queues an email-only retry when the lead filed but the email did not send', async () => {
     localStorage.setItem(KEY, JSON.stringify([lead('half-success')]));
-    const fetchMock = vi.fn(async () =>
-      jsonResponse(200, { ok: true, leadFiled: true, emailSent: false })
-    );
-    vi.stubGlobal('fetch', fetchMock);
+    await flushAndSettle(() => jsonResponse(200, { ok: true, leadFiled: true, emailSent: false }));
 
-    flushQueue();
-    await vi.waitFor(() => expect(queued()).toHaveLength(1));
-
+    expect(queued()).toHaveLength(1);
     const [retry] = queued();
     expect(retry.resend, 'the retry would have filed a second lead').toBe(true);
     expect(retry.id).toBe('half-success');
@@ -75,43 +101,65 @@ describe('the queue after a half-successful submit', () => {
 
   it('drops the item when both halves succeeded', async () => {
     localStorage.setItem(KEY, JSON.stringify([lead('all-good')]));
-    vi.stubGlobal('fetch', async () =>
-      jsonResponse(200, { ok: true, leadFiled: true, emailSent: true })
-    );
 
-    flushQueue();
-    await vi.waitFor(() => expect(queued()).toHaveLength(0));
+    await flushAndSettle(() => jsonResponse(200, { ok: true, leadFiled: true, emailSent: true }));
+
+    expect(queued()).toHaveLength(0);
   });
 
   it('does not queue a resend for a resend that failed again', async () => {
     // Otherwise a permanently broken mailer grows the queue without bound.
     localStorage.setItem(KEY, JSON.stringify([{ ...lead('already-resent'), resend: true }]));
-    vi.stubGlobal('fetch', async () =>
-      jsonResponse(200, { ok: true, leadFiled: true, emailSent: false })
-    );
 
-    flushQueue();
-    await vi.waitFor(() => expect(queued()).toHaveLength(0));
+    await flushAndSettle(() => jsonResponse(200, { ok: true, leadFiled: true, emailSent: false }));
+
+    expect(queued()).toHaveLength(0);
   });
 
   it('still retries the whole payload when the request itself fails', async () => {
     localStorage.setItem(KEY, JSON.stringify([lead('network-down')]));
-    vi.stubGlobal('fetch', async () => {
+
+    await flushAndSettle(() => {
       throw new Error('offline');
     });
 
-    flushQueue();
-    await vi.waitFor(() => expect(queued()).toHaveLength(1));
+    expect(queued()).toHaveLength(1);
     expect(queued()[0].resend, 'a network failure was mistaken for a mail failure').toBeFalsy();
     expect(queued()[0]._retries).toBe(1);
   });
 
   it('drops a lead the server rejected as invalid rather than looping', async () => {
     localStorage.setItem(KEY, JSON.stringify([lead('bad-payload')]));
-    vi.stubGlobal('fetch', async () => jsonResponse(400, { ok: false, error: 'invalid_inputs' }));
 
-    flushQueue();
-    await vi.waitFor(() => expect(queued()).toHaveLength(0));
+    await flushAndSettle(() => jsonResponse(400, { ok: false, error: 'invalid_inputs' }));
+
+    expect(queued()).toHaveLength(0);
+  });
+
+  // One case per status: the module rate-limits flushes at module scope, so a
+  // loop inside a single test would be measuring that instead of the policy.
+  it.each([400, 404, 409, 429])(
+    'drops a lead on %i, because that will not work on a second try either',
+    async (status) => {
+      // 404 is a resend for a lead the server has no record of; 409 is another
+      // instance already writing this one. Retrying either is pointless, and
+      // for the duplicate it is actively wrong.
+      localStorage.setItem(KEY, JSON.stringify([lead(`refused-${status}`)]));
+
+      await flushAndSettle(() => jsonResponse(status, { ok: false }));
+
+      expect(queued()).toHaveLength(0);
+    }
+  );
+
+  it.each([500, 502, 503])('keeps the lead on %i, because that is what a queue is for', async (status) => {
+    // Airtable, Redis or Resend unreachable. The design must survive it.
+    localStorage.setItem(KEY, JSON.stringify([lead(`down-${status}`)]));
+
+    await flushAndSettle(() => jsonResponse(status, { ok: false }));
+
+    expect(queued()).toHaveLength(1);
+    expect(queued()[0]._retries).toBe(1);
   });
 });
 

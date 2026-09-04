@@ -1,18 +1,14 @@
-import { brands, BrandConfig, BrandKey, DEFAULT_BRAND } from './brands';
+import { brands, brandFor, BrandConfig, BrandKey, DEFAULT_BRAND } from './brands';
 
 /**
- * Get the current brand configuration based on NEXT_PUBLIC_BRAND env var.
- * Falls back to the default brand if not set or invalid.
+ * The brand for this build, or the one a `?brand=` asked for.
+ *
+ * Delegates to `brandFor` so the page, the quote email and the tests all
+ * resolve a brand the same way. `?source=` is attribution and never reaches
+ * this.
  */
-export function getBrand(): BrandConfig {
-  const brandKey = (process.env.NEXT_PUBLIC_BRAND || DEFAULT_BRAND) as BrandKey;
-
-  if (brandKey in brands) {
-    return brands[brandKey];
-  }
-
-  console.warn(`Unknown brand "${brandKey}", falling back to "${DEFAULT_BRAND}"`);
-  return brands[DEFAULT_BRAND];
+export function getBrand(requested?: string | null): BrandConfig {
+  return brandFor(requested);
 }
 
 /**

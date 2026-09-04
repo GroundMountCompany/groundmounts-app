@@ -130,9 +130,14 @@ export function flushQueue(url = "/api/leads") {
   })
   .then(async r => {
     if (!r.ok) {
-      // Don't retry on 400 (bad request) - data is invalid
-      if (r.status === 400) {
-        console.warn("[LEAD_QUEUE] Dropping invalid lead:", next.id);
+      // 4xx is the server saying this request will never work: a malformed
+      // payload, a resend for a lead it has no record of, or another instance
+      // already mid-write. Retrying is pointless and, for a duplicate, wrong.
+      //
+      // 5xx is the server saying it could not do it *this time* — Airtable,
+      // Redis or Resend unreachable — which is precisely what a queue is for.
+      if (r.status < 500) {
+        console.warn("[LEAD_QUEUE] Dropping lead the server refused:", next.id, r.status);
         return;
       }
       throw new Error("net");

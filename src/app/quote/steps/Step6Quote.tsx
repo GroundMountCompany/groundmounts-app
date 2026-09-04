@@ -88,7 +88,10 @@ export default function Step6Quote() {
         email,
         phone,
         state: searchParams.get('state') || 'TX',
+        // Attribution: which partner sent them. Recorded, and nothing more.
         source: searchParams.get('source') || brand.domain,
+        // Identity: what the email says it is from.
+        brand: searchParams.get('brand') || undefined,
         honeypot: company,
       },
       Date.now()

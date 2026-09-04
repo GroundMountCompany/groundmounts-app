@@ -9,8 +9,14 @@ import { parseQuoteInputs, priceFromInputs, InvalidQuoteInputs } from "@/lib/quo
 import { siteFactsForArray, resolveSiteConditions } from "@/lib/server/siteLookup";
 import EmailTemplate from "@/components/common/EmailTemplate";
 import type { ReactElement } from "react";
-import { brandForSource } from "@/config/brands";
-import { claimOnce, cacheGet, cacheSet } from "@/lib/server/redis";
+import { brandFor } from "@/config/brands";
+import {
+  storeGet,
+  storeSet,
+  acquireLease,
+  releaseLease,
+  StoreUnavailable,
+} from "@/lib/server/redis";
 
 /** Decoded screenshots above this are rejected rather than uploaded. */
 const MAX_SCREENSHOT_BYTES = 2 * 1024 * 1024;
@@ -33,10 +39,25 @@ const NOTIFICATION_EMAIL = process.env.NOTIFY_EMAIL || "bert@groundmounts.com";
 
 /** How long a completed submit is remembered, so a repeat is a no-op. */
 const SUBMIT_TTL_SECONDS = 24 * 60 * 60;
+/**
+ * How long one submit may hold the write.
+ *
+ * Long enough for Airtable and two emails, short enough that a process killed
+ * mid-flight does not lock the customer out for the afternoon.
+ */
+const LEASE_TTL_SECONDS = 60;
 const SUBMIT_PREFIX = "gm:submit:";
+const LEASE_PREFIX = "gm:submit:lease:";
 
-/** What a finished submit returned, replayed verbatim to a repeat of it. */
-interface SubmitResult {
+/**
+ * What a finished submit did, written only once the record exists.
+ *
+ * It carries the recipient and the quote as well as the reply, because a
+ * resend has to reproduce the email from what the server stored rather than
+ * from anything a later request says. Its presence is the answer to "has this
+ * already happened?".
+ */
+interface SubmitRecord {
   ok: boolean;
   leadFiled: boolean;
   emailSent: boolean;
@@ -44,6 +65,29 @@ interface SubmitResult {
   priceHigh: number;
   lineItems: Array<{ key: string; label: string; detail?: string; amount: number }>;
   airtableId?: string;
+  /** Everything needed to send the email again, and nothing from the caller. */
+  email: string;
+  address: string;
+  brand?: string;
+  totalPanels: number;
+  trenchFeet: number;
+  systemSizeKw: number;
+  annualProductionKwh: number;
+  estimate: number;
+}
+
+/** The customer-facing half of a stored record. */
+function replyFrom(record: SubmitRecord, extra: Record<string, unknown> = {}) {
+  return {
+    ok: record.ok,
+    leadFiled: record.leadFiled,
+    emailSent: record.emailSent,
+    priceLow: record.priceLow,
+    priceHigh: record.priceHigh,
+    lineItems: record.lineItems,
+    airtableId: record.airtableId,
+    ...extra,
+  };
 }
 const AIRTABLE_BASE_ID = process.env.AIRTABLE_BASE_ID;
 // Airtable record deep links need the table *id* (tblXXXXXXXX), not its name.
@@ -66,6 +110,8 @@ interface LeadPayload {
   address?: string;
   name?: string;
   source?: string;
+  /** Which brand the funnel wore. Attribution is `source`, and separate. */
+  brand?: string;
   quote?: {
     /** What the price is computed from. Everything else here is context. */
     inputs?: unknown;
@@ -104,6 +150,7 @@ function validateLead(data: unknown): LeadPayload {
     address: (obj.address as string) || "",
     name: (obj.name as string) || "",
     source: (obj.source as string) || "",
+    brand: typeof obj.brand === 'string' ? obj.brand : undefined,
     quote: obj.quote as LeadPayload['quote'],
     ts: obj.ts,
     honeypot: obj.honeypot as string,
@@ -122,7 +169,7 @@ function validateLead(data: unknown): LeadPayload {
 async function sendQuoteEmail(
   to: string,
   address: string,
-  source: string | undefined,
+  brandKey: string | undefined,
   inputs: { panelCount: number; trenchFeet: number },
   priced: {
     systemSizeKw: number;
@@ -132,9 +179,10 @@ async function sendQuoteEmail(
 ): Promise<boolean> {
   try {
     const resend = getResendOrThrow();
-    // The brand the customer filled the form in on, not the build's default:
-    // a quote from a name they have never seen reads like spam.
-    const brand = brandForSource(source);
+    // The brand this funnel wears, which is a build setting or an explicit
+    // ?brand=, never the attribution parameter: otherwise any URL could choose
+    // what a customer's email claimed to be from.
+    const brand = brandFor(brandKey);
     const template = EmailTemplate({
       client: to,
       address: address || 'Your Property',
@@ -254,6 +302,9 @@ async function savePartial(raw: Record<string, unknown>): Promise<NextResponse> 
 }
 
 export async function POST(req: NextRequest) {
+  // Hoisted so an unexpected throw anywhere below still gives the lease back.
+  let heldLease: string | null = null;
+
   try {
     const body = await req.json();
     const raw = body as Record<string, unknown>;
@@ -327,47 +378,117 @@ export async function POST(req: NextRequest) {
       throw error;
     }
 
-    // Idempotency. Two taps on Get my quote can land on two instances, and the
-    // client-side disable is a courtesy rather than the mechanism: without
-    // this the customer gets two emails and the owner gets two rows.
-    //
-    // A repeat replays the first answer verbatim and writes nothing.
-    if (!lead.resend) {
-      const key = SUBMIT_PREFIX + lead.id;
-      const claimed = await claimOnce(key + ':lock', SUBMIT_TTL_SECONDS);
-      if (claimed === false) {
-        const first = await cacheGet<SubmitResult>(key);
-        if (first) {
-          console.log('[LEADS_DUPLICATE] replaying first result for', lead.id);
-          return NextResponse.json({ ...first, duplicate: true });
-        }
-        // Claimed but no result yet: the first request is still in flight.
-        console.log('[LEADS_DUPLICATE] submit already in progress for', lead.id);
-        return NextResponse.json(
-          { ok: false, leadFiled: false, emailSent: false, error: 'in_progress' },
-          { status: 409 }
-        );
-      }
+    const submitKey = SUBMIT_PREFIX + lead.id;
+    const leaseKey = LEASE_PREFIX + lead.id;
+
+    /**
+     * What the server already knows about this submit.
+     *
+     * A configured store that cannot be read is not the same as no record: the
+     * first answers "this may or may not have happened", and guessing wrong
+     * means either a duplicate record or a lost lead. So it is a 503 and the
+     * client keeps the payload.
+     */
+    let stored: SubmitRecord | null;
+    try {
+      stored = await storeGet<SubmitRecord>(submitKey);
+    } catch (error) {
+      console.error('[LEADS_STORE_DOWN]', lead.id, error);
+      return NextResponse.json(
+        { ok: false, leadFiled: false, emailSent: false, error: 'store_unavailable' },
+        { status: 503 }
+      );
     }
 
-    // A retry for a lead that is already filed: send the email, nothing else.
-    // The record exists, so re-writing it would duplicate it, and the customer
-    // is waiting on the one thing that failed.
+    // A resend is not a way to send mail. It is a way to finish one specific
+    // submit that this server remembers failing halfway.
+    //
+    // Everything except the lead id is ignored: the recipient and the figures
+    // come from what was stored when the record was written. Without that, the
+    // route would forward any address in any request body to Resend under our
+    // own verified domain, which is an open relay with a solar quote attached.
     if (lead.resend) {
-      const emailSent = lead.email
-        ? await sendQuoteEmail(lead.email, lead.address ?? '', lead.source, inputs, priced)
-        : false;
-      console.log('[LEAD_EMAIL_RESEND]', lead.id, emailSent ? 'sent' : 'failed');
-      return NextResponse.json(
+      if (!stored || !stored.leadFiled) {
+        console.log('[LEAD_RESEND_UNKNOWN]', lead.id);
+        return NextResponse.json(
+          { ok: false, leadFiled: false, emailSent: false, error: 'no_such_lead' },
+          { status: 404 }
+        );
+      }
+
+      if (stored.emailSent) {
+        // Already done. Say so rather than sending a second copy.
+        return NextResponse.json(replyFrom(stored, { duplicate: true }));
+      }
+
+      const emailSent = await sendQuoteEmail(
+        stored.email,
+        stored.address,
+        stored.brand,
+        { panelCount: stored.totalPanels, trenchFeet: stored.trenchFeet },
         {
-          ok: emailSent,
-          leadFiled: true,
-          emailSent,
-          priceLow: priced.quote.low,
-          priceHigh: priced.quote.high,
-          lineItems: priced.quote.lineItems,
-        },
-        { status: emailSent ? 200 : 502 }
+          systemSizeKw: stored.systemSizeKw,
+          annualProductionKwh: stored.annualProductionKwh,
+          quote: {
+            lineItems: stored.lineItems,
+            estimate: stored.estimate,
+            low: stored.priceLow,
+            high: stored.priceHigh,
+          },
+        }
+      );
+      console.log('[LEAD_EMAIL_RESEND]', lead.id, emailSent ? 'sent' : 'failed');
+
+      if (emailSent) {
+        const updated: SubmitRecord = { ...stored, emailSent: true, ok: true };
+        try {
+          await storeSet(submitKey, updated, SUBMIT_TTL_SECONDS);
+        } catch (error) {
+          // The mail went. Losing the flag means one extra resend at worst.
+          console.warn('[LEAD_RESEND_FLAG]', lead.id, error);
+        }
+        return NextResponse.json(replyFrom(updated));
+      }
+
+      return NextResponse.json(replyFrom({ ...stored, ok: false }), { status: 502 });
+    }
+
+    // A repeat of a completed submit replays it and does nothing else.
+    if (stored) {
+      console.log('[LEADS_DUPLICATE] replaying stored result for', lead.id);
+      return NextResponse.json(replyFrom(stored, { duplicate: true }));
+    }
+
+    /**
+     * Lease, then commit.
+     *
+     * The lease is held only for as long as the work takes and is released the
+     * moment anything fails, so a customer whose submit hit a broken Airtable
+     * can press the button again immediately. The durable record is written
+     * after the write succeeds — it is a record of what happened, not a claim
+     * that it is about to.
+     */
+    let leased: boolean;
+    try {
+      leased = await acquireLease(leaseKey, LEASE_TTL_SECONDS);
+    } catch (error) {
+      console.error('[LEADS_STORE_DOWN]', lead.id, error);
+      return NextResponse.json(
+        { ok: false, leadFiled: false, emailSent: false, error: 'store_unavailable' },
+        { status: 503 }
+      );
+    }
+
+    heldLease = leaseKey;
+
+    if (!leased) {
+      heldLease = null;
+      // Another request for this same lead is mid-write. Dropping is right:
+      // that one is going to finish the job.
+      console.log('[LEADS_IN_PROGRESS]', lead.id);
+      return NextResponse.json(
+        { ok: false, leadFiled: false, emailSent: false, error: 'in_progress' },
+        { status: 409 }
       );
     }
 
@@ -469,16 +590,83 @@ export async function POST(req: NextRequest) {
     // Upserted, not created: the partial saves from steps 1, 3 and 4 have been
     // writing to this row all along, and the owner should have one record per
     // customer rather than four.
-    const result = await upsertLeadByLeadId(cleanFields, lead.id);
+    //
+    // Nothing is remembered as done until this returns. If Airtable is down,
+    // the lease goes back immediately and the customer can press the button
+    // again rather than being told their submit is already in progress.
+    let result: { id?: string };
+    try {
+      result = await upsertLeadByLeadId(cleanFields, lead.id);
+    } catch (error) {
+      await releaseLease(leaseKey);
+      heldLease = null;
+      console.error('[LEAD_WRITE_FAILED]', lead.id, error instanceof Error ? error.message : error);
+      return NextResponse.json(
+        { ok: false, leadFiled: false, emailSent: false, error: 'lead_not_saved' },
+        { status: 502 }
+      );
+    }
 
     console.log("[LEAD_CAPTURED]", lead.id, "airtable_id:", result.id);
 
+    /**
+     * The record exists, so this submit has happened. Commit that fact before
+     * anything else can fail.
+     *
+     * Written with emailSent false and updated after the send: a crash between
+     * the two leaves a lead that is filed and unsent, which is exactly the
+     * state `resend` exists to finish.
+     */
+    const record: SubmitRecord = {
+      ok: true,
+      leadFiled: true,
+      emailSent: false,
+      // The screen reveals these, not its own arithmetic. The customer must be
+      // shown the number that was filed and emailed, even if this page has
+      // somehow computed a different one.
+      priceLow: priced.quote.low,
+      priceHigh: priced.quote.high,
+      lineItems: priced.quote.lineItems,
+      airtableId: result.id,
+      email: lead.email ?? '',
+      address: lead.address ?? '',
+      brand: lead.brand,
+      totalPanels: inputs.panelCount,
+      trenchFeet: inputs.trenchFeet,
+      systemSizeKw: priced.systemSizeKw,
+      annualProductionKwh: priced.annualProductionKwh,
+      estimate: priced.quote.estimate,
+    };
+
+    try {
+      await storeSet(SUBMIT_PREFIX + lead.id, record, SUBMIT_TTL_SECONDS);
+    } catch (error) {
+      // The lead is filed. Without the record a repeat would file it again, so
+      // hold the lease to its full minute rather than releasing it, and tell
+      // the client to retry: the store may be back by then.
+      console.error('[LEAD_RECORD_FAILED]', lead.id, error);
+      return NextResponse.json(
+        { ok: false, leadFiled: true, emailSent: false, error: 'store_unavailable' },
+        { status: 503 }
+      );
+    }
+
     // The customer's quote email. The lead is already safe at this point, so a
     // failure here is reported in the response rather than failing the request:
-    // the client retries the email alone.
+    // the client retries the email alone, through `resend`.
     const emailSent = lead.email
-      ? await sendQuoteEmail(lead.email, lead.address ?? '', lead.source, inputs, priced)
+      ? await sendQuoteEmail(lead.email, lead.address ?? '', lead.brand, inputs, priced)
       : false;
+
+    if (emailSent) {
+      record.emailSent = true;
+      try {
+        await storeSet(SUBMIT_PREFIX + lead.id, record, SUBMIT_TTL_SECONDS);
+      } catch (error) {
+        // At worst the customer gets one duplicate quote from a resend.
+        console.warn('[LEAD_RECORD_FLAG]', lead.id, error);
+      }
+    }
 
     // Send notification email (don't fail request if email fails)
     try {
@@ -583,32 +771,29 @@ export async function POST(req: NextRequest) {
       // Don't throw - lead was still captured successfully
     }
 
-    const result_body: SubmitResult = {
-      ok: true,
-      leadFiled: true,
-      emailSent,
-      // The screen reveals these, not its own arithmetic. The customer must be
-      // shown the number that was filed and emailed, even if this page has
-      // somehow computed a different one.
-      priceLow: priced.quote.low,
-      priceHigh: priced.quote.high,
-      lineItems: priced.quote.lineItems,
-      airtableId: result.id,
-    };
+    // The work is committed and the record is written; the lease has done its
+    // job and the next request should be answered from the record.
+    await releaseLease(leaseKey);
+    heldLease = null;
 
-    // Remembered so a repeat of this submit replays it instead of doing it
-    // again. Only a completed one: a failure should be retryable.
-    await cacheSet(SUBMIT_PREFIX + lead.id, result_body, SUBMIT_TTL_SECONDS);
-
-    return NextResponse.json(result_body);
+    return NextResponse.json(replyFrom(record));
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e);
     const stack = e instanceof Error ? e.stack : undefined;
     console.error("[LEADS_ROUTE_ERROR]", msg);
     if (stack) console.error("[LEADS_ROUTE_STACK]", stack);
+
+    // Something broke on this side. A 400 here told the client its payload was
+    // bad and the queue dropped the lead; a malformed request is rejected by
+    // the explicit checks above, so anything reaching here is ours to fix and
+    // theirs to retry. A store that is down says so specifically.
+    // Give the lease back so the retry is not told it is already in progress.
+    if (heldLease) await releaseLease(heldLease);
+
+    const status = e instanceof StoreUnavailable ? 503 : 502;
     return NextResponse.json(
-      { ok: false, leadFiled: false, emailSent: false, error: msg || "bad_request" },
-      { status: 400 }
+      { ok: false, leadFiled: false, emailSent: false, error: msg || "server_error" },
+      { status }
     );
   }
 }

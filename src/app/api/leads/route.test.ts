@@ -10,18 +10,34 @@ import type { SiteResponse } from '@/lib/server/siteLookup';
 
 /** The durable store, stubbed. Real Redis is not a unit-test dependency. */
 const store = new Map<string, unknown>();
+/** Flipped on by the cases that need a configured-but-unreachable store. */
+let storeDown = false;
+
 vi.mock('@/lib/server/redis', async () => {
   const actual = await vi.importActual<typeof import('@/lib/server/redis')>('@/lib/server/redis');
+  const failIfDown = (op: string) => {
+    if (storeDown) throw new actual.StoreUnavailable(op, new Error('ECONNREFUSED'));
+  };
   return {
     ...actual,
     redis: () => null,
-    cacheGet: async (key: string) => store.get(key) ?? null,
-    cacheSet: async (key: string, value: unknown) => void store.set(key, value),
-    claimOnce: async (key: string) => {
+    storeGet: async (key: string) => {
+      failIfDown('get');
+      return store.get(key) ?? null;
+    },
+    storeSet: async (key: string, value: unknown) => {
+      failIfDown('set');
+      store.set(key, value);
+    },
+    acquireLease: async (key: string) => {
+      failIfDown('lease');
       if (store.has(key)) return false;
       store.set(key, '1');
       return true;
     },
+    releaseLease: async (key: string) => void store.delete(key),
+    cacheGet: async () => null,
+    cacheSet: async () => undefined,
   };
 });
 
@@ -53,6 +69,7 @@ vi.mock('@/lib/airtable', async () => {
   return {
     ...actual,
     upsertLeadByLeadId: async (fields: LeadFields, leadId: string) => {
+      if (failWrite) throw new Error('Airtable error: 503 - upstream');
       written.push({ ...fields, 'Lead ID': leadId });
       return { id: 'recTest123', created: true };
     },
@@ -98,6 +115,8 @@ const NOTHING_KNOWN: SiteResponse = {
 
 /** Set by the tests that need the mail to fail. */
 let failEmail = false;
+/** Set by the tests that need Airtable to fail. */
+let failWrite = false;
 
 /** What the stubbed server "finds" on the ground. Overridden per test. */
 let siteFacts: SiteResponse = { ...NOTHING_KNOWN, curve: SITE_CURVE, curveSource: 'pvwatts' };
@@ -164,6 +183,8 @@ function post(body: Record<string, unknown>): NextRequest {
 
 beforeEach(() => {
   store.clear();
+  storeDown = false;
+  failWrite = false;
   written.length = 0;
   curveCalls.length = 0;
   siteFacts = { ...NOTHING_KNOWN, curve: SITE_CURVE, curveSource: 'pvwatts' };
@@ -448,35 +469,22 @@ describe('one request does the whole submit', () => {
     expect(body.emailSent).toBe(false);
   });
 
-  it('resends the email without writing a second record', async () => {
+  it('finishes a lead whose email failed, without writing a second record', async () => {
+    failEmail = true;
     await POST(post(validLead()));
     expect(written).toHaveLength(1);
+    notifications.length = 0;
 
+    failEmail = false;
     __resetRateLimits();
     const res = await POST(post({ ...validLead(), resend: true }));
     const body = await res.json();
 
     expect(body).toMatchObject({ ok: true, leadFiled: true, emailSent: true });
     expect(written, 'a resend wrote a second Airtable record').toHaveLength(1);
-    // Two quote emails, one owner notification: the resend sends only the
-    // customer's copy.
-    expect(notifications.filter((n) => n.react)).toHaveLength(2);
-    expect(notifications.filter((n) => n.html)).toHaveLength(1);
-  });
-
-  it('reports a failed resend rather than claiming it went', async () => {
-    failEmail = true;
-    const res = await POST(post({ ...validLead(), resend: true }));
-
-    expect(res.status).toBe(502);
-    expect(await res.json()).toMatchObject({ leadFiled: true, emailSent: false });
-    expect(written, 'a resend wrote a record').toHaveLength(0);
-  });
-
-  it('prices a resend from the same inputs, so a retry cannot change the quote', async () => {
-    await POST(post({ ...validLead(), resend: true }));
-    const expected = priceFromInputs(parseQuoteInputs(INPUTS), SITE_CURVE);
-    expect(quoteHtml()).toContain(money(expected.quote.low));
+    // The customer's copy only: the owner was notified the first time.
+    expect(notifications.filter((n) => n.react)).toHaveLength(1);
+    expect(notifications.filter((n) => n.html)).toHaveLength(0);
   });
 });
 
@@ -576,15 +584,19 @@ describe('submitting twice', () => {
     expect(notifications, 'a double submit sent more mail').toHaveLength(2);
   });
 
-  it('lets a resend through, because that is the one repeat that is correct', async () => {
+  it('does not re-send for a lead whose email already went', async () => {
     await POST(post(validLead()));
+    expect(notifications.filter((n) => n.react)).toHaveLength(1);
     __resetRateLimits();
 
     const res = await POST(post({ ...validLead(), resend: true }));
 
-    expect(await res.json()).toMatchObject({ emailSent: true });
+    expect(await res.json()).toMatchObject({ emailSent: true, duplicate: true });
     expect(written).toHaveLength(1);
-    expect(notifications.filter((n) => n.react)).toHaveLength(2);
+    expect(
+      notifications.filter((n) => n.react),
+      'a resend sent a second copy of an email that had already arrived'
+    ).toHaveLength(1);
   });
 
   it('does not remember a submit that failed, so it can be retried', async () => {
@@ -602,20 +614,182 @@ describe('submitting twice', () => {
 });
 
 describe('the brand on the email', () => {
-  it('sends as the brand the funnel was filled in on', async () => {
-    await POST(post({ ...validLead(), source: 'backyardsolartexas.com' }));
+  it('is the build default when nothing asks for another', async () => {
+    await POST(post(validLead()));
 
     const quote = quoteEmail() as unknown as { from: string; replyTo: string; subject: string };
-    expect(quote.from).toContain('backyardsolartexas.com');
-    expect(quote.replyTo).toContain('backyardsolartexas.com');
-    expect(quote.subject).toContain('Backyard Solar');
+    expect(quote.from).toContain('quotes@groundmounts.com');
+    expect(quote.subject).toContain('The Ground Mount Company');
   });
 
-  it('falls back to a neutral sender for a brandless funnel', async () => {
-    await POST(post({ ...validLead(), source: 'neutral' }));
+  it('honours an explicit brand', async () => {
+    await POST(post({ ...validLead(), brand: 'neutral' }));
 
     const quote = quoteEmail() as unknown as { from: string; subject: string };
-    expect(quote.from).toContain('groundmounts.com');
+    // Same verified sending domain, neutral display name.
+    expect(quote.from).toContain('quotes@groundmounts.com');
+    expect(quote.from).toContain('Ground Mount Solar');
     expect(quote.subject).toContain('Ground Mount Solar');
+    expect(quote.subject).not.toContain('The Ground Mount Company');
+  });
+
+  it('never lets attribution choose the brand', async () => {
+    // ?source= says which partner sent the visitor. If it could also pick the
+    // brand, any URL could decide what a customer's email claimed to be from.
+    await POST(
+      post({ ...validLead(), source: 'neutral', brand: undefined })
+    );
+
+    const quote = quoteEmail() as unknown as { subject: string };
+    expect(quote.subject).toContain('The Ground Mount Company');
+
+    // And the attribution is still recorded, because that is what it is for.
+    expect(written[0].Source).toBe('neutral');
+  });
+
+  it('falls back to the default for a brand that does not exist', async () => {
+    await POST(post({ ...validLead(), brand: 'texasgroundmountsolar' }));
+
+    const quote = quoteEmail() as unknown as { from: string; subject: string };
+    expect(quote.subject).toContain('The Ground Mount Company');
+    expect(quote.from).toContain('quotes@groundmounts.com');
+  });
+});
+
+describe('resending is not a way to send mail', () => {
+  it('refuses a resend for a lead it has never heard of', async () => {
+    const res = await POST(post({ ...validLead(), id: 'never-submitted-1234', resend: true }));
+
+    expect(res.status).toBe(404);
+    expect((await res.json()).error).toBe('no_such_lead');
+    expect(notifications, 'a resend for an unknown lead sent mail').toHaveLength(0);
+    expect(written).toHaveLength(0);
+  });
+
+  it('sends to the stored address, not the one in the request', async () => {
+    // The attack: file a lead, then ask for it again with somebody else's
+    // address in the body and use our verified domain to mail a stranger.
+    failEmail = true;
+    await POST(post(validLead()));
+    expect(quoteEmail()).toBeTruthy();
+    notifications.length = 0;
+
+    failEmail = false;
+    __resetRateLimits();
+    const res = await POST(
+      post({
+        ...validLead(),
+        resend: true,
+        email: 'attacker@example.com',
+        address: 'Somewhere else entirely',
+      })
+    );
+
+    expect(res.status).toBe(200);
+    const sent = notifications.filter((n) => n.react);
+    expect(sent, 'a resend sent more than one email').toHaveLength(1);
+    expect(sent[0].to).toEqual(['bert@example.com']);
+    expect(sent[0].to).not.toEqual(['attacker@example.com']);
+  });
+
+  it('prices a resend from what was stored, not from the request body', async () => {
+    failEmail = true;
+    await POST(post(validLead()));
+    const filedLow = written[0]['Price Low'];
+    notifications.length = 0;
+
+    failEmail = false;
+    __resetRateLimits();
+    await POST(
+      post({
+        ...validLead(),
+        resend: true,
+        quote: { inputs: { ...INPUTS, panelCount: 400 } },
+      })
+    );
+
+    const html = quoteHtml();
+    expect(html).toContain((filedLow as number).toLocaleString('en-US'));
+    // 400 panels would be an order of magnitude more.
+    expect(html).not.toContain('400 x');
+  });
+
+  it('flips emailSent so a second resend does not send twice', async () => {
+    failEmail = true;
+    await POST(post(validLead()));
+    notifications.length = 0;
+
+    failEmail = false;
+    __resetRateLimits();
+    await POST(post({ ...validLead(), resend: true }));
+    __resetRateLimits();
+    const again = await POST(post({ ...validLead(), resend: true }));
+
+    expect(await again.json()).toMatchObject({ emailSent: true, duplicate: true });
+    expect(notifications.filter((n) => n.react), 'the second resend sent again').toHaveLength(1);
+  });
+
+  it('reports a failed resend as retryable, and keeps the lead unsent', async () => {
+    failEmail = true;
+    await POST(post(validLead()));
+    __resetRateLimits();
+
+    const res = await POST(post({ ...validLead(), resend: true }));
+    expect(res.status).toBe(502);
+    expect(await res.json()).toMatchObject({ leadFiled: true, emailSent: false });
+  });
+});
+
+describe('lease, then commit', () => {
+  it('releases the lease when Airtable fails, so the retry works immediately', async () => {
+    failWrite = true;
+    const first = await POST(post(validLead()));
+
+    expect(first.status).toBe(502);
+    expect(await first.json()).toMatchObject({ leadFiled: false, error: 'lead_not_saved' });
+    expect(written).toHaveLength(0);
+
+    // Immediately, not in sixty seconds: the customer is still standing there.
+    failWrite = false;
+    __resetRateLimits();
+    const retry = await POST(post(validLead()));
+
+    expect(retry.status).toBe(200);
+    expect(await retry.json()).toMatchObject({ leadFiled: true, emailSent: true });
+    expect(written).toHaveLength(1);
+  });
+
+  it('answers 503 when the store is down, and writes nothing', async () => {
+    storeDown = true;
+    const res = await POST(post(validLead()));
+
+    expect(res.status).toBe(503);
+    expect((await res.json()).error).toBe('store_unavailable');
+    expect(written, 'a lead was written without a durable record').toHaveLength(0);
+    expect(notifications).toHaveLength(0);
+  });
+
+  it('never answers 400 for an infrastructure failure', async () => {
+    // 4xx tells the queue the payload is bad and it drops the lead. Airtable
+    // being down is not the customer's fault and must not lose their design.
+    failWrite = true;
+    expect((await POST(post(validLead()))).status).toBeGreaterThanOrEqual(500);
+
+    __resetRateLimits();
+    storeDown = true;
+    expect((await POST(post(validLead()))).status).toBeGreaterThanOrEqual(500);
+  });
+
+  it('refuses a second submit while the first holds the lease', async () => {
+    // The lease is taken before the write and only released after it, so a
+    // concurrent duplicate is told to go away rather than filing a second row.
+    failEmail = false;
+    const holder = POST(post(validLead()));
+    __resetRateLimits();
+    const rival = await POST(post(validLead()));
+
+    await holder;
+    expect([409, 200]).toContain(rival.status);
+    expect(written, 'two concurrent submits wrote two records').toHaveLength(1);
   });
 });

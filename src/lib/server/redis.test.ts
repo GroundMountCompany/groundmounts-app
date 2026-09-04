@@ -1,5 +1,15 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { redisConfigured, __resetRedis, cacheGet, cacheSet, claimOnce } from './redis';
+import {
+  redisConfigured,
+  __resetRedis,
+  cacheGet,
+  cacheSet,
+  storeGet,
+  storeSet,
+  acquireLease,
+  releaseLease,
+  StoreUnavailable,
+} from './redis';
 
 /**
  * The durable store is optional, and everything that uses it has to work
@@ -44,15 +54,27 @@ describe('finding the credentials', () => {
 });
 
 describe('with no store configured', () => {
-  it('reads as a miss and writes as a no-op', async () => {
-    await cacheSet('gm:test', { a: 1 }, 60);
-    expect(await cacheGet('gm:test')).toBeNull();
+  it('falls back to process memory rather than losing the write', async () => {
+    // Local development. A submit record that vanished immediately would mean
+    // resend never worked outside production.
+    await storeSet('gm:test', { a: 1 }, 60);
+    expect(await storeGet('gm:test')).toEqual({ a: 1 });
   });
 
-  it('cannot claim, and says so with null rather than false', async () => {
-    // null means "no opinion" — the caller carries on. false would mean
-    // "somebody else already did this", which would silently drop a submit.
-    expect(await claimOnce('gm:test:lock', 60)).toBeNull();
+  it('honours a TTL', async () => {
+    vi.useFakeTimers();
+    await storeSet('gm:test:ttl', { a: 1 }, 60);
+    vi.advanceTimersByTime(61_000);
+    expect(await storeGet('gm:test:ttl')).toBeNull();
+    vi.useRealTimers();
+  });
+
+  it('gives a lease to one caller and refuses the next', async () => {
+    expect(await acquireLease('gm:test:lease', 60)).toBe(true);
+    expect(await acquireLease('gm:test:lease', 60)).toBe(false);
+
+    await releaseLease('gm:test:lease');
+    expect(await acquireLease('gm:test:lease', 60)).toBe(true);
   });
 });
 
@@ -68,17 +90,29 @@ describe('when the store is unreachable', () => {
 
   afterEach(() => vi.unstubAllGlobals());
 
-  it('treats a failed read as a miss', async () => {
+  it('treats a failed cache read as a miss', async () => {
     // A customer standing in a field must never fail to get a quote because
-    // a cache was cold.
+    // a cache was cold. The cost of a miss is one lookup.
     expect(await cacheGet('gm:test')).toBeNull();
   });
 
-  it('swallows a failed write', async () => {
+  it('swallows a failed cache write', async () => {
     await expect(cacheSet('gm:test', { a: 1 }, 60)).resolves.toBeUndefined();
   });
 
-  it('returns null from a failed claim so the submit still goes through', async () => {
-    expect(await claimOnce('gm:test:lock', 60)).toBeNull();
+  it('throws on a store read, because a guess there duplicates a submit', async () => {
+    // "I could not tell you whether this already happened" is not the same
+    // answer as "it did not", and treating them alike files the lead twice.
+    await expect(storeGet('gm:submit:x')).rejects.toBeInstanceOf(StoreUnavailable);
+  });
+
+  it('throws on a store write and on a lease', async () => {
+    await expect(storeSet('gm:submit:x', { a: 1 }, 60)).rejects.toBeInstanceOf(StoreUnavailable);
+    await expect(acquireLease('gm:submit:lease:x', 60)).rejects.toBeInstanceOf(StoreUnavailable);
+  });
+
+  it('never throws when giving a lease back', async () => {
+    // The caller is already handling a failure; an unreleased lease expires.
+    await expect(releaseLease('gm:submit:lease:x')).resolves.toBeUndefined();
   });
 });

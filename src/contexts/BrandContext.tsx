@@ -13,11 +13,17 @@ interface BrandProviderProps {
 
 /**
  * Provider for brand configuration throughout the app.
- * Can optionally accept a brand prop for server-side rendering,
- * otherwise uses getBrand() to read from env.
+ *
+ * Reads `?brand=` first so a partner embed can ask for the neutral brand,
+ * then NEXT_PUBLIC_BRAND, then the default. `?source=` is attribution only and
+ * deliberately has no say here.
  */
 export function BrandProvider({ children, brand }: BrandProviderProps) {
-  const brandConfig = brand || getBrand();
+  const requested =
+    typeof window === 'undefined'
+      ? null
+      : new URLSearchParams(window.location.search).get('brand');
+  const brandConfig = brand || getBrand(requested);
 
   return (
     <BrandContext.Provider value={brandConfig}>

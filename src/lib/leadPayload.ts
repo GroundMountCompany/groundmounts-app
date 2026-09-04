@@ -40,6 +40,7 @@ export interface LeadPayload {
   phone: string;
   address: string;
   source: string;
+  brand?: string;
   quote: LeadQuote;
   ts: number;
   honeypot: string;
@@ -54,7 +55,10 @@ export interface LeadContact {
   email: string;
   phone: string;
   state: string;
+  /** Where the visitor came from. Recorded, and nothing more. */
   source: string;
+  /** Which brand the funnel wears. Never derived from `source`. */
+  brand?: string;
   honeypot: string;
 }
 
@@ -92,6 +96,7 @@ export function buildLeadPayload(
     phone: contact.phone,
     address: s.address,
     source: contact.source,
+    brand: contact.brand,
     quote: {
       inputs,
       totalPanels: s.totalPanels,

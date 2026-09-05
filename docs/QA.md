@@ -30,6 +30,7 @@ the system font size turned up, use it.
 - [ ] The address box takes focus without the page jumping.
 - [ ] Typing three characters brings suggestions; they are readable and tappable
       without zooming.
+- [ ] Tapping the box drops the sheet out of the way on its own.
 - [ ] Tapping a suggestion drops the pin and the map settles on the property.
 - [ ] **The keyboard does not cover the suggestions.** iOS Safari resizes the
       visual viewport rather than the layout viewport; this is the single most
@@ -39,8 +40,10 @@ the system font size turned up, use it.
 
 ## Step 2 — Bill
 
-- [ ] **Upload a photo of a real bill with the camera**, not the file picker.
-      The button should open the camera directly.
+- [ ] **"Take a photo" opens the camera directly**, not the file picker.
+- [ ] **"Choose a photo or PDF" offers Photo Library and Browse**, and a bill
+      already saved on the phone can be picked. This is the one the owner could
+      not reach in 8.6, so check it on a real iPhone every time.
 - [ ] While it reads, the button says so and cannot be pressed again.
 - [ ] The months come back in a table you can actually read at arm's length.
 - [ ] Correct one figure. The annual total updates as you type.
@@ -69,6 +72,10 @@ This is the step the whole tool exists for. Take your time.
 
 - [ ] The array appears on its own within a few seconds, on the property and
       not on the roof.
+- [ ] **Without touching the sheet**: the four numbers on the map, the +/- and
+      the button are all on screen at once, and the whole design can be done
+      from there. Pulling the sheet up should never be necessary.
+- [ ] The map HUD is not sitting on top of the array, at any zoom you land on.
 - [ ] **Drag the array with one finger.** It moves, the map does not.
 - [ ] **Pinch to zoom with two fingers.** The map zooms and the array stays put
       relative to the ground.

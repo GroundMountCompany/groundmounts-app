@@ -354,8 +354,16 @@ export const useQuoteStore = create<QuoteStore>()(
           trenchFeet,
           additionalCost: Math.max(0, Math.round(trenchFeet) * TRENCH.basePerFt),
         }),
-      setSlope: (slopePercent, slopeTier, source) =>
-        set({ slopePercent, slopeTier, slopeSource: source ?? null }),
+      setSlope: (slopePercent, slopeTier, source) => {
+        // A lookup that found nothing must not overwrite an answer the customer
+        // gave us. Every arrival at the design step re-reads the ground, so a
+        // reload after picking Steep was replacing that pick with Unknown — and
+        // Unknown carries no site adder, which is the exact under-quote the
+        // picker exists to prevent. A real measurement still wins: it is the
+        // absence of one that has to defer.
+        if (source === 'unavailable' && get().slopeSource === 'chosen') return;
+        set({ slopePercent, slopeTier, slopeSource: source ?? null });
+      },
 
       chooseSlopeTier: (slopeTier) =>
         set({ slopeTier, slopePercent: null, slopeSource: 'chosen' }),

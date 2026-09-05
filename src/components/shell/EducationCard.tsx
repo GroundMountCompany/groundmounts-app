@@ -10,7 +10,14 @@ import { UI } from '@/config/copy';
  * Every step has one. The default line has to earn its place on a phone screen,
  * so it is a single sentence; anything longer goes behind "Learn more".
  */
-export default function EducationCard({ copy }: { copy: EducationCopy }) {
+export default function EducationCard({
+  copy,
+  extra,
+}: {
+  copy: EducationCopy;
+  /** Step-specific long copy, shown alongside `more` behind the same toggle. */
+  extra?: React.ReactNode;
+}) {
   const [open, setOpen] = useState(false);
 
   return (
@@ -23,6 +30,12 @@ export default function EducationCard({ copy }: { copy: EducationCopy }) {
       {open && (
         <p data-testid="education-more" className="mt-3 text-[16px] leading-relaxed text-neutral-700">
           {copy.more}
+        </p>
+      )}
+
+      {open && extra && (
+        <p data-testid="education-extra" className="mt-3 text-[16px] leading-relaxed text-neutral-700">
+          {extra}
         </p>
       )}
 

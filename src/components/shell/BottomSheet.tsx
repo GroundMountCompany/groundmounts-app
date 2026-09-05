@@ -35,6 +35,15 @@ interface Props {
   onSnapChange: (snap: Snap) => void;
   /** Progress and heading. Pinned to the top, never scrolls. */
   header: React.ReactNode;
+  /**
+   * What the pinned area shows at the peek snap point, when a step wants
+   * something other than its heading there. The design step puts its panel
+   * control here: at peek the body is below the fold, so a heading in that row
+   * costs the customer the one control they need.
+   *
+   * Half and full always show `header`, so the heading is one drag away.
+   */
+  peekHeader?: React.ReactNode;
   /** The primary button. Pinned to the bottom, above the keyboard. */
   footer: React.ReactNode;
   /**
@@ -61,6 +70,7 @@ export default function BottomSheet({
   snap,
   onSnapChange,
   header,
+  peekHeader,
   footer,
   fullHeight = false,
   children,
@@ -115,6 +125,11 @@ export default function BottomSheet({
     };
   }, []);
 
+  // Phone only. Above md the sheet is a full-height column with no fold, so
+  // there is nothing to make room for and the heading should just be there.
+  const atPeek = isPhone && !fullHeight && snap === 'peek';
+  const pinned = atPeek && peekHeader ? peekHeader : header;
+
   // Peek has to fit the header AND the footer, because the primary button lives
   // in the footer now. Measuring only the header left the button below the fold
   // — the exact "hunting for the button" this layout exists to prevent.
@@ -142,7 +157,10 @@ export default function BottomSheet({
     observer.observe(head);
     if (foot) observer.observe(foot);
     return () => observer.disconnect();
-  }, []);
+    // Re-measured when the pinned content swaps, not only when it resizes: a
+    // peek row that is a different height than the heading it replaced has to
+    // move the fold with it.
+  }, [pinned]);
 
   const settled = viewport ? heightFor(snap, viewport, peekPx) : peekPx;
   const height = dragPx ?? settled;
@@ -313,7 +331,7 @@ export default function BottomSheet({
         <div
           className={`px-5 pb-3 md:px-0 md:pt-2 ${fullHeight ? 'pt-[max(12px,env(safe-area-inset-top))]' : ''}`}
         >
-          {header}
+          {pinned}
         </div>
       </div>
 

@@ -8,6 +8,7 @@ import { footprintFt } from '@/lib/geo/array';
 import { annualKwh, percentOfSouth } from '@/lib/production';
 import { PANELS } from '@/config/pricing';
 import { useDesignSetup } from './useDesignSetup';
+import PanelStepper from './PanelStepper';
 
 function Stat({ label, value, testId }: { label: string; value: string; testId: string }) {
   return (
@@ -20,8 +21,16 @@ function Stat({ label, value, testId }: { label: string; value: string; testId: 
   );
 }
 
+interface Step4DesignProps {
+  /**
+   * False while the sheet is at peek, where the shell renders the stepper in
+   * the peek row instead. Rendered in one place at a time, never both.
+   */
+  showStepper?: boolean;
+}
+
 /** The product screen: what they are buying, in feet and kilowatts. */
-export default function Step4Design() {
+export default function Step4Design({ showStepper = true }: Step4DesignProps) {
   useDesignSetup();
 
   const totalPanels = useQuoteStore((s) => s.totalPanels);
@@ -30,9 +39,7 @@ export default function Step4Design() {
   const trenchFeet = useQuoteStore((s) => s.trenchFeet);
   const slopePercent = useQuoteStore((s) => s.slopePercent);
   const slopeTier = useQuoteStore((s) => s.slopeTier);
-  const panelAdjust = useQuoteStore((s) => s.panelAdjust);
   const soilClass = useQuoteStore((s) => s.soilClass);
-  const setPanelAdjust = useQuoteStore((s) => s.setPanelAdjust);
   const slopeSource = useQuoteStore((s) => s.slopeSource);
   const chooseSlopeTier = useQuoteStore((s) => s.chooseSlopeTier);
   // The site's own PVWatts curve when /api/site answered, the Texas fallback
@@ -104,44 +111,24 @@ export default function Step4Design() {
         </div>
       )}
 
-      <div className="flex items-center justify-between rounded-xl border border-neutral-200 px-3 py-2">
-        <span className="text-[17px] font-medium text-neutral-900">{UI.panels}</span>
-        <div className="flex items-center gap-3">
-          <button
-            type="button"
-            data-testid="panel-minus"
-            aria-label={UI.removePanel}
-            onClick={() => setPanelAdjust(panelAdjust - 1)}
-            disabled={totalPanels <= 1}
-            className="h-12 w-12 rounded-xl border border-neutral-300 text-[22px] font-semibold disabled:opacity-40"
-          >
-            &minus;
-          </button>
-          <span data-testid="panel-count" className="min-w-[3ch] text-center text-[19px] font-semibold">
-            {totalPanels}
-          </span>
-          <button
-            type="button"
-            data-testid="panel-plus"
-            aria-label={UI.addPanel}
-            onClick={() => setPanelAdjust(panelAdjust + 1)}
-            className="h-12 w-12 rounded-xl border border-neutral-300 text-[22px] font-semibold"
-          >
-            +
-          </button>
-        </div>
-      </div>
+      {showStepper && <PanelStepper />}
 
-      <p className="text-[16px] text-neutral-700">
-        {UI.slope}:{' '}
-        {slopePercent === null
-          ? UI.slopeChecking
-          : `${slopePercent}% · ${slopeTier.toLowerCase()}`}
-        . {soilClass ? `${UI.soilLabel}: ${soilClass}. ` : ''}
-        {UI.trenchNote}
-      </p>
-
-      <EducationCard copy={STEPS[3].education} />
+      {/* The site note is long, and long copy on this step belongs behind
+          "Learn more" — the screen has to stay short enough that a customer
+          never has to pull the sheet up to finish the design. */}
+      <EducationCard
+        copy={STEPS[3].education}
+        extra={
+          <>
+            {UI.slope}:{' '}
+            {slopePercent === null
+              ? UI.slopeChecking
+              : `${slopePercent}% · ${slopeTier.toLowerCase()}`}
+            . {soilClass ? `${UI.soilLabel}: ${soilClass}. ` : ''}
+            {UI.trenchNote}
+          </>
+        }
+      />
     </div>
   );
 }

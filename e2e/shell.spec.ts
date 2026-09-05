@@ -98,6 +98,33 @@ const STEP_HEADINGS = [
   'Get your number',
 ];
 
+/**
+ * Confirm which step is on screen.
+ *
+ * The design step's peek row is its panel control, not its heading — the
+ * heading is one drag up, deliberately, so the numbers and the buttons fit on
+ * screen while the array is being placed. So peel the sheet open if the
+ * heading is not already there.
+ */
+async function openSheet(page: Page) {
+  const handle = page.getByTestId('sheet-handle');
+  if (!(await handle.isVisible())) return; // desktop: the panel is already open
+  await waitForSheet(page);
+  while ((await page.getByTestId('bottom-sheet').getAttribute('data-snap')) !== 'full') {
+    await handle.click();
+    await waitForSheet(page);
+  }
+}
+
+async function expectOnStep(page: Page, step: number) {
+  const heading = page.getByRole('heading', { name: STEP_HEADINGS[step] });
+  if (!(await heading.isVisible())) {
+    const handle = page.getByTestId('sheet-handle');
+    if (await handle.isVisible()) await handle.click();
+  }
+  await expect(heading).toBeVisible({ timeout: 10_000 });
+}
+
 const scrollTop = (page: Page) =>
   page.evaluate(() => document.scrollingElement?.scrollTop ?? 0);
 
@@ -144,9 +171,7 @@ test('the page never scrolls under the map, on any step', async ({ page }, testI
     // authoritative over the persisted index, so a plain reload would restore
     // whichever step the previous URL named.
     await gotoStep(page, step);
-    await expect(
-      page.getByRole('heading', { name: STEP_HEADINGS[step] })
-    ).toBeVisible({ timeout: 10_000 });
+    await expectOnStep(page, step);
     await waitForSheet(page);
 
     expect(await scrollTop(page), `step ${step} on load`).toBe(0);
@@ -358,9 +383,7 @@ test('every interactive control is at least 44px, on every step', async ({
     await gotoStep(page, step);
 
     // Confirm we are auditing the step we think we are before measuring.
-    await expect(
-      page.getByRole('heading', { name: STEP_HEADINGS[step] })
-    ).toBeVisible({ timeout: 10_000 });
+    await expectOnStep(page, step);
     await waitForSheet(page);
 
     // Open the sheet fully so the step's own controls are laid out, not
@@ -558,6 +581,14 @@ test('asks for the slope when the ground cannot be read, and prices the answer',
       }),
     })
   );
+  // The second terrain source, refused for the whole test rather than for the
+  // instant the first assertion runs. The seed says the ground could not be
+  // read, but every visit to the step asks again — so without this the picker
+  // was racing a lookup that could answer and take it off screen, and the test
+  // only passed because it clicked faster than the network.
+  await page.route('**/api.mapbox.com/v4/mapbox.mapbox-terrain-v2/tilequery/**', (route) =>
+    route.fulfill({ status: 500, contentType: 'application/json', body: '{}' })
+  );
   await mockGeocoding(page);
 
   const estimateOnQuote = async () => {
@@ -572,6 +603,10 @@ test('asks for the slope when the ground cannot be read, and prices the answer',
   const unanswered = await estimateOnQuote();
 
   await gotoStep(page, 3);
+  // The peek row is the panel control and the button; the slope picker is a
+  // rare fallback that lives in the body, so open the sheet the way a customer
+  // would before reaching for it.
+  await openSheet(page);
   await page.getByTestId('slope-steep').click();
   await expect(page.getByTestId('slope-steep')).toHaveAttribute('aria-pressed', 'true');
 
@@ -1435,4 +1470,183 @@ test('the bill field rounds to whole dollars on blur', async ({ page }) => {
   await bill.blur();
   await expect(bill).toHaveValue('');
   await expect(page.getByText('NaN')).toHaveCount(0);
+});
+
+/**
+ * Owner QA on a real iPhone, against the 8.6 preview. Three findings, all of
+ * them things a headless run had no way to see because they are about what is
+ * on screen at once rather than about what the DOM contains.
+ */
+
+test('the address suggestions are not covered by the sheet', async ({ page }, testInfo) => {
+  test.skip(!testInfo.project.name.startsWith('mobile'), 'the bottom sheet is the phone layout');
+
+  await openFunnel(page);
+  await waitForSheet(page);
+
+  // Start with the sheet pulled up, which is where the owner found it: the
+  // list has to make its own room rather than assume it.
+  await page.getByTestId('sheet-handle').click();
+  await expect(page.getByTestId('bottom-sheet')).toHaveAttribute('data-snap', 'half');
+
+  await page.locator('#address').click();
+  await page.locator('#address').fill('123 Main St');
+
+  // Focusing the field drops the sheet back, so the gap between the input and
+  // the keyboard is free for the list.
+  await expect(page.getByTestId('bottom-sheet')).toHaveAttribute('data-snap', 'peek');
+
+  const suggestion = page.getByRole('button', { name: SUGGESTION.place_name });
+  await expect(suggestion).toBeVisible();
+  await waitForSheet(page);
+
+  const [row, sheet, viewport] = await Promise.all([
+    suggestion.boundingBox(),
+    page.getByTestId('bottom-sheet').boundingBox(),
+    page.viewportSize(),
+  ]);
+  expect(row, 'the first suggestion has no box').not.toBeNull();
+  expect(sheet, 'the sheet has no box').not.toBeNull();
+
+  // Fully on screen...
+  expect(row!.y, 'the suggestion starts above the viewport').toBeGreaterThanOrEqual(0);
+  expect(
+    row!.y + row!.height,
+    `the suggestion runs past the bottom of the ${viewport!.height}px screen`
+  ).toBeLessThanOrEqual(viewport!.height);
+
+  // ...and clear of the sheet, not merely painted over it. A rect that
+  // overlaps is a rect that would be hidden the moment the stacking order
+  // changed, which is exactly what happened on the phone.
+  expect(
+    row!.y + row!.height,
+    `the suggestion overlaps the sheet by ${Math.round(row!.y + row!.height - sheet!.y)}px`
+  ).toBeLessThanOrEqual(sheet!.y);
+
+  // And it is the topmost thing at its own centre, so it is the element a
+  // thumb would actually hit.
+  const onTop = await page.evaluate(([x, y]) => {
+    const el = document.elementFromPoint(x, y);
+    return !!el?.closest('[data-testid="address-suggestions"]');
+  }, [row!.x + row!.width / 2, row!.y + row!.height / 2] as const);
+  expect(onTop, 'something else is on top of the suggestion').toBe(true);
+});
+
+test('a bill can be chosen from the library, not only shot with the camera', async ({ page }) => {
+  await mockGeocoding(page);
+  await gotoStep(page, 1);
+
+  // The camera door keeps `capture`, because somebody standing at their meter
+  // box wants the camera and nothing else.
+  await expect(page.getByTestId('bill-file')).toHaveAttribute('capture', 'environment');
+
+  // The other door must NOT have it. On iOS `capture` replaces the picker
+  // rather than hinting at it, so its presence here is the whole bug: the
+  // owner could not reach a bill already saved on the phone.
+  const library = page.getByTestId('bill-file-library');
+  expect(
+    await library.evaluate((el) => el.hasAttribute('capture')),
+    'the library input has a capture attribute, which hides Photo Library and Files on iOS'
+  ).toBe(false);
+  await expect(library).toHaveAttribute('accept', 'image/*,application/pdf');
+
+  // Both buttons are on screen, and the second one opens the second input.
+  await expect(page.getByTestId('bill-upload')).toBeVisible();
+  await expect(page.getByTestId('bill-upload-library')).toBeVisible();
+
+  await page.route('**/api/bill/extract', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        ok: true,
+        extraction: {
+          months: [{ month: 'Jan 2026', kwh: 1450, cost: 203.5 }],
+          ratePerKwh: 0.14,
+          confidence: 'high',
+        },
+      }),
+    })
+  );
+  await library.setInputFiles('e2e/fixtures/bill.png');
+  await expect(page.getByTestId('bill-review')).toBeVisible();
+});
+
+test('the design step can be finished without opening the sheet', async ({ page }, testInfo) => {
+  test.skip(!testInfo.project.name.startsWith('mobile'), 'the bottom sheet is the phone layout');
+
+  await page.addInitScript(() => {
+    window.localStorage.setItem(
+      'gmq:v3',
+      JSON.stringify({
+        state: {
+          currentStepIndex: 3,
+          address: '123 Main St, Fort Worth, TX 76131',
+          coordinates: { latitude: 32.7555, longitude: -97.3208 },
+          electricalMeterPosition: [-97.3208, 32.7556],
+          arrayCenter: [-97.3208, 32.7553],
+          avgValue: 240,
+          percentage: 100,
+          totalPanels: 31,
+          trenchFeet: 42,
+          leadId: 'a1b2c3d4-5e6f-4a7b-8c9d-0e1f2a3b4c5d',
+          startedAt: Date.now() - 600_000,
+        },
+        version: 1,
+      })
+    );
+  });
+
+  await mockGeocoding(page);
+  await gotoStep(page, 3);
+  await waitForSheet(page);
+
+  // The sheet is where the customer finds it, untouched.
+  await expect(page.getByTestId('bottom-sheet')).toHaveAttribute('data-snap', 'peek');
+
+  const viewport = page.viewportSize()!;
+  expect(viewport.width, 'this test is about a 390px screen').toBe(390);
+
+  /** On screen means on screen: in the DOM, laid out, and inside the viewport. */
+  const fullyVisible = async (testId: string) => {
+    await expect(page.getByTestId(testId)).toBeVisible();
+    const box = await page.getByTestId(testId).boundingBox();
+    expect(box, `${testId} has no box`).not.toBeNull();
+    expect(box!.y, `${testId} is above the viewport`).toBeGreaterThanOrEqual(0);
+    expect(
+      box!.y + box!.height,
+      `${testId} runs ${Math.round(box!.y + box!.height - viewport.height)}px below the fold`
+    ).toBeLessThanOrEqual(viewport.height);
+    return box!;
+  };
+
+  // The numbers, on the map — and the same numbers the sheet's own grid holds,
+  // rather than a second reading of the design that could drift from it.
+  const hud = await fullyVisible('design-hud');
+  const digits = (text: string | null) => (text ?? '').replace(/[^\d.]/g, '');
+  await expect(page.getByTestId('hud-panels')).toHaveText(
+    digits(await page.getByTestId('stat-panels').textContent())
+  );
+  await expect(page.getByTestId('hud-trench')).toHaveText(
+    digits(await page.getByTestId('stat-trench').textContent())
+  );
+  expect(
+    Number(await page.getByTestId('hud-trench').textContent()),
+    'no trench on the HUD to read'
+  ).toBeGreaterThan(0);
+
+  // The controls, in the peek row.
+  await fullyVisible('panel-minus');
+  await fullyVisible('panel-plus');
+  const cta = await fullyVisible('primary-cta');
+
+  // The HUD is anchored opposite "Find my panels", so neither is on the other.
+  const find = (await page.getByTestId('find-panels').boundingBox())!;
+  expect(hud.x + hud.width, 'the HUD reaches under Find my panels').toBeLessThanOrEqual(find.x);
+
+  // And the count actually changes from the peek row, without the sheet moving.
+  await page.getByTestId('panel-plus').click();
+  await expect(page.getByTestId('hud-panels')).toHaveText('32');
+  await expect(page.getByTestId('bottom-sheet')).toHaveAttribute('data-snap', 'peek');
+  expect(cta.y, 'the button moved when the count changed').toBeGreaterThan(0);
 });

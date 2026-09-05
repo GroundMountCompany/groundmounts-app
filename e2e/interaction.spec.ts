@@ -1221,6 +1221,81 @@ test.describe('design step gestures', () => {
     }
   });
 
+  test('the HUD keeps the numbers on screen while the array is dragged', async ({ page }) => {
+    // Owner QA on a real iPhone: "while placing panels you can't see the
+    // numbers". They were in the sheet's stats grid, below the fold at the
+    // peek snap point, so the whole design was being done blind.
+    await openDesignStep(page);
+    await waitForArray(page, 15_000);
+    await bringMapIntoView(page);
+
+    const viewport = page.viewportSize()!;
+    const sheet = page.getByTestId('bottom-sheet');
+    await expect(sheet).toHaveAttribute('data-snap', 'peek');
+
+    // The four figures, the panel control and the button, all on screen at
+    // once, with the sheet exactly where the customer finds it.
+    for (const id of ['design-hud', 'panel-minus', 'panel-plus', 'primary-cta']) {
+      await expect(page.getByTestId(id)).toBeVisible();
+      const box = (await page.getByTestId(id).boundingBox())!;
+      expect(box.y, `${id} is above the viewport`).toBeGreaterThanOrEqual(0);
+      expect(
+        box.y + box.height,
+        `${id} runs ${Math.round(box.y + box.height - viewport.height)}px below the fold`
+      ).toBeLessThanOrEqual(viewport.height);
+    }
+
+    // The HUD must not be sitting on the array it is describing. It is
+    // anchored top-left, opposite "Find my panels", and the array is framed in
+    // the middle of the map by fitDesignView.
+    const hud = (await page.getByTestId('design-hud').boundingBox())!;
+    const find = (await page.getByTestId('find-panels').boundingBox())!;
+    expect(hud.x + hud.width, 'the HUD reaches under Find my panels').toBeLessThanOrEqual(find.x);
+    const hullPx = await page.evaluate(() => window.__gmTest.renderedGeom()?.hullPx ?? null);
+    expect(hullPx, 'no rendered array to check the HUD against').not.toBeNull();
+    const rect = await page.evaluate(() => window.__gmTest.canvasRect());
+    const overlaps = hullPx!.some(
+      ([x, y]) =>
+        rect.left + x >= hud.x &&
+        rect.left + x <= hud.x + hud.width &&
+        rect.top + y >= hud.y &&
+        rect.top + y <= hud.y + hud.height
+    );
+    expect(overlaps, 'the HUD is sitting on top of the array at the fitted zoom').toBe(false);
+
+    // And it is live. Drag the array away from the meter and the trench grows
+    // under the customer's finger, read off the HUD rather than off the store.
+    const trenchBefore = Number(await page.getByTestId('hud-trench').textContent());
+    expect(trenchBefore, 'no trench to begin with').toBeGreaterThan(0);
+
+    const client = await page.context().newCDPSession(page);
+    let dragged = false;
+    for (let attempt = 0; attempt < 4 && !dragged; attempt++) {
+      const grab = await findArrayGrab(page);
+      if (!grab) {
+        await page.waitForTimeout(300);
+        continue;
+      }
+      await waitForCameraStill(page);
+      await touchStart(client, [{ x: grab[0], y: grab[1], id: 1 }]);
+      for (let i = 1; i <= 12; i++) {
+        await touchMove(client, [{ x: grab[0], y: grab[1] - i * 6, id: 1 }]);
+      }
+      await touchEnd(client);
+      dragged =
+        Number(await page.getByTestId('hud-trench').textContent()) !== trenchBefore ||
+        attempt === 3;
+    }
+
+    const trenchAfter = Number(await page.getByTestId('hud-trench').textContent());
+    expect(
+      trenchAfter,
+      `the HUD trench read ${trenchBefore} ft before the drag and ${trenchAfter} ft after`
+    ).not.toBe(trenchBefore);
+    // The sheet never moved to show it.
+    await expect(sheet).toHaveAttribute('data-snap', 'peek');
+  });
+
   test('the real Continue button stores a screenshot containing the design', async ({
     page,
   }) => {

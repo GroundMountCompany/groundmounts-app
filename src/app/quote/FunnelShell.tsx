@@ -19,6 +19,8 @@ import Step1Property from './steps/Step1Property';
 import Step2Power from './steps/Step2Power';
 import Step3Meter from './steps/Step3Meter';
 import Step4Design from './steps/Step4Design';
+import PanelStepper from './steps/PanelStepper';
+import DesignHud from '@/components/map/DesignHud';
 import Step5Options from './steps/Step5Options';
 import Step6Quote from './steps/Step6Quote';
 
@@ -114,7 +116,7 @@ export default function FunnelShell() {
     <Step1Property key="1" />,
     <Step2Power key="2" />,
     <Step3Meter key="3" />,
-    <Step4Design key="4" />,
+    <Step4Design key="4" showStepper={snap !== 'peek'} />,
     <Step5Options key="5" />,
     <Step6Quote key="6" />,
   ][Math.min(step, MAX_STEP)];
@@ -128,6 +130,20 @@ export default function FunnelShell() {
       </div>
     </div>
   );
+
+  /*
+    At peek on the design step the pinned row is the panel control, not the
+    heading. Owner QA: the numbers and the buttons were both below the fold
+    while the array was being placed, so the whole design had to be done with
+    the sheet pulled up over the map. The heading is one drag away at half.
+  */
+  const peekHeader =
+    step === 3 ? (
+      <div className="space-y-3">
+        <ProgressRow step={step} onPick={goToStep} />
+        <PanelStepper />
+      </div>
+    ) : undefined;
 
   const footer =
     step < MAX_STEP ? (
@@ -167,10 +183,11 @@ export default function FunnelShell() {
             {step === 0 && (
               <div className="pointer-events-auto absolute inset-x-0 top-0 z-20 px-4 pt-[max(12px,env(safe-area-inset-top))]">
                 <Suspense fallback={<div className="h-14" />}>
-                  <AddressInput />
+                  <AddressInput onFocusRequestPeek={() => setSnap('peek')} />
                 </Suspense>
               </div>
             )}
+            {step === 3 && <DesignHud />}
             {step === 3 && (
               <button
                 type="button"
@@ -195,6 +212,7 @@ export default function FunnelShell() {
           snap={snap}
           onSnapChange={setSnap}
           header={header}
+          peekHeader={peekHeader}
           footer={footer}
           fullHeight={!showsMap}
         >

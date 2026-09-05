@@ -66,7 +66,14 @@ export default function BillUpload({ onConfirm, onDiscard }: BillUploadProps) {
   // funnel's state, and it should not survive a refresh.
   const [reason, setReason] = useState(UI.billFailed);
   const [failed, setFailed] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
+  // Two inputs, because one cannot be both.
+  //
+  // `capture` is not a hint on iOS — it *replaces* the picker with the camera,
+  // so a customer whose bill is already a photo in their library had no way in
+  // at all. The camera stays, because somebody standing at their meter box
+  // wants it, but it is now one of two doors rather than the only one.
+  const cameraRef = useRef<HTMLInputElement>(null);
+  const libraryRef = useRef<HTMLInputElement>(null);
 
   const months = draft ?? [];
 
@@ -82,8 +89,8 @@ export default function BillUpload({ onConfirm, onDiscard }: BillUploadProps) {
       // Playwright does not hand back the body of a multipart upload — so the
       // e2e reads it here instead. `next build` strips this branch.
       if (process.env.NODE_ENV !== 'production') {
-        inputRef.current?.setAttribute('data-upload-bytes', String(upload.size));
-        inputRef.current?.setAttribute('data-original-bytes', String(file.size));
+        cameraRef.current?.setAttribute('data-upload-bytes', String(upload.size));
+        cameraRef.current?.setAttribute('data-original-bytes', String(file.size));
       }
 
       const form = new FormData();
@@ -132,26 +139,39 @@ export default function BillUpload({ onConfirm, onDiscard }: BillUploadProps) {
     setDraft(months, Number.isFinite(cents) && cents > 0 ? cents / 100 : null);
   };
 
+  /** Both inputs land here — the file is a file however it was chosen. */
+  const onPick = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) void upload(file);
+    // Cleared so choosing the same file twice still fires.
+    e.target.value = '';
+  };
+
   const { annual, scaled } = annualFromMonths(months);
   const rateCentsText = draftRate ? String(Math.round(draftRate * 100)) : '';
 
   return (
     <div className="space-y-2">
       <input
-        ref={inputRef}
+        ref={cameraRef}
         type="file"
-        // `capture` opens the camera on a phone rather than the file browser,
-        // which is what somebody standing next to their meter box wants.
         accept="image/jpeg,image/png,application/pdf"
+        // The camera door. On iOS this bypasses the picker entirely.
         capture="environment"
         data-testid="bill-file"
         className="hidden"
-        onChange={(e) => {
-          const file = e.target.files?.[0];
-          if (file) void upload(file);
-          // Cleared so choosing the same file twice still fires.
-          e.target.value = '';
-        }}
+        onChange={onPick}
+      />
+      <input
+        ref={libraryRef}
+        type="file"
+        // No `capture` attribute, deliberately: its absence is what makes iOS
+        // offer Photo Library and Browse (Files). Adding one back closes the
+        // only route in for a bill that is already saved on the phone.
+        accept="image/*,application/pdf"
+        data-testid="bill-file-library"
+        className="hidden"
+        onChange={onPick}
       />
 
       {phase === 'confirmed' && (
@@ -174,20 +194,34 @@ export default function BillUpload({ onConfirm, onDiscard }: BillUploadProps) {
       )}
 
       {phase !== 'review' && phase !== 'confirmed' && (
-        <button
-          type="button"
-          data-testid="bill-upload"
-          disabled={phase === 'reading'}
-          onClick={() => inputRef.current?.click()}
-          className="min-h-[56px] w-full rounded-xl border border-dashed border-neutral-400 px-4 py-3 text-left disabled:opacity-60"
-        >
-          <span className="block text-[17px] font-semibold text-neutral-900">
-            {phase === 'reading' ? UI.billReading : UI.billUpload}
-          </span>
-          <span className="block text-[15px] text-neutral-500">
-            {failed ? reason : UI.billUploadNote}
-          </span>
-        </button>
+        <div className="space-y-2">
+          <button
+            type="button"
+            data-testid="bill-upload"
+            disabled={phase === 'reading'}
+            onClick={() => cameraRef.current?.click()}
+            className="min-h-[56px] w-full rounded-xl border border-dashed border-neutral-400 px-4 py-3 text-left disabled:opacity-60"
+          >
+            <span className="block text-[17px] font-semibold text-neutral-900">
+              {phase === 'reading' ? UI.billReading : UI.billTakePhoto}
+            </span>
+            <span className="block text-[15px] text-neutral-500">{UI.billTakePhotoNote}</span>
+          </button>
+          <button
+            type="button"
+            data-testid="bill-upload-library"
+            disabled={phase === 'reading'}
+            onClick={() => libraryRef.current?.click()}
+            className="min-h-[56px] w-full rounded-xl border border-dashed border-neutral-400 px-4 py-3 text-left disabled:opacity-60"
+          >
+            <span className="block text-[17px] font-semibold text-neutral-900">
+              {UI.billChooseFile}
+            </span>
+            <span className="block text-[15px] text-neutral-500">
+              {failed ? reason : UI.billChooseFileNote}
+            </span>
+          </button>
+        </div>
       )}
 
       {failed && phase === 'none' && (

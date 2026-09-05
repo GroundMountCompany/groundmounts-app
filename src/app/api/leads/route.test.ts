@@ -1387,12 +1387,20 @@ describe('a partial paused in the middle of its own work', () => {
 
     const redis = await import('@/lib/server/redis');
     const realGet = redis.storeGet;
+    let reads = 0;
     let suspended = false;
 
     vi.spyOn(redis, 'storeGet').mockImplementation(async (key: string) => {
-      if (!suspended && key === `gm:submit:${LEAD}`) {
-        suspended = true;
-        await held;
+      // The partial reads twice: once cheaply before the lease, and once
+      // authoritatively under it. The second is the one to suspend inside —
+      // suspending the first would stop before the lease was ever taken and
+      // prove nothing about the window this test exists for.
+      if (key === `gm:submit:${LEAD}`) {
+        reads++;
+        if (reads === 2) {
+          suspended = true;
+          await held;
+        }
       }
       return realGet(key);
     });
@@ -1494,5 +1502,40 @@ describe('what a partial does before it takes the lease', () => {
     expect(observed, 'the lease was taken before the site lookup').toEqual([
       'lease-after-1-lookups',
     ]);
+  });
+});
+
+describe('what a doomed partial costs', () => {
+  const LEAD = '8f14e45f-ceea-467a-9f34-2c8c3b1a77de';
+  const partialBody = (step: number, id = LEAD) => ({
+    partial: true,
+    id,
+    stepReached: step,
+    inputs: INPUTS,
+  });
+
+  it('makes no site lookup at all once the lead is filed', async () => {
+    // A cold lookup is eleven upstream calls. A save that is going to be
+    // thrown away should not pay for one.
+    await POST(post(validLead()));
+    curveCalls.length = 0;
+
+    __resetRateLimits();
+    const late = await POST(post(partialBody(4)));
+
+    expect(await late.json()).toMatchObject({ skipped: 'already_filed' });
+    expect(curveCalls, 'a doomed partial still looked the site up').toHaveLength(0);
+  });
+
+  it('makes no site lookup on the fourth save in a minute', async () => {
+    // Three legitimate saves, then a stuck retry loop.
+    for (let i = 0; i < 3; i++) await POST(post(partialBody(4)));
+    expect(curveCalls.length).toBeGreaterThan(0);
+    curveCalls.length = 0;
+
+    const capped = await POST(post(partialBody(4)));
+
+    expect(await capped.json()).toMatchObject({ skipped: 'rate_limited' });
+    expect(curveCalls, 'a rate-limited partial still looked the site up').toHaveLength(0);
   });
 });

@@ -444,13 +444,38 @@ async function savePartial(raw: Record<string, unknown>, ip: string): Promise<Ne
   }
 
   /**
+   * The cheap checks first, because the expensive one is a network fan-out.
+   *
+   * A late partial for a funnel that has already been submitted, or the fourth
+   * save in a minute from a stuck retry loop, should cost nothing at all — and
+   * `partialFields` is five PVWatts calls, an SSURGO query and five Tilequery
+   * samples on a cold cache. This read is advisory: it can be stale, which is
+   * why the authoritative one still happens under the lease below. It is here
+   * to avoid paying for work that is about to be thrown away.
+   */
+  try {
+    const alreadyFiled = await storeGet<SubmitRecord>(SUBMIT_PREFIX + id);
+    if (alreadyFiled?.leadFiled) {
+      console.log('[LEAD_PARTIAL] ignored for a filed lead (early)', id, 'step', stepReached);
+      return NextResponse.json({ ok: true, partial: true, skipped: 'already_filed' });
+    }
+  } catch {
+    console.warn('[LEAD_PARTIAL] store unavailable, skipping', id);
+    return NextResponse.json({ ok: true, partial: true, skipped: 'store_unavailable' });
+  }
+
+  if (!(await rateLimitOkAsync(`partial:${id}`, 'lead-partial-id'))) {
+    console.log('[LEAD_PARTIAL] per-lead limit hit', id, 'from', ip);
+    return NextResponse.json({ ok: true, partial: true, skipped: 'rate_limited' });
+  }
+
+  /**
    * The site lookup happens before the lease, not under it.
    *
-   * It is the slow part — a cold cache is five PVWatts calls, an SSURGO query
-   * and five Tilequery samples — and holding a lock across somebody else's
-   * network is how a background save ends up blocking a customer's submit for
-   * seconds. The lease covers only the two things that have to be atomic: the
-   * check that the funnel has not already finished, and the write.
+   * Holding a lock across somebody else's network is how a background save
+   * ends up blocking a customer's submit for seconds. The lease covers only
+   * the two things that have to be atomic: the authoritative check that the
+   * funnel has not finished, and the write.
    */
   const fields = await partialFields(raw, stepReached);
 
@@ -471,7 +496,7 @@ async function savePartial(raw: Record<string, unknown>, ip: string): Promise<Ne
   }
 
   try {
-    return await writePartial(id, stepReached, fields, ip);
+    return await writePartial(id, stepReached, fields);
   } finally {
     // Held across the recheck and the write, and no longer.
     await releaseLease(leaseKey, leaseToken);
@@ -541,8 +566,7 @@ async function partialFields(
 async function writePartial(
   id: string,
   stepReached: number,
-  fields: LeadFields,
-  ip: string
+  fields: LeadFields
 ): Promise<NextResponse> {
   /**
    * A finished funnel does not go backwards.
@@ -564,18 +588,6 @@ async function writePartial(
   if (completed?.leadFiled) {
     console.log('[LEAD_PARTIAL] ignored for a filed lead', id, 'step', stepReached);
     return NextResponse.json({ ok: true, partial: true, skipped: 'already_filed' });
-  }
-
-  /**
-   * At most three per funnel per minute, on top of the per-IP bucket.
-   *
-   * The IP bucket stops one machine flooding the route; this stops one lead id
-   * doing it, which is what a stuck retry loop in somebody's browser looks
-   * like. Three is the number of steps that legitimately save.
-   */
-  if (!(await rateLimitOkAsync(`partial:${id}`, 'lead-partial-id'))) {
-    console.log('[LEAD_PARTIAL] per-lead limit hit', id, 'from', ip);
-    return NextResponse.json({ ok: true, partial: true, skipped: 'rate_limited' });
   }
 
   const clean = Object.fromEntries(

@@ -33,7 +33,7 @@ import type { Pt } from './gmTest';
 import './gmTest';
 
 /** Seed the funnel straight into the design step on a rural parcel. */
-async function openDesignStep(page: Page): Promise<boolean> {
+async function openDesignStep(page: Page): Promise<void> {
   await page.addInitScript(
     ([rural, meter]) => {
       // Seed once only: addInitScript runs on every navigation, and re-seeding
@@ -67,7 +67,7 @@ async function openDesignStep(page: Page): Promise<boolean> {
   // mapbox-gl is imported lazily now, so the map instance appears a beat after
   // first paint. `loadMapPage` waits for the hook and for the first tiles, and
   // retries once before giving up on the environment.
-  return loadMapPage(page);
+  await loadMapPage(page);
 }
 
 /** Wait until the array polygon is actually rendered on the map. */
@@ -208,9 +208,6 @@ async function swingCompassTo(page: Page, client: CDPSession, targetBearing: num
  * fixed sleep is not enough — the drag then starts before the zoom has settled
  * and grabs empty map.
  */
-/** Above this the environment cannot be timed fairly. */
-const SLOW_FRAME_MS = 100;
-
 /**
  * Load the funnel with a working map, or say why not.
  *
@@ -223,7 +220,55 @@ const SLOW_FRAME_MS = 100;
  * cannot load twice, the environment cannot host these tests and the suite
  * says so rather than reporting a gesture regression that is not there.
  */
-async function loadMapPage(page: Page): Promise<boolean> {
+/**
+ * Wait until the camera has genuinely stopped.
+ *
+ * `isMoving()` goes false while an ease is still settling by fractions of a
+ * pixel, and the setup here always ends with a fitDesign ease. Sampling a
+ * "before" position during that tail made the map look as though it jumped
+ * 3-21px when the gesture started — the jump was measured entirely before the
+ * first touchmove, and tracked frame time rather than anything the app did.
+ */
+async function waitForCameraStill(page: Page): Promise<void> {
+  let last = '';
+  let identical = 0;
+
+  for (let i = 0; i < 60; i++) {
+    const now = await page.evaluate(() => {
+      const c = window.__gmTest.mapCenter();
+      return `${c[0].toFixed(9)},${c[1].toFixed(9)},${window.__gmTest.isMoving() ? 1 : 0}`;
+    });
+
+    // Three in a row, not two: under load an ease can stall long enough
+    // between frames to give two matching reads and then carry on moving,
+    // which is how a settled-looking camera produced a 6px "jump" in the
+    // full suite while reading 0.0px when this file ran alone.
+    identical = now === last ? identical + 1 : 0;
+    last = now;
+    if (identical >= 2 && now.endsWith(',0')) return;
+    await page.waitForTimeout(50);
+  }
+}
+
+async function loadMapPage(page: Page): Promise<void> {
+  /**
+   * Watch what Mapbox actually answered.
+   *
+   * The only honest reason to skip is that the tiles or the style could not be
+   * fetched — somebody else's CDN, or no network. Every other cause of a map
+   * that never becomes ready is ours: an exception during construction, a
+   * broken token, a map that is simply never built. Those must fail, or the
+   * suite quietly stops testing the thing it exists for.
+   */
+  const upstreamFailures: string[] = [];
+  const watch = (status: number, url: string) => {
+    if (!url.includes('api.mapbox.com')) return;
+    if (status >= 400) upstreamFailures.push(`${status} ${url.split('?')[0]}`);
+  };
+  page.on('response', (r) => watch(r.status(), r.url()));
+  page.on('requestfailed', (r) => upstreamFailures.push(`failed ${r.url().split('?')[0]}`));
+
+  let lastError: unknown;
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       await page.goto('/quote');
@@ -235,12 +280,24 @@ async function loadMapPage(page: Page): Promise<boolean> {
       });
       await page.waitForFunction(() => !window.__gmTest.isMoving(), null, { timeout: 15_000 });
       await page.waitForTimeout(600);
-      return true;
-    } catch {
+      return;
+    } catch (error) {
+      lastError = error;
       console.warn(`[e2e] map did not become ready (attempt ${attempt + 1})`);
     }
   }
-  return false;
+
+  // Twice, and Mapbox itself refused or never answered: not our bug.
+  test.skip(
+    upstreamFailures.length > 0,
+    `Mapbox did not serve the map: ${upstreamFailures.slice(0, 3).join('; ')}`
+  );
+
+  // Otherwise the map is broken and the suite says so.
+  throw new Error(
+    `The map never became ready and Mapbox answered every request. ` +
+      `This is an app failure, not an environment one. Last error: ${String(lastError)}`
+  );
 }
 
 async function waitForStableHandle(page: Page) {
@@ -427,8 +484,7 @@ test.describe('map pins', () => {
       if (window.localStorage.getItem('gmq:v3')) return;
       window.localStorage.setItem('gmq:v3', JSON.stringify(payload));
     }, seed);
-    const ready = await loadMapPage(page);
-    test.skip(!ready, 'map tiles did not load — network or Mapbox unavailable');
+    await loadMapPage(page);
   }
 
   /**
@@ -504,8 +560,7 @@ test.describe('map pins', () => {
         })
       );
     });
-    const ready = await loadMapPage(page);
-    test.skip(!ready, 'map tiles did not load — network or Mapbox unavailable');
+    await loadMapPage(page);
 
     const meterPx = await page.evaluate(() => {
       const t = window.__gmTest;
@@ -534,8 +589,7 @@ test.describe('map pins', () => {
 
 test.describe('design step gestures', () => {
   test('array appears within 3s on a rural parcel', async ({ page }) => {
-    const mapLoaded = await openDesignStep(page);
-    test.skip(!mapLoaded, 'map tiles did not load — network or Mapbox unavailable');
+    await openDesignStep(page);
 
     // The rural hang: no buildings ever load, so a placement that waits for
     // them never resolves. The bounded wait must still put panels on the map.
@@ -547,8 +601,7 @@ test.describe('design step gestures', () => {
   });
 
   test('single-finger drag moves the array and not the map', async ({ page }) => {
-    const mapLoaded = await openDesignStep(page);
-    test.skip(!mapLoaded, 'map tiles did not load — network or Mapbox unavailable');
+    await openDesignStep(page);
     await waitForArray(page, 15_000);
     await bringMapIntoView(page);
 
@@ -567,6 +620,7 @@ test.describe('design step gestures', () => {
         await page.waitForTimeout(300);
         continue;
       }
+      await waitForCameraStill(page);
       before = await page.evaluate(() => ({
         array: window.__gmTest.state().arrayCenter!,
         map: window.__gmTest.mapCenter(),
@@ -617,13 +671,9 @@ test.describe('design step gestures', () => {
     expect(moved, 'array did not move under a single-finger drag').toBeGreaterThan(0);
     expect(samples.length, 'no map samples were taken during the drag').toBe(20);
 
-    // A frame that took longer than this means the renderer was starved, and
-    // any drift measured across it is the machine rather than the app.
+    // Reported in the failure message, never used to skip: a slow renderer is
+    // context for a number, not a reason to stop checking it.
     const worstFrame = Math.max(...frameGaps, 0);
-    test.skip(
-      worstFrame > SLOW_FRAME_MS,
-      `environment too slow for gesture timing (worst frame ${worstFrame.toFixed(0)}ms during the drag)`
-    );
 
     // The map must not visibly pan underneath the finger, and "visibly" has to
     // be measured against how far the finger actually went — not against a
@@ -672,16 +722,15 @@ test.describe('design step gestures', () => {
      */
     expect(
       peakDriftPx,
-      `map jumped ${peakDriftPx.toFixed(1)}px as the gesture started`
-    ).toBeLessThan(30);
+      `map jumped ${peakDriftPx.toFixed(1)}px as the gesture started (worst frame ${worstFrame.toFixed(0)}ms)`
+    ).toBeLessThan(3);
   });
 
   test('the control: a drag on empty ground does move the map', async ({ page }) => {
     // The assertion above is only worth anything if a map that IS tracking the
     // finger fails it. This is that map: the same gesture, started away from
     // the array, where Mapbox handles it and the camera follows.
-    const mapLoaded = await openDesignStep(page);
-    test.skip(!mapLoaded, 'map tiles did not load — network or Mapbox unavailable');
+    await openDesignStep(page);
     await waitForArray(page, 15_000);
     await bringMapIntoView(page);
 
@@ -723,6 +772,7 @@ test.describe('design step gestures', () => {
       requestAnimationFrame(tick);
     });
 
+    await waitForCameraStill(page);
     const before = await page.evaluate(() => window.__gmTest.mapCenter());
     await touchStart(client, [{ x: empty.point[0], y: empty.point[1], id: 1 }]);
     const samples: Array<[number, number]> = [];
@@ -740,10 +790,6 @@ test.describe('design step gestures', () => {
       return w.__gmFrames;
     });
     const worstFrame = Math.max(...frameGaps, 0);
-    test.skip(
-      worstFrame > SLOW_FRAME_MS,
-      `environment too slow for gesture timing (worst frame ${worstFrame.toFixed(0)}ms during the drag)`
-    );
 
     const degreesPerPixel = await page.evaluate(() => {
       const a = window.__gmTest.unproject([0, 0]);
@@ -759,13 +805,13 @@ test.describe('design step gestures', () => {
     // number the array-drag assertion has to be nowhere near.
     expect(
       movedPx / fingerTravelPx,
-      `map only moved ${movedPx.toFixed(1)}px over ${fingerTravelPx.toFixed(0)}px of finger travel`
+      `map only moved ${movedPx.toFixed(1)}px over ${fingerTravelPx.toFixed(0)}px of finger travel ` +
+        `(worst frame ${worstFrame.toFixed(0)}ms)`
     ).toBeGreaterThan(0.5);
   });
 
   test('a second finger hands the gesture to the map mid-drag', async ({ page }) => {
-    const mapLoaded = await openDesignStep(page);
-    test.skip(!mapLoaded, 'map tiles did not load — network or Mapbox unavailable');
+    await openDesignStep(page);
     await waitForArray(page, 15_000);
     await bringMapIntoView(page);
 
@@ -828,8 +874,7 @@ test.describe('design step gestures', () => {
   });
 
   test('compass tracks the finger and sets azimuth from its bearing', async ({ page }) => {
-    const mapLoaded = await openDesignStep(page);
-    test.skip(!mapLoaded, 'map tiles did not load — network or Mapbox unavailable');
+    await openDesignStep(page);
     await waitForArray(page, 15_000);
     await bringMapIntoView(page);
     await page.waitForFunction(() => window.__gmTest.renderedHandles() > 0, null, {
@@ -893,8 +938,7 @@ test.describe('design step gestures', () => {
     // at the default azimuth when the design step opens. Rotation is a siting
     // decision, not a resizing one: watching the count tick up and down while
     // you turn the array is how a customer stops trusting the number.
-    const mapLoaded = await openDesignStep(page);
-    test.skip(!mapLoaded, 'map tiles did not load — network or Mapbox unavailable');
+    await openDesignStep(page);
     await waitForArray(page, 15_000);
     await bringMapIntoView(page);
     await page.waitForFunction(() => window.__gmTest.renderedHandles() > 0, null, {
@@ -950,9 +994,7 @@ test.describe('design step gestures', () => {
       });
     });
 
-    const mapLoaded = await openDesignStep(page);
-
-    test.skip(!mapLoaded, 'map tiles did not load — network or Mapbox unavailable');
+    await openDesignStep(page);
     await waitForArray(page, 15_000);
     await bringMapIntoView(page);
 
@@ -1022,9 +1064,7 @@ test.describe('design step gestures', () => {
       });
     });
 
-    const mapLoaded = await openDesignStep(page);
-
-    test.skip(!mapLoaded, 'map tiles did not load — network or Mapbox unavailable');
+    await openDesignStep(page);
     await waitForArray(page, 15_000);
     await bringMapIntoView(page);
     await page.waitForTimeout(2500);
@@ -1096,8 +1136,7 @@ test.describe('design step gestures', () => {
   test('grip keeps a usable screen distance from the array at any zoom', async ({
     page,
   }) => {
-    const mapLoaded = await openDesignStep(page);
-    test.skip(!mapLoaded, 'map tiles did not load — network or Mapbox unavailable');
+    await openDesignStep(page);
     await waitForArray(page, 15_000);
     await bringMapIntoView(page);
 
@@ -1128,8 +1167,7 @@ test.describe('design step gestures', () => {
   test('the real Continue button stores a screenshot containing the design', async ({
     page,
   }) => {
-    const mapLoaded = await openDesignStep(page);
-    test.skip(!mapLoaded, 'map tiles did not load — network or Mapbox unavailable');
+    await openDesignStep(page);
     await waitForArray(page, 15_000);
     await bringMapIntoView(page);
     // Let satellite tiles finish so the buffer holds imagery, not just layers.

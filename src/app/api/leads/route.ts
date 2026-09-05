@@ -444,14 +444,16 @@ async function savePartial(raw: Record<string, unknown>, ip: string): Promise<Ne
   }
 
   /**
-   * The lease comes first, before anything is read.
+   * The site lookup happens before the lease, not under it.
    *
-   * Reading the completed record and then taking the lease left a window: the
-   * read says "not filed yet", a submit runs to completion in the gap, and the
-   * partial writes Status Partial over the New lead at step 6. Holding the
-   * lease across both the read and the write is what makes the check mean
-   * something.
+   * It is the slow part — a cold cache is five PVWatts calls, an SSURGO query
+   * and five Tilequery samples — and holding a lock across somebody else's
+   * network is how a background save ends up blocking a customer's submit for
+   * seconds. The lease covers only the two things that have to be atomic: the
+   * check that the funnel has not already finished, and the write.
    */
+  const fields = await partialFields(raw, stepReached);
+
   const leaseKey = LEASE_PREFIX + id;
   let leaseToken: string | null;
   try {
@@ -469,11 +471,65 @@ async function savePartial(raw: Record<string, unknown>, ip: string): Promise<Ne
   }
 
   try {
-    return await writePartial(id, stepReached, raw, ip);
+    return await writePartial(id, stepReached, fields, ip);
   } finally {
-    // Held across the read and the write together, and no longer.
+    // Held across the recheck and the write, and no longer.
     await releaseLease(leaseKey, leaseToken);
   }
+}
+
+/**
+ * Everything a partial wants to say, worked out before any lock is taken.
+ *
+ * No PII: name, email, phone and address are never read here. The soil is the
+ * server's finding or nothing, because a background save is written with
+ * nobody reviewing it.
+ */
+async function partialFields(
+  raw: Record<string, unknown>,
+  stepReached: number
+): Promise<LeadFields> {
+  const fields: LeadFields = {
+    'Step Reached': stepReached,
+    Status: 'Partial',
+    Source: slug(raw.source),
+  };
+
+  // The design, if there is one yet. Step 1 has coordinates and nothing else.
+  try {
+    const inputs = buildableInputs(parseQuoteInputs(raw.inputs));
+    const facts = await siteFactsForArray(inputs.arrayCenter);
+    const conditions = resolveSiteConditions({ ...inputs, soilClass: null }, facts);
+    const priced = priceFromInputs({ ...inputs, ...conditions }, facts.curve);
+
+    fields.Panels = inputs.panelCount;
+    fields['Panel Tier'] = inputs.tier;
+    fields['System Size kW'] = priced.systemSizeKw;
+    fields['Trenching Distance ft'] = inputs.trenchFeet;
+    fields['Battery Units'] = inputs.batteryUnits;
+    fields['Site Prep'] = inputs.needsClearing;
+    fields.Azimuth = inputs.azimuth;
+    fields['Slope %'] = conditions.slopePercent ?? undefined;
+    fields['Slope Tier'] = priced.quote.slopeTier;
+    fields['Soil Class'] = conditions.soilClass ?? undefined;
+    fields['Curve Source'] = facts.curveSource;
+    fields['Est Annual Production kWh'] = priced.annualProductionKwh;
+    // No prices on a partial: the customer has not been shown one yet, and a
+    // figure in the record the owner might quote from should follow a submit.
+  } catch {
+    // No usable design yet. The row is still worth writing: it says somebody
+    // got this far and where they were looking.
+  }
+
+  const coordinates = raw.coordinates as { latitude?: number; longitude?: number } | undefined;
+  const lat = Number(coordinates?.latitude);
+  const lng = Number(coordinates?.longitude);
+  if (Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180) {
+    fields.Latitude = lat;
+    fields.Longitude = lng;
+  }
+
+  return fields;
 }
 
 /**
@@ -485,7 +541,7 @@ async function savePartial(raw: Record<string, unknown>, ip: string): Promise<Ne
 async function writePartial(
   id: string,
   stepReached: number,
-  raw: Record<string, unknown>,
+  fields: LeadFields,
   ip: string
 ): Promise<NextResponse> {
   /**
@@ -520,51 +576,6 @@ async function writePartial(
   if (!(await rateLimitOkAsync(`partial:${id}`, 'lead-partial-id'))) {
     console.log('[LEAD_PARTIAL] per-lead limit hit', id, 'from', ip);
     return NextResponse.json({ ok: true, partial: true, skipped: 'rate_limited' });
-  }
-
-  const fields: LeadFields = {
-    'Step Reached': stepReached,
-    Status: 'Partial',
-    Source: slug(raw.source),
-  };
-
-  // The design, if there is one yet. Step 1 has coordinates and nothing else.
-  try {
-    const inputs = buildableInputs(parseQuoteInputs(raw.inputs));
-    const facts = await siteFactsForArray(inputs.arrayCenter);
-    // A partial is written without anybody reviewing it, so the client's soil
-    // text is not accepted here at all: either the server found the ground or
-    // the row says Unknown. On a submit the customer's answer is a fallback
-    // worth having; on a background save it is just unverified text landing in
-    // the owner's records.
-    const conditions = resolveSiteConditions({ ...inputs, soilClass: null }, facts);
-    const priced = priceFromInputs({ ...inputs, ...conditions }, facts.curve);
-
-    fields.Panels = inputs.panelCount;
-    fields['Panel Tier'] = inputs.tier;
-    fields['System Size kW'] = priced.systemSizeKw;
-    fields['Trenching Distance ft'] = inputs.trenchFeet;
-    fields['Battery Units'] = inputs.batteryUnits;
-    fields['Site Prep'] = inputs.needsClearing;
-    fields.Azimuth = inputs.azimuth;
-    fields['Slope %'] = conditions.slopePercent ?? undefined;
-    fields['Slope Tier'] = priced.quote.slopeTier;
-    fields['Soil Class'] = conditions.soilClass ?? undefined;
-    fields['Curve Source'] = facts.curveSource;
-    fields['Est Annual Production kWh'] = priced.annualProductionKwh;
-    // No prices on a partial: the customer has not been shown one yet, and a
-    // figure in the record the owner might quote from should follow a submit.
-  } catch {
-    // No usable design yet. The row is still worth writing: it says somebody
-    // got this far and where they were looking.
-  }
-
-  const coordinates = raw.coordinates as { latitude?: number; longitude?: number } | undefined;
-  const lat = Number(coordinates?.latitude);
-  const lng = Number(coordinates?.longitude);
-  if (Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180) {
-    fields.Latitude = lat;
-    fields.Longitude = lng;
   }
 
   const clean = Object.fromEntries(
@@ -913,12 +924,19 @@ export async function POST(req: NextRequest) {
     }
 
     if (!leaseToken) {
-      // Another request for this same lead is mid-write. Dropping is right:
-      // that one is going to finish the job.
-      console.log('[LEADS_IN_PROGRESS]', lead.id);
+      /**
+       * Retryable, not droppable.
+       *
+       * This used to be a 409, and the queue drops 4xx. But the thing holding
+       * the lease is usually a partial save that is about to finish, and a
+       * concurrent submit that is genuinely a duplicate will find the stored
+       * record and replay it. Neither case is "this request can never work",
+       * which is the only thing a 4xx should mean.
+       */
+      console.log('[LEADS_BUSY]', lead.id);
       return NextResponse.json(
-        { ok: false, leadFiled: false, emailSent: false, error: 'in_progress' },
-        { status: 409 }
+        { ok: false, leadFiled: false, emailSent: false, error: 'busy' },
+        { status: 503 }
       );
     }
 

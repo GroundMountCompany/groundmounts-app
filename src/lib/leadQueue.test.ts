@@ -215,3 +215,40 @@ describe('what a real client sends', () => {
     expect(sentHeaders['x-gm-hp']).toBeUndefined();
   });
 });
+
+describe('chasing a retry without being woken', () => {
+  it('schedules its own flush after a 5xx', async () => {
+    // The queue used to flush only on `online` or the tab becoming visible.
+    // A customer who submits, gets a 503 because something held the lease for
+    // a moment, and keeps looking at the same tab triggers neither.
+    let attempts = 0;
+    vi.stubGlobal('fetch', async () => {
+      attempts++;
+      return attempts === 1
+        ? jsonResponse(503, { ok: false, error: 'busy' })
+        : jsonResponse(200, { ok: true, leadFiled: true, emailSent: true });
+    });
+
+    const result = await enqueueOrSend(lead('busy-then-fine'));
+
+    expect(result).toMatchObject({ ok: false, queued: true, status: 503 });
+    expect(queued(), 'the lead was not kept').toHaveLength(1);
+    expect(attempts).toBe(1);
+
+    // Nothing happens in the tab: no navigation, no reconnect. The queue has
+    // to come back on its own.
+    await vi.advanceTimersByTimeAsync(3500);
+
+    expect(attempts, 'the queue never retried by itself').toBeGreaterThan(1);
+    await vi.waitFor(() => expect(queued()).toHaveLength(0));
+  });
+
+  it('does not queue a lead the server refused outright', async () => {
+    vi.stubGlobal('fetch', async () => jsonResponse(400, { ok: false, error: 'bad_request' }));
+
+    const result = await enqueueOrSend(lead('refused'));
+
+    expect(result).toMatchObject({ ok: false, queued: false, status: 400 });
+    expect(queued(), 'a payload that can never work was queued').toHaveLength(0);
+  });
+});

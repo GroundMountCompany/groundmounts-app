@@ -92,6 +92,9 @@ function leadHeaders(payload: Payload): Record<string, string> {
   return headers;
 }
 
+/** First retry after a server-side failure. Doubles from there in flushQueue. */
+const RETRY_DELAY_MS = 3000;
+
 export async function enqueueOrSend(
   payload: Payload,
   url = "/api/leads"
@@ -104,15 +107,38 @@ export async function enqueueOrSend(
       body: JSON.stringify(payload),
     });
     status = res.status;
+
     if (res.ok) {
       // The body carries what actually happened: the lead is filed, and the
       // email may or may not have gone with it.
       const body = await res.json().catch(() => ({}));
       return { ok: true, queued: false, status, body };
     }
+
+    // 4xx means this payload will never work. Queuing it would burn retries on
+    // something the server has already refused on its merits.
+    if (res.status < 500) {
+      console.warn("[LEAD_QUEUE] Server refused the lead:", payload.id, res.status);
+      return { ok: false, queued: false, status };
+    }
+
     throw new Error("net");
   } catch {
     const q = load(); q.push({ ...payload, _retries: 0 }); save(q);
+
+    /**
+     * Chase it ourselves rather than waiting to be woken.
+     *
+     * The queue only flushed on an `online` event or the tab becoming visible.
+     * A customer who submits, gets a 503 because something held the lease for
+     * a moment, and then sits looking at the same tab would have waited
+     * indefinitely — the two events that trigger a flush are exactly the two
+     * that do not happen when nothing changes.
+     */
+    if (typeof setTimeout === "function") {
+      setTimeout(() => flushQueue(url), RETRY_DELAY_MS);
+    }
+
     return { ok: false, queued: true, status };
   }
 }

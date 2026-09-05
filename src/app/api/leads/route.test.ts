@@ -1437,3 +1437,62 @@ describe('a partial paused in the middle of its own work', () => {
     expect(written).toHaveLength(1);
   });
 });
+
+describe('a submit that cannot get the lease', () => {
+  const LEAD = '8f14e45f-ceea-467a-9f34-2c8c3b1a77de';
+
+  it('answers 503 so the queue keeps the lead', async () => {
+    // Held for longer than the submit is willing to wait. A 409 here would be
+    // a 4xx, and the queue drops those — somebody would lose their lead to a
+    // background save.
+    const redis = await import('@/lib/server/redis');
+    const held = await redis.acquireLease(`gm:submit:lease:${LEAD}`, 60);
+    expect(held).toBeTruthy();
+
+    const res = await POST(post(validLead()));
+
+    expect(res.status, 'a busy lead was reported as a client error').toBe(503);
+    expect((await res.json()).error).toBe('busy');
+    expect(written).toHaveLength(0);
+
+    // Once it is free, the same payload files.
+    await redis.releaseLease(`gm:submit:lease:${LEAD}`, held!);
+    __resetRateLimits();
+    const retry = await POST(post(validLead()));
+
+    expect(retry.status).toBe(200);
+    expect(written).toHaveLength(1);
+  });
+});
+
+describe('what a partial does before it takes the lease', () => {
+  it('looks the site up first, so the lock covers only the write', async () => {
+    // Holding a lock across somebody else's network is how a background save
+    // blocks a customer's submit for seconds.
+    curveCalls.length = 0;
+
+    const redis = await import('@/lib/server/redis');
+    const observed: string[] = [];
+    const realAcquire = redis.acquireLease;
+    vi.spyOn(redis, 'acquireLease').mockImplementation(async (key: string, ttl: number) => {
+      // How many lookups had happened by the time the lease was taken?
+      observed.push(`lease-after-${curveCalls.length}-lookups`);
+      return realAcquire(key, ttl);
+    });
+
+    await POST(
+      post({
+        partial: true,
+        id: '9d3f1c55-2a7e-4b3d-8e61-0c4a7b2f9d10',
+        stepReached: 4,
+        inputs: INPUTS,
+      })
+    );
+    vi.restoreAllMocks();
+
+    expect(curveCalls, 'the site was never looked up').toHaveLength(1);
+    expect(observed, 'the lease was taken before the site lookup').toEqual([
+      'lease-after-1-lookups',
+    ]);
+  });
+});

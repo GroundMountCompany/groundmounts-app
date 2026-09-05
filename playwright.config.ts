@@ -48,12 +48,12 @@ export default defineConfig({
       // The funnel is mobile-first and customers are overwhelmingly on phones,
       // so the phone viewport is the default target, not an afterthought.
       name: 'mobile',
-      testIgnore: /interaction\.spec\.ts/,
+      testIgnore: /(interaction|mouse)\.spec\.ts/,
       use: { ...devices['iPhone 13'], viewport: { width: 390, height: 844 } },
     },
     {
       name: 'desktop',
-      testIgnore: /interaction\.spec\.ts/,
+      testIgnore: /(interaction|mouse)\.spec\.ts/,
       use: { ...devices['Desktop Chrome'] },
     },
     {
@@ -92,12 +92,46 @@ export default defineConfig({
        */
       dependencies: ['mobile', 'desktop', 'mobile-chromium'],
       fullyParallel: false,
+      /**
+       * Two 10s readiness attempts plus classification, on a software
+       * rasteriser, inside one budget. The default 30s left no room for the
+       * second attempt and the failure would arrive as a bare timeout rather
+       * than as the classifier's message.
+       */
+      timeout: 45_000,
       use: {
         ...devices['Desktop Chrome'],
         viewport: { width: 390, height: 844 },
         hasTouch: true,
         isMobile: true,
         deviceScaleFactor: 2,
+        launchOptions: {
+          args: [
+            '--use-gl=angle',
+            '--use-angle=swiftshader',
+            '--enable-unsafe-swiftshader',
+            '--ignore-gpu-blocklist',
+          ],
+        },
+      },
+    },
+    {
+      /**
+       * The same real map, driven with a mouse.
+       *
+       * Everything above dispatches synthetic touch, so the pointer path a
+       * desktop customer actually uses went unexercised — which is how a
+       * capture-phase listener that broke mouse dragging outright survived a
+       * full green suite.
+       */
+      name: 'desktop-map',
+      testMatch: /mouse\.spec\.ts/,
+      dependencies: ['interaction'],
+      fullyParallel: false,
+      timeout: 45_000,
+      use: {
+        ...devices['Desktop Chrome'],
+        viewport: { width: 1280, height: 900 },
         launchOptions: {
           args: [
             '--use-gl=angle',

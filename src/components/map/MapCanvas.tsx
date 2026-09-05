@@ -315,37 +315,7 @@ export default function MapStage({ mode }: { mode: MapMode }) {
         pendingCamera = [map.getCenter().lng, map.getCenter().lat];
       }
     };
-    /**
-     * Listen above the map, not on its canvas.
-     *
-     * Mapbox binds its handler manager to the container we hand it, in the
-     * capture phase — so a capture listener on the canvas fires *after* it,
-     * and the pan has already begun. That is the 3-21px jump: one frame of
-     * Mapbox panning before our handler claims the gesture, which the camera
-     * pin then corrects.
-     *
-     * The container's parent is the first element whose capture phase runs
-     * before Mapbox's. Claiming there means its handler manager never sees the
-     * touch at all, rather than seeing it and being undone.
-     */
-    const outer = host.current?.parentElement ?? host.current!;
-    outer.addEventListener('touchstart', onTouchStartCapture, { capture: true });
-
-    /**
-     * The same claim for a mouse or pen, which arrive as pointerdown without a
-     * touchstart. Mapbox pans on those too.
-     */
-    const onPointerDownCapture = (e: PointerEvent) => {
-      if (modeRef.current !== 'design') return;
-      if (e.pointerType === 'touch') return; // already handled above
-      const rect = canvas.getBoundingClientRect();
-      const pt: [number, number] = [e.clientX - rect.left, e.clientY - rect.top];
-      if (hitTest(pt)) {
-        e.stopPropagation();
-        pendingCamera = [map.getCenter().lng, map.getCenter().lat];
-      }
-    };
-    outer.addEventListener('pointerdown', onPointerDownCapture, { capture: true });
+    canvas.addEventListener('touchstart', onTouchStartCapture, { capture: true });
 
     /**
      * Hold the camera still for the duration of an array or compass drag.
@@ -528,8 +498,7 @@ export default function MapStage({ mode }: { mode: MapMode }) {
       fitRef.current = null;
       framedResetRef.current = null;
       if (slopeTimer.current) clearTimeout(slopeTimer.current);
-      outer.removeEventListener('touchstart', onTouchStartCapture, { capture: true });
-      outer.removeEventListener('pointerdown', onPointerDownCapture, { capture: true });
+      canvas.removeEventListener('touchstart', onTouchStartCapture, { capture: true });
       canvas.removeEventListener('touchend', releasePending);
       canvas.removeEventListener('touchcancel', releasePending);
       canvas.removeEventListener('pointerdown', onPointerDown);

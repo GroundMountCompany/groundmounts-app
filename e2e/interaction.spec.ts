@@ -260,25 +260,45 @@ async function loadMapPage(page: Page): Promise<void> {
    * broken token, a map that is simply never built. Those must fail, or the
    * suite quietly stops testing the thing it exists for.
    */
-  const upstreamFailures: string[] = [];
-  const watch = (status: number, url: string) => {
+  /**
+   * Whose fault is a map that never appeared?
+   *
+   * A 4xx from Mapbox is ours: a bad token, a style that does not exist, a
+   * URL we got wrong. Those are exactly the failures this suite exists to
+   * catch, and skipping on them would mean the map could break completely
+   * and the gate would stay green. Only a 5xx or a connection that never
+   * completed is somebody else's outage.
+   */
+  const ourFailures: string[] = [];
+  const theirFailures: string[] = [];
+
+  page.on('response', (r) => {
+    const url = r.url();
     if (!url.includes('api.mapbox.com')) return;
-    if (status >= 400) upstreamFailures.push(`${status} ${url.split('?')[0]}`);
-  };
-  page.on('response', (r) => watch(r.status(), r.url()));
-  page.on('requestfailed', (r) => upstreamFailures.push(`failed ${r.url().split('?')[0]}`));
+    const status = r.status();
+    const short = `${status} ${url.split('?')[0]}`;
+    if (status >= 500) theirFailures.push(short);
+    else if (status >= 400) ourFailures.push(short);
+  });
+  page.on('requestfailed', (r) => {
+    if (r.url().includes('api.mapbox.com')) {
+      theirFailures.push(`failed ${r.url().split('?')[0]}`);
+    }
+  });
 
   let lastError: unknown;
+  // Ten seconds a wait, so two attempts plus this classification finish well
+  // inside the 45s the interaction project allows a test.
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       await page.goto('/quote');
       await page.waitForFunction(() => typeof window.__gmTest !== 'undefined', null, {
-        timeout: 30_000,
+        timeout: 10_000,
       });
       await page.waitForFunction(() => window.__gmTest.state().mapReady === true, null, {
-        timeout: 30_000,
+        timeout: 10_000,
       });
-      await page.waitForFunction(() => !window.__gmTest.isMoving(), null, { timeout: 15_000 });
+      await page.waitForFunction(() => !window.__gmTest.isMoving(), null, { timeout: 10_000 });
       await page.waitForTimeout(600);
       return;
     } catch (error) {
@@ -287,13 +307,21 @@ async function loadMapPage(page: Page): Promise<void> {
     }
   }
 
-  // Twice, and Mapbox itself refused or never answered: not our bug.
+  // Ours first: a rejected token or a missing style is the thing to shout
+  // about, and it must never be mistaken for somebody else's bad afternoon.
+  if (ourFailures.length) {
+    throw new Error(
+      `Mapbox rejected our requests — bad token, wrong style, or a URL we got ` +
+        `wrong. This is an app failure: ${ourFailures.slice(0, 3).join('; ')}`
+    );
+  }
+
+  // Only a 5xx or a connection that never completed is external.
   test.skip(
-    upstreamFailures.length > 0,
-    `Mapbox did not serve the map: ${upstreamFailures.slice(0, 3).join('; ')}`
+    theirFailures.length > 0,
+    `Mapbox did not serve the map: ${theirFailures.slice(0, 3).join('; ')}`
   );
 
-  // Otherwise the map is broken and the suite says so.
   throw new Error(
     `The map never became ready and Mapbox answered every request. ` +
       `This is an app failure, not an environment one. Last error: ${String(lastError)}`
@@ -334,6 +362,34 @@ function distanceToPolygonEdge(point: Pt, ring: Pt[]): number {
   }
   return best;
 }
+
+test('a rejected Mapbox token is reported as our failure, not an outage', async ({ page }) => {
+  // The classifier's whole job. With a bad token Mapbox answers 401, the map
+  // never becomes ready, and the suite has to say "this is ours" rather than
+  // skipping as though somebody else were down — a skip here would mean the
+  // map could break completely and the gate would stay green.
+  await page.route('**/api.mapbox.com/**', (route) =>
+    route.fulfill({
+      status: 401,
+      contentType: 'application/json',
+      body: JSON.stringify({ message: 'Not Authorized - Invalid Token' }),
+    })
+  );
+
+  let thrown: unknown;
+  try {
+    await loadMapPage(page);
+  } catch (error) {
+    thrown = error;
+  }
+
+  expect(thrown, 'a rejected token did not fail the suite').toBeTruthy();
+  const message = String(thrown);
+  expect(message, 'the failure did not name the cause').toContain('Mapbox rejected our requests');
+  expect(message).toContain('401');
+  // Not the bare timeout it used to be.
+  expect(message).not.toContain('exceeded');
+});
 
 test.describe('map pins', () => {
   /** Drag whatever is at `from` to `to` and report what moved. */
@@ -692,18 +748,15 @@ test.describe('design step gestures', () => {
     /**
      * The measurement that matters: does the map follow the finger?
      *
-     * Sampling after every touchMove showed the profile is flat — the map
-     * jumps once as the gesture starts and then holds for all twenty samples
-     * (e.g. "7.2 7.2 7.2 ... 7.2"). So the quantity is a fixed offset from the
-     * moment before our handler claims the gesture, not drift that accumulates
-     * with the drag.
+     * Sampled after every touchMove. With the camera settled before the
+     * "before" reading is taken, every sample reads 0.00px — the map does not
+     * move at all during an array drag.
      *
-     * That means dividing the peak by finger travel measures the length of
-     * drag this test happens to make: the same offset would read 5% over 216px
-     * and 10% over 108px. What is worth asserting proportionally is the
-     * *spread* — how much the map moves across the gesture while the finger
-     * travels 216px. A map being panned by the finger climbs steadily; a
-     * pinned one is flat.
+     * The spread is what is worth asserting proportionally: how much the map
+     * moves across the gesture while the finger travels 216px. A map being
+     * panned by the finger climbs steadily; a
+     * pinned one is flat. The control test below drags empty ground and must
+     * exceed 50%, which is what shows this measurement can tell the two apart.
      */
     const spreadPx = Math.max(...driftsPx) - Math.min(...driftsPx);
     expect(
@@ -714,11 +767,15 @@ test.describe('design step gestures', () => {
     ).toBeLessThan(0.05);
 
     /**
-     * And the initial offset, as an absolute figure because that is what it
-     * is. Measured between 3px and 21px across runs on a loaded machine, all
-     * of it in the first frame; the owner confirmed on a real iPhone that the
-     * drag does not fight the map. 30px is a regression bound, not a target —
-     * if this starts failing, gesture arbitration has changed.
+     * And the offset at the start of the gesture, as an absolute figure
+     * because that is what it is: a one-off, not something that grows with the
+     * drag.
+     *
+     * It reads 0.00px once the camera is genuinely still before the "before"
+     * sample is taken. The 3-21px this used to report was the setup's
+     * fitDesign ease still settling, measured entirely before the first
+     * touchmove — a fault in the test, not in the map. 3px is the bound: far
+     * above the zero it actually measures, far below the artefact it replaced.
      */
     expect(
       peakDriftPx,

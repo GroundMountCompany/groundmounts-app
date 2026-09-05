@@ -214,6 +214,41 @@ async function swingCompassTo(page: Page, client: CDPSession, targetBearing: num
  * fixed sleep is not enough — the drag then starts before the zoom has settled
  * and grabs empty map.
  */
+/**
+ * Watch how fast the renderer is actually painting.
+ *
+ * SwiftShader rasterises on the CPU, and on a loaded machine — a laptop
+ * running a full suite, a CI box with noisy neighbours — frames can stretch
+ * from 16ms to hundreds. Gesture assertions measured under that are measuring
+ * the machine, not the app.
+ *
+ * Returns the median interval between animation frames during the window.
+ */
+async function medianFrameMs(page: Page, sampleMs: number): Promise<number> {
+  return page.evaluate(async (ms) => {
+    const times: number[] = [];
+    let last = performance.now();
+    const started = last;
+
+    await new Promise<void>((resolve) => {
+      const tick = (now: number) => {
+        times.push(now - last);
+        last = now;
+        if (now - started >= ms) resolve();
+        else requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    });
+
+    if (!times.length) return Number.POSITIVE_INFINITY;
+    const sorted = [...times].sort((a, b) => a - b);
+    return sorted[Math.floor(sorted.length / 2)];
+  }, sampleMs);
+}
+
+/** Above this the environment cannot be timed fairly. */
+const SLOW_FRAME_MS = 100;
+
 async function waitForStableHandle(page: Page) {
   await page.waitForFunction(() => !window.__gmTest.isMoving(), null, { timeout: 10_000 });
   let stable = 0;
@@ -535,6 +570,14 @@ test.describe('design step gestures', () => {
     await waitForArray(page, 15_000);
     await bringMapIntoView(page);
 
+    // Measured before the gesture, so a starved renderer is reported as such
+    // rather than showing up as an app regression.
+    const frameMs = await medianFrameMs(page, 400);
+    test.skip(
+      frameMs > SLOW_FRAME_MS,
+      `environment too slow for gesture timing (median frame ${frameMs.toFixed(0)}ms)`
+    );
+
     const client = await page.context().newCDPSession(page);
     let moved = 0;
     let mapDrift = Number.NaN;
@@ -555,10 +598,6 @@ test.describe('design step gestures', () => {
       // Driven step by step so the map centre can be sampled while the finger
       // is still down: once it lifts, an out-of-view array is deliberately
       // re-framed, which moves the camera on purpose.
-      // A long drag on purpose. The map's residual is a fixed few pixels from
-      // the moment before our handler claims the gesture, so the further the
-      // array travels the less the ratio below depends on how many frames the
-      // harness happened to deliver.
       await touchStart(client, [{ x: grab[0], y: grab[1], id: 1 }]);
       for (let i = 1; i <= 20; i++) {
         await touchMove(client, [
@@ -566,6 +605,10 @@ test.describe('design step gestures', () => {
         ]);
       }
 
+      // The last sample before the finger lifts, not one taken mid-gesture.
+      // The camera pin is a correction, so a mid-drag reading can catch an
+      // excursion that is about to be undone; what a person sees is where the
+      // map ended up.
       const during = await page.evaluate(() => ({
         array: window.__gmTest.state().arrayCenter!,
         map: window.__gmTest.mapCenter(),
@@ -608,6 +651,12 @@ test.describe('design step gestures', () => {
     await openDesignStep(page);
     await waitForArray(page, 15_000);
     await bringMapIntoView(page);
+
+    const frameMs = await medianFrameMs(page, 400);
+    test.skip(
+      frameMs > SLOW_FRAME_MS,
+      `environment too slow for gesture timing (median frame ${frameMs.toFixed(0)}ms)`
+    );
 
     const client = await page.context().newCDPSession(page);
 

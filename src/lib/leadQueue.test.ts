@@ -186,3 +186,32 @@ describe('sending directly', () => {
     expect(queued()).toHaveLength(1);
   });
 });
+
+describe('what a real client sends', () => {
+  it('puts the honeypot in a header as well as the body', async () => {
+    // The server checks the header before it parses anything. A guard only
+    // real clients fail to trigger is a guard that only stops honest traffic.
+    let sentHeaders: Record<string, string> = {};
+    vi.stubGlobal('fetch', async (_url: string, init: RequestInit) => {
+      sentHeaders = init.headers as Record<string, string>;
+      return jsonResponse(200, { ok: true, leadFiled: true, emailSent: true });
+    });
+
+    await enqueueOrSend({ ...lead('with-hp'), honeypot: 'i am a robot' });
+
+    expect(sentHeaders['x-gm-hp']).toBe('i am a robot');
+    expect(sentHeaders['Content-Type']).toBe('application/json');
+  });
+
+  it('sends no honeypot header when the field is empty', async () => {
+    let sentHeaders: Record<string, string> = {};
+    vi.stubGlobal('fetch', async (_url: string, init: RequestInit) => {
+      sentHeaders = init.headers as Record<string, string>;
+      return jsonResponse(200, { ok: true, leadFiled: true, emailSent: true });
+    });
+
+    await enqueueOrSend({ ...lead('no-hp'), honeypot: '' });
+
+    expect(sentHeaders['x-gm-hp']).toBeUndefined();
+  });
+});

@@ -810,17 +810,23 @@ describe('lease, then commit', () => {
     expect((await POST(post(validLead()))).status).toBeGreaterThanOrEqual(500);
   });
 
-  it('refuses a second submit while the first holds the lease', async () => {
-    // The lease is taken before the write and only released after it, so a
-    // concurrent duplicate is told to go away rather than filing a second row.
+  it('files one record when two submits land together', async () => {
+    // The loser waits for the lease, then finds the record the winner wrote
+    // and replays it. Waiting rather than refusing matters because partials
+    // hold this lease too, and a 4xx would make the queue drop the lead.
     failEmail = false;
-    const holder = POST(post(validLead()));
-    __resetRateLimits();
-    const rival = await POST(post(validLead()));
+    const [first, second] = await Promise.all([
+      POST(post(validLead())),
+      POST(post(validLead())),
+    ]);
 
-    await holder;
-    expect([409, 200]).toContain(rival.status);
+    const bodies = await Promise.all([first.json(), second.json()]);
     expect(written, 'two concurrent submits wrote two records').toHaveLength(1);
+
+    // One did the work; the other replayed it. Both got the same answer.
+    expect(bodies.filter((b) => b.duplicate)).toHaveLength(1);
+    expect(bodies[0].priceLow).toBe(bodies[1].priceLow);
+    expect(notifications.filter((n) => n.react), 'two customer emails').toHaveLength(1);
   });
 });
 
@@ -1354,5 +1360,80 @@ describe('an attachment Airtable would not take', () => {
 
     expect(blobs).toHaveLength(1);
     expect(deletedBlobs, 'a good attachment was deleted').toHaveLength(0);
+  });
+});
+
+describe('a partial paused in the middle of its own work', () => {
+  const LEAD = '8f14e45f-ceea-467a-9f34-2c8c3b1a77de';
+  const partialBody = (step: number) => ({
+    partial: true,
+    id: LEAD,
+    stepReached: step,
+    inputs: INPUTS,
+    coordinates: { latitude: 32.7555, longitude: -97.3208 },
+  });
+
+  it('cannot overwrite a submit that completed while it was suspended', async () => {
+    // The interleaving that used to lose the lead: the partial reads "not
+    // filed yet", a submit runs to completion in the gap, and the partial then
+    // writes Status Partial over the New lead at step 6.
+    //
+    // The partial is suspended at exactly that point — inside its
+    // completed-record read — and a submit is started. With the lease taken
+    // before the read, the submit cannot get past its own lease acquisition
+    // while the partial is stopped, so the gap the bug needed does not exist.
+    let resume: (() => void) | null = null;
+    const held = new Promise<void>((resolve) => (resume = resolve));
+
+    const redis = await import('@/lib/server/redis');
+    const realGet = redis.storeGet;
+    let suspended = false;
+
+    vi.spyOn(redis, 'storeGet').mockImplementation(async (key: string) => {
+      if (!suspended && key === `gm:submit:${LEAD}`) {
+        suspended = true;
+        await held;
+      }
+      return realGet(key);
+    });
+
+    const partial = POST(post(partialBody(4)));
+    await vi.waitFor(() => expect(suspended).toBe(true));
+
+    const submit = POST(post(validLead()));
+    // Long enough for the submit to have written, if anything could.
+    await new Promise((resolve) => setTimeout(resolve, 400));
+
+    expect(
+      written,
+      'a submit wrote while a partial held the lease'
+    ).toHaveLength(0);
+
+    (resume as unknown as () => void)();
+    await Promise.all([partial, submit]);
+    vi.restoreAllMocks();
+
+    // The partial went first and wrote its row; the submit followed and turned
+    // it into the finished funnel. Whatever the order, the row ends as New.
+    const final = written[written.length - 1];
+    expect(final.Status, 'a partial overwrote a filed lead').toBe('New');
+    expect(final['Step Reached']).toBe(6);
+    expect(written.every((f) => f['Lead ID'] === LEAD)).toBe(true);
+  });
+
+  it('makes the submit wait rather than refusing it', async () => {
+    // A partial holding the lease must never cost somebody their lead: a 409
+    // is a 4xx, and the queue drops those.
+    const redis = await import('@/lib/server/redis');
+    const held = await redis.acquireLease(`gm:submit:lease:${LEAD}`, 60);
+    expect(held).toBeTruthy();
+
+    // Give it back while the submit is in its retry loop.
+    setTimeout(() => void redis.releaseLease(`gm:submit:lease:${LEAD}`, held!), 300);
+
+    const res = await POST(post(validLead()));
+
+    expect(res.status, 'the submit gave up instead of waiting').toBe(200);
+    expect(written).toHaveLength(1);
   });
 });

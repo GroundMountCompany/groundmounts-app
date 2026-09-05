@@ -79,6 +79,19 @@ export interface SendResult {
  * what to tell the customer: a queued lead is not a delivered one, and clearing
  * their design on a 500 loses work they cannot get back.
  */
+/**
+ * Headers a real client sends, so the pre-parse guards apply to it.
+ *
+ * The honeypot travels in the body too — the server checks both — but the
+ * server's cheap check runs before it reads the body, and a guard that only
+ * real clients fail to trigger is a guard that only stops honest traffic.
+ */
+function leadHeaders(payload: Payload): Record<string, string> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (payload.honeypot) headers["x-gm-hp"] = payload.honeypot.slice(0, 64);
+  return headers;
+}
+
 export async function enqueueOrSend(
   payload: Payload,
   url = "/api/leads"
@@ -87,7 +100,7 @@ export async function enqueueOrSend(
   try {
     const res = await fetch(url, {
       method: "POST",
-      headers: { "Content-Type":"application/json" },
+      headers: leadHeaders(payload),
       body: JSON.stringify(payload),
     });
     status = res.status;
@@ -125,7 +138,7 @@ export function flushQueue(url = "/api/leads") {
 
   fetch(url, {
     method: "POST",
-    headers: { "Content-Type":"application/json" },
+    headers: leadHeaders(next),
     body: JSON.stringify(next),
   })
   .then(async r => {

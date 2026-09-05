@@ -444,12 +444,56 @@ async function savePartial(raw: Record<string, unknown>, ip: string): Promise<Ne
   }
 
   /**
+   * The lease comes first, before anything is read.
+   *
+   * Reading the completed record and then taking the lease left a window: the
+   * read says "not filed yet", a submit runs to completion in the gap, and the
+   * partial writes Status Partial over the New lead at step 6. Holding the
+   * lease across both the read and the write is what makes the check mean
+   * something.
+   */
+  const leaseKey = LEASE_PREFIX + id;
+  let leaseToken: string | null;
+  try {
+    leaseToken = await acquireLease(leaseKey, LEASE_TTL_SECONDS);
+  } catch {
+    console.warn('[LEAD_PARTIAL] store unavailable at lease, skipping', id);
+    return NextResponse.json({ ok: true, partial: true, skipped: 'store_unavailable' });
+  }
+
+  if (!leaseToken) {
+    // A submit for this lead is mid-write. It is about to say everything this
+    // save would have, and more.
+    console.log('[LEAD_PARTIAL] lead is mid-write, skipping', id);
+    return NextResponse.json({ ok: true, partial: true, skipped: 'in_progress' });
+  }
+
+  try {
+    return await writePartial(id, stepReached, raw, ip);
+  } finally {
+    // Held across the read and the write together, and no longer.
+    await releaseLease(leaseKey, leaseToken);
+  }
+}
+
+/**
+ * A partial save, with the lease already held.
+ *
+ * Split out so the lease cannot be forgotten on an early return: every path
+ * below returns, and the caller's `finally` gives it back.
+ */
+async function writePartial(
+  id: string,
+  stepReached: number,
+  raw: Record<string, unknown>,
+  ip: string
+): Promise<NextResponse> {
+  /**
    * A finished funnel does not go backwards.
    *
    * Partial saves are fire-and-forget from a page that may still be open in a
-   * tab, so one can land after the submit it precedes — and rewrite the
-   * owner's New lead at Step 6 into a Partial at step 4. A completed record is
-   * the end of the story for that id.
+   * tab, so one can land after the submit it precedes. Read under the lease,
+   * so a submit cannot slip between this and the write below.
    */
   let completed: SubmitRecord | null = null;
   try {
@@ -476,31 +520,6 @@ async function savePartial(raw: Record<string, unknown>, ip: string): Promise<Ne
   if (!(await rateLimitOkAsync(`partial:${id}`, 'lead-partial-id'))) {
     console.log('[LEAD_PARTIAL] per-lead limit hit', id, 'from', ip);
     return NextResponse.json({ ok: true, partial: true, skipped: 'rate_limited' });
-  }
-
-  /**
-   * The same lease a submit takes, for the same reason.
-   *
-   * A partial and the submit it precedes can be in flight together — the page
-   * fires one on a step change while the customer presses the button — and
-   * both write the same Airtable row. The completed-record check above closes
-   * the window where the submit has already finished; this closes the one
-   * where it has not finished yet.
-   */
-  const leaseKey = LEASE_PREFIX + id;
-  let leaseToken: string | null;
-  try {
-    leaseToken = await acquireLease(leaseKey, LEASE_TTL_SECONDS);
-  } catch {
-    console.warn('[LEAD_PARTIAL] store unavailable at lease, skipping', id);
-    return NextResponse.json({ ok: true, partial: true, skipped: 'store_unavailable' });
-  }
-
-  if (!leaseToken) {
-    // A submit for this lead is mid-write. It is about to say everything this
-    // save would have, and more.
-    console.log('[LEAD_PARTIAL] lead is mid-write, skipping', id);
-    return NextResponse.json({ ok: true, partial: true, skipped: 'in_progress' });
   }
 
   const fields: LeadFields = {
@@ -560,10 +579,6 @@ async function savePartial(raw: Record<string, unknown>, ip: string): Promise<Ne
     // A partial save must never be visible to the customer. Log and move on.
     console.error('[LEAD_PARTIAL_ERROR]', id, error instanceof Error ? error.message : error);
     return NextResponse.json({ ok: false, partial: true, error: 'not_saved' }, { status: 502 });
-  } finally {
-    // Held for the write and no longer: a submit arriving a moment later
-    // should not be told its own lead is busy.
-    await releaseLease(leaseKey, leaseToken);
   }
 }
 
@@ -640,6 +655,9 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // The header first, because it is free. The body's copy is checked below
+    // once it has been parsed: a client that sends only the field is still
+    // caught, and one that sends only the header is caught here.
     if (isBotHoneypot(declaredHoneypot ?? undefined)) {
       console.log("[LEADS_BLOCKED] Bot honeypot triggered (header)");
       return NextResponse.json({ ok: true, ignored: true, leadFiled: true, emailSent: true });
@@ -871,9 +889,21 @@ export async function POST(req: NextRequest) {
      * after the write succeeds — it is a record of what happened, not a claim
      * that it is about to.
      */
-    let leaseToken: string | null;
+    /**
+     * Wait briefly rather than refusing.
+     *
+     * Partials hold this lease too, and one takes a few hundred milliseconds.
+     * A submit that gave up immediately would 409, the queue would drop it as
+     * a 4xx, and a customer would lose their lead to a background save that
+     * was about to finish. Two concurrent *submits* still resolve the same
+     * way, because the one that wins files the lead.
+     */
+    let leaseToken: string | null = null;
     try {
-      leaseToken = await acquireLease(leaseKey, LEASE_TTL_SECONDS);
+      for (let attempt = 0; attempt < 6 && !leaseToken; attempt++) {
+        leaseToken = await acquireLease(leaseKey, LEASE_TTL_SECONDS);
+        if (!leaseToken) await new Promise((resolve) => setTimeout(resolve, 250));
+      }
     } catch (error) {
       console.error('[LEADS_STORE_DOWN]', lead.id, error);
       return NextResponse.json(
@@ -893,6 +923,32 @@ export async function POST(req: NextRequest) {
     }
 
     heldLease = { key: leaseKey, token: leaseToken };
+
+    /**
+     * Read again, now that nobody else can be writing.
+     *
+     * The first read happened before the lease. Two submits landing together
+     * both saw "not filed", and the one that waited for the lease then wrote a
+     * second record — the exact thing the lease exists to prevent, moved one
+     * step along rather than removed. This is the check that counts.
+     */
+    try {
+      const settled = await storeGet<SubmitRecord>(submitKey);
+      if (settled) {
+        await releaseLease(leaseKey, leaseToken);
+        heldLease = null;
+        console.log('[LEADS_DUPLICATE] replaying result written while we waited', lead.id);
+        return NextResponse.json(replyFrom(settled, { duplicate: true }));
+      }
+    } catch (error) {
+      await releaseLease(leaseKey, leaseToken);
+      heldLease = null;
+      console.error('[LEADS_STORE_DOWN]', lead.id, error);
+      return NextResponse.json(
+        { ok: false, leadFiled: false, emailSent: false, error: 'store_unavailable' },
+        { status: 503 }
+      );
+    }
 
     // Parse address components
     const addressParts = lead.address ? parseAddress(lead.address) : {};

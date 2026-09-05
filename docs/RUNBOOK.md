@@ -45,7 +45,11 @@ the owner's notification address from us.
 | `?brand=` | Which brand the funnel wears: `groundmounts` or `neutral`. Anything else falls back to the default. Decides the email sender and the logo. | `/quote?brand=neutral` |
 | `?source=` | **Attribution only.** Recorded in Airtable's Source field. Deliberately cannot pick a brand — otherwise any URL could decide what a customer's email claimed to be from. | `/quote?source=partnersite.com` |
 | `?zipcode=` | Pre-fills the address search. | `/quote?zipcode=76086` |
-| `?partial=1` | Header/query hint that a POST to `/api/leads` is a partial save. Set by the client; the body's `partial: true` works too. | — |
+| `?partial=1` | Header/query hint that a POST to `/api/leads` is a partial save. Set by the client as `x-gm-partial: 1`; the body's `partial: true` works too. | — |
+
+The client also sends the honeypot as `x-gm-hp` alongside the body field, so
+the server's pre-parse check applies to real traffic rather than only to
+whatever a bot chooses to send. Both are checked.
 | `?state=` | Sets the state on the lead. Defaults to `TX`. | `/quote?state=TX` |
 
 ---

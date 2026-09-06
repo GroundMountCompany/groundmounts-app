@@ -22,6 +22,7 @@ import Step4Design from './steps/Step4Design';
 import PanelStepper from './steps/PanelStepper';
 import DesignHud from '@/components/map/DesignHud';
 import FaceSouth from '@/components/map/FaceSouth';
+import SizeToast from '@/components/map/SizeToast';
 import Step5Options from './steps/Step5Options';
 import Step6Quote from './steps/Step6Quote';
 
@@ -165,51 +166,54 @@ export default function FunnelShell() {
       // pointer-events-auto; everything else lets the map have it.
       className="pointer-events-none fixed inset-0 z-10 flex flex-col overflow-hidden md:flex-row"
     >
-      {/* Map: full-bleed on a phone, the left 60% on a desktop. */}
-      {/* The map canvas is a body-level portal underneath this shell, so the map
-          column must let touches through to it. Anything drawn on top of the map
-          re-enables pointer events for itself.
+      {/* Map: full-bleed on a phone, the left 60% on a desktop.
 
-          On steps with no map the column collapses on a phone — the sheet fills
-          the screen instead of leaving a white band with a stray line of text
-          floating in it. */}
+          The map canvas is a body-level portal underneath this shell, so the
+          map column must let touches through to it. Anything drawn on top of
+          the map re-enables pointer events for itself.
+
+          On steps with no map the column is not rendered at all. It used to
+          collapse on a phone but stay on a desktop, holding an empty grey band
+          across 60% of the window with a stray line of the step description
+          floating in it, while the form itself was squeezed into a 40% strip.
+          There is nothing to show, so there is no column. */}
+      {showsMap && (
+        <div className="pointer-events-none relative min-h-0 flex-1 md:w-[60%] md:flex-none">
+          <MapSlot className="absolute inset-0" />
+          {step === 0 && (
+            <div className="pointer-events-auto absolute inset-x-0 top-0 z-20 px-4 pt-[max(12px,env(safe-area-inset-top))]">
+              <Suspense fallback={<div className="h-14" />}>
+                <AddressInput onFocusRequestPeek={() => setSnap('peek')} />
+              </Suspense>
+            </div>
+          )}
+          {step === 3 && <DesignHud />}
+          {step === 3 && <FaceSouth />}
+          {step === 3 && <SizeToast />}
+          {step === 3 && (
+            <button
+              type="button"
+              data-testid="find-panels"
+              onClick={() => fitDesignView()}
+              className="pointer-events-auto absolute right-3 top-3 z-20 min-h-[48px] rounded-xl bg-white/95 px-4 text-[16px] font-semibold text-neutral-900 shadow-md"
+            >
+              {UI.findPanels}
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Controls: a bottom sheet on a phone. On a desktop, the right 40%
+          beside the map — or, with no map, one centred column with the reading
+          width of a form rather than a full-window stretch. */}
       <div
-        className={`relative min-h-0 md:w-[60%] md:flex-none ${
-          showsMap ? 'pointer-events-none flex-1' : 'hidden bg-neutral-100 md:block'
+        data-testid="content-column"
+        className={`pointer-events-auto md:flex md:flex-col md:overflow-y-auto md:py-6 ${
+          showsMap
+            ? 'md:w-[40%] md:border-l md:border-neutral-200 md:px-6'
+            : 'md:mx-auto md:w-full md:max-w-[720px] md:px-8'
         }`}
       >
-        {showsMap ? (
-          <>
-            <MapSlot className="absolute inset-0" />
-            {step === 0 && (
-              <div className="pointer-events-auto absolute inset-x-0 top-0 z-20 px-4 pt-[max(12px,env(safe-area-inset-top))]">
-                <Suspense fallback={<div className="h-14" />}>
-                  <AddressInput onFocusRequestPeek={() => setSnap('peek')} />
-                </Suspense>
-              </div>
-            )}
-            {step === 3 && <DesignHud />}
-            {step === 3 && <FaceSouth />}
-            {step === 3 && (
-              <button
-                type="button"
-                data-testid="find-panels"
-                onClick={() => fitDesignView()}
-                className="pointer-events-auto absolute right-3 top-3 z-20 min-h-[48px] rounded-xl bg-white/95 px-4 text-[16px] font-semibold text-neutral-900 shadow-md"
-              >
-                {UI.findPanels}
-              </button>
-            )}
-          </>
-        ) : (
-          <div className="pointer-events-auto flex h-full items-center justify-center px-8 text-center">
-            <p className="text-[17px] text-neutral-500">{copy.intro}</p>
-          </div>
-        )}
-      </div>
-
-      {/* Controls: bottom sheet on a phone, right 40% on a desktop. */}
-      <div className="pointer-events-auto md:flex md:w-[40%] md:flex-col md:overflow-y-auto md:border-l md:border-neutral-200 md:px-6 md:py-6">
         <BottomSheet
           snap={snap}
           onSnapChange={setSnap}

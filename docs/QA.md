@@ -90,17 +90,25 @@ This is the step the whole tool exists for. Take your time.
       sensibly rather than losing it.
 - [ ] **Turn the array with the compass grip.** It rotates smoothly, the grip
       stays under your finger, and the panel count does *not* change.
-- [ ] Once it is off south, the HUD adds a line naming the loss and how many
-      panels would cover it. Tapping **Add N** adds exactly that many and the
-      line goes.
+- [ ] **Let go** of the grip: the count re-sizes for the new heading and a
+      toast says what changed and why. Nothing moves while your finger is down.
+- [ ] Press **+** once, then turn the array. The count must not move, and an
+      **Auto-size** chip appears. Tapping it hands the count back to the sizing
+      maths for wherever the array is now pointing.
 - [ ] The **S** button appears beside the grip. Tapping it turns the array back
-      to south with a short ease — not a jump — and then disappears.
+      to south with a short ease — not a jump — the count returns to what it
+      was, and the button disappears.
 - [ ] The trench line follows the array and its "N ft" label stays legible.
 - [ ] The compass grip does not sit on top of the array at any zoom.
 - [ ] ± panel buttons are easy to hit with a thumb.
 - [ ] If the slope chips appear, they are tappable and the selection sticks.
 - [ ] **In sunlight**: array fill, trench line and meter marker are all
       distinguishable from the satellite image beneath.
+
+## Desktop, briefly
+
+- [ ] On a laptop, steps 2, 5 and 6 are **one centred column**, not a form
+      squeezed beside an empty grey band. Steps 1, 3 and 4 keep the map.
 
 ## Step 5 — Options
 

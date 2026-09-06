@@ -14,6 +14,31 @@ import type { BillMonth } from '@/lib/billSchema';
 /** none -> reading -> review -> confirmed, with failure returning to none. */
 export type BillPhase = 'none' | 'reading' | 'review' | 'confirmed';
 
+/**
+ * Whether the panel count still belongs to the sizing maths.
+ *
+ * 'auto' means the count is whatever covers the customer's target at the angle
+ * the array is pointing, and turning the array re-computes it. The moment they
+ * press + or -, the count is theirs: rotation stops touching it, because a
+ * number somebody chose by hand must not move on its own.
+ */
+export type SizingMode = 'auto' | 'manual';
+
+/**
+ * What the last automatic resize did, for the toast to report.
+ *
+ * Not persisted: it describes something that just happened on screen, and a
+ * reload an hour later should not announce it again.
+ */
+export interface SizeNotice {
+  /** Panels added (positive) or removed (negative). Never zero. */
+  delta: number;
+  /** The azimuth the array ended on, so the toast can name the direction. */
+  azimuth: number;
+  /** Distinguishes two resizes that happen to have the same delta. */
+  id: number;
+}
+
 export interface Coordinates {
   latitude: number;
   longitude: number;
@@ -107,6 +132,8 @@ interface QuoteState {
   rateCentsPerKwh: number;
   /** Manual panel adjustment on the design step, added to the sized count. */
   panelAdjust: number;
+  sizingMode: SizingMode;
+  sizeNotice: SizeNotice | null;
   /**
    * The count sizing produced, before any manual adjustment. Kept so the ±
    * control and a tier change can both work from the same baseline.
@@ -188,6 +215,9 @@ interface QuoteActions {
   chooseSlopeTier: (tier: SlopeTier) => void;
   setRateCentsPerKwh: (v: number) => void;
   setPanelAdjust: (v: number) => void;
+  setSizingMode: (mode: SizingMode) => void;
+  setSizeNotice: (notice: SizeNotice | null) => void;
+  returnToAuto: () => void;
   setSized: (panels: number, azimuth: number) => void;
   setMapReady: (v: boolean) => void;
   setLeadFiled: (leadId: string | null) => void;
@@ -242,6 +272,8 @@ const initialState: QuoteState = {
   slopeSource: null,
   rateCentsPerKwh: DEFAULT_RATE_CENTS,
   panelAdjust: 0,
+  sizingMode: 'auto',
+  sizeNotice: null,
   sizedPanels: 0,
   sizedAzimuth: 180,
   mapReady: false,
@@ -368,7 +400,18 @@ export const useQuoteStore = create<QuoteStore>()(
       chooseSlopeTier: (slopeTier) =>
         set({ slopeTier, slopePercent: null, slopeSource: 'chosen' }),
       setRateCentsPerKwh: (rateCentsPerKwh) => set({ rateCentsPerKwh }),
-      setPanelAdjust: (panelAdjust) => set({ panelAdjust }),
+      /*
+        Touching +/- hands the count to the customer.
+
+        From here on rotation leaves it alone — see applyAutoSize. The way back
+        is the Auto-size chip, which is deliberately explicit: silently taking
+        the number back would be worse than never having given it away.
+      */
+      setPanelAdjust: (panelAdjust) => set({ panelAdjust, sizingMode: 'manual' }),
+      setSizingMode: (sizingMode) => set({ sizingMode }),
+      setSizeNotice: (sizeNotice) => set({ sizeNotice }),
+      /** Back to the sizing maths, with the hand adjustment dropped. */
+      returnToAuto: () => set({ panelAdjust: 0, sizingMode: 'auto' }),
       setSized: (sizedPanels, sizedAzimuth) => set({ sizedPanels, sizedAzimuth }),
       setMapReady: (mapReady) => set({ mapReady }),
       setLeadFiled: (leadFiled) => set({ leadFiled }),
@@ -427,6 +470,7 @@ export const useQuoteStore = create<QuoteStore>()(
         slopeSource: state.slopeSource,
         rateCentsPerKwh: state.rateCentsPerKwh,
         panelAdjust: state.panelAdjust,
+        sizingMode: state.sizingMode,
         sizedPanels: state.sizedPanels,
         sizedAzimuth: state.sizedAzimuth,
         leadFiled: state.leadFiled,

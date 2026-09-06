@@ -24,6 +24,7 @@ import { buildTrench } from '@/lib/geo/trench';
 import { slopeAt } from '@/lib/slope';
 import { refreshSiteIntel } from '@/lib/siteIntel';
 import { captureMap } from '@/lib/screenshot';
+import { applyAutoSize } from '@/lib/applyAutoSize';
 import type { ArraySpec } from '@/lib/geo/array';
 import type { LngLat } from '@/lib/geo/units';
 
@@ -264,6 +265,10 @@ export default function MapStage({ mode }: { mode: MapMode }) {
       if (!g || e.pointerId !== g.pointerId) return;
       const kind = g.kind;
       releaseGrab();
+
+      // The turn is over, so the count can settle. Nothing resized while the
+      // grip was under the finger — see applyAutoSize.
+      if (kind === 'rotate') applyAutoSize();
 
       // Only the array's own moves change the ground under it or need the view
       // re-framed. Dragging the pin or the meter used to trigger a slope lookup

@@ -140,6 +140,14 @@ async function findArrayGrab(page: Page): Promise<Pt | null> {
  * the circle the handle actually rides so "is the icon under the finger?"
  * is a fair question.
  */
+/**
+ * Turn the compass grip to a bearing.
+ *
+ * Returns the panel counts sampled between touchMoves, with the finger still
+ * down. Nothing may re-size mid-gesture — the count settles when the turn ends,
+ * not while it is happening — and that is only checkable from inside the
+ * gesture.
+ */
 async function swingCompassTo(page: Page, client: CDPSession, targetBearing: number) {
   const geom = await page.evaluate((target) => {
     const t = window.__gmTest;
@@ -177,6 +185,7 @@ async function swingCompassTo(page: Page, client: CDPSession, targetBearing: num
 
   await touchStart(client, [{ x: geom.from[0], y: geom.from[1], id: 1 }]);
   const steps = 12;
+  const duringGesture: number[] = [];
   for (let i = 1; i <= steps; i++) {
     const t = i / steps;
     await touchMove(client, [
@@ -186,6 +195,7 @@ async function swingCompassTo(page: Page, client: CDPSession, targetBearing: num
         id: 1,
       },
     ]);
+    duringGesture.push(await page.evaluate(() => window.__gmTest.state().totalPanels));
   }
   await touchEnd(client);
   // The last pointermove can still be queued when touchEnd returns; read
@@ -198,7 +208,7 @@ async function swingCompassTo(page: Page, client: CDPSession, targetBearing: num
     last = az;
     await page.waitForTimeout(80);
   }
-  return geom;
+  return { ...geom, duringGesture };
 }
 
 /**
@@ -990,11 +1000,13 @@ test.describe('design step gestures', () => {
     expect(Math.min(delta, 360 - delta), 'azimuth does not match pointer bearing').toBeLessThan(2);
   });
 
-  test('rotating the array never changes the panel count', async ({ page }) => {
-    // Sizing answers "how many panels for this bill", and the answer is fixed
-    // at the default azimuth when the design step opens. Rotation is a siting
-    // decision, not a resizing one: watching the count tick up and down while
-    // you turn the array is how a customer stops trusting the number.
+  test('the panel count never moves while the grip is under the finger', async ({ page }) => {
+    // Watching the count tick up and down while you turn the array is how a
+    // customer stops trusting the number, so nothing re-sizes mid-gesture.
+    //
+    // It does settle when the turn *ends* — an array pointing east makes less
+    // power than the count was chosen for — and that is a separate test. This
+    // one is about the boundary between the two.
     await openDesignStep(page);
     await waitForArray(page, 15_000);
     await bringMapIntoView(page);
@@ -1011,7 +1023,7 @@ test.describe('design step gestures', () => {
     expect(before.panels, 'nothing was sized to begin with').toBeGreaterThan(0);
 
     const client = await page.context().newCDPSession(page);
-    await swingCompassTo(page, client, 90);
+    const swing = await swingCompassTo(page, client, 90);
     await waitForStableHandle(page);
 
     const after = await page.evaluate(() => ({
@@ -1025,7 +1037,13 @@ test.describe('design step gestures', () => {
       Math.min(turned, 360 - turned),
       'the array did not actually rotate, so the count proves nothing'
     ).toBeGreaterThan(80);
-    expect(after.panels, 'rotation re-sized the array').toBe(before.panels);
+
+    // Every sample taken between touchMoves, with the finger still down.
+    expect(swing.duringGesture.length, 'no samples were taken mid-gesture').toBeGreaterThan(6);
+    expect(
+      [...new Set(swing.duringGesture)],
+      `the count moved mid-gesture: ${swing.duringGesture.join(', ')}`
+    ).toEqual([before.panels]);
   });
 
   test('dragging the array re-asks about the ground under it', async ({ page }) => {
@@ -1316,12 +1334,13 @@ test.describe('design step gestures', () => {
     }
   });
 
-  test('turning the array offers the panels it costs, and Face south undoes it', async ({
+  test('a finished turn re-sizes the array, and a hand-set count is left alone', async ({
     page,
   }) => {
-    // Rotation deliberately never changes the count (see useSizing). What it
-    // does change is production, and a customer who turned their array east was
-    // quietly under the offset they asked for with nothing saying so.
+    // Nothing re-sizes while the grip is under the finger — that is unchanged,
+    // and covered by "rotating the array never changes the panel count" above.
+    // What is new is that letting go settles the count for the heading, because
+    // an array pointing east makes less power than the count was chosen for.
     await openDesignStep(page);
     await waitForArray(page, 15_000);
     await bringMapIntoView(page);
@@ -1331,14 +1350,12 @@ test.describe('design step gestures', () => {
     await page.evaluate(() => window.__gmTest.setZoom(18.8));
     await waitForStableHandle(page);
 
-    // Facing south, sized for south: nothing to say, and nowhere to go back to.
-    await expect(page.getByTestId('hud-shortfall')).toHaveCount(0);
+    // Facing south, sized for south: nothing to undo and nothing to explain.
     await expect(page.getByTestId('face-south')).toHaveCount(0);
+    await expect(page.getByTestId('hud-auto-size')).toHaveCount(0);
 
-    expect(
-      await page.evaluate(() => window.__gmTest.state().totalPanels),
-      'nothing was sized to begin with'
-    ).toBeGreaterThan(0);
+    const atSouth = await page.evaluate(() => window.__gmTest.state().totalPanels);
+    expect(atSouth, 'nothing was sized to begin with').toBeGreaterThan(0);
 
     const client = await page.context().newCDPSession(page);
     await swingCompassTo(page, client, 90);
@@ -1351,62 +1368,47 @@ test.describe('design step gestures', () => {
       'the array did not actually turn, so the rest proves nothing'
     ).toBeLessThan(25);
 
-    // The cost, named.
-    const line = page.getByTestId('hud-shortfall');
-    await expect(line).toBeVisible();
+    // Panels added, and the toast says how many and why.
+    const east = await page.evaluate(() => window.__gmTest.state().totalPanels);
+    expect(east, 'the finished turn did not re-size the array').toBeGreaterThan(atSouth);
 
-    // The count and the offer read from one frame, immediately before the tap.
-    // Sizing settles against the site's real curve after the step opens, so a
-    // count captured before the rotation is a different number by the time the
-    // button exists — and the assertion would be measuring that drift rather
-    // than what the button did.
-    const { before, asked } = await page.evaluate(() => {
-      const text = document.querySelector('[data-testid="hud-shortfall-panels"]')?.textContent;
-      return {
-        before: window.__gmTest.state().totalPanels,
-        asked: Number(text?.match(/\d+/)?.[0] ?? 0),
-      };
-    });
-    expect(asked, 'the line did not name a number of panels').toBeGreaterThan(0);
-    await expect(page.getByTestId('hud-add-panels')).toContainText(String(asked));
+    const toast = page.getByTestId('size-toast');
+    await expect(toast).toBeVisible();
+    await expect(page.getByTestId('size-toast-count')).toHaveText(String(east - atSouth));
+    await expect(toast).toContainText('added');
 
-    // Taking the offer adds exactly that many, and settles the matter.
-    await page.getByTestId('hud-add-panels').click();
-    await expect
-      .poll(() => page.evaluate(() => window.__gmTest.state().totalPanels))
-      .toBe(before + asked);
-    await expect(line).toHaveCount(0);
-
-    // Face south is beside the grip, because that is where the thumb already
-    // is, and it only exists while there is something to undo.
-    const faceSouth = page.getByTestId('face-south');
-    await expect(faceSouth).toBeVisible();
-    const button = (await faceSouth.boundingBox())!;
-    expect(button.width, 'the target is smaller than a thumb').toBeGreaterThanOrEqual(48);
-    expect(button.height).toBeGreaterThanOrEqual(48);
-
-    const grip = await page.evaluate(() => {
-      const t = window.__gmTest;
-      const r = t.canvasRect();
-      const h = t.handleLngLat();
-      if (!h) return null;
-      const p = t.project(h);
-      return { x: r.left + p[0], y: r.top + p[1] };
-    });
-    expect(grip, 'the grip is not on screen').not.toBeNull();
-    const gap = Math.hypot(
-      button.x + button.width / 2 - grip!.x,
-      button.y + button.height / 2 - grip!.y
-    );
-    expect(gap, `the button is ${Math.round(gap)}px from the grip it belongs to`).toBeLessThan(120);
-
-    await faceSouth.click();
-
-    // Eased, not snapped, and it lands exactly on south rather than near it.
+    // Back to south, and the count comes back with it — a round trip, not a
+    // ratchet that leaves the customer paying for panels they no longer need.
+    await page.getByTestId('face-south').click();
     await expect
       .poll(() => page.evaluate(() => Math.round(window.__gmTest.state().azimuth)))
       .toBe(180);
-    await expect(faceSouth).toHaveCount(0);
+    await expect
+      .poll(() => page.evaluate(() => window.__gmTest.state().totalPanels))
+      .toBe(atSouth);
+    await expect(page.getByTestId('size-toast')).toBeVisible();
+    await expect(page.getByTestId('size-toast')).toContainText('removed');
+    await expect(page.getByTestId('face-south')).toHaveCount(0);
+
+    // Now take the count by hand. Rotation must not touch it again.
+    await page.getByTestId('panel-plus').click();
+    const manual = await page.evaluate(() => window.__gmTest.state().totalPanels);
+    expect(manual).toBe(atSouth + 1);
+    await expect(page.getByTestId('hud-auto-size')).toBeVisible();
+
+    await swingCompassTo(page, client, 90);
+    await waitForStableHandle(page);
+    expect(
+      await page.evaluate(() => window.__gmTest.state().totalPanels),
+      'a count the customer set by hand moved on rotation'
+    ).toBe(manual);
+
+    // The chip gives it back, for the heading the array is on now.
+    await page.getByTestId('auto-size').click();
+    await expect
+      .poll(() => page.evaluate(() => window.__gmTest.state().totalPanels))
+      .toBe(east);
+    await expect(page.getByTestId('hud-auto-size')).toHaveCount(0);
   });
 
   test('the real Continue button stores a screenshot containing the design', async ({

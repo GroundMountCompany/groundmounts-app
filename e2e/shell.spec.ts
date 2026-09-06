@@ -86,6 +86,31 @@ async function waitForSheet(page: Page) {
  * waiting for the assertion to pass — a box that settles in the wrong place
  * still fails.
  */
+/**
+ * Wait for a rendered figure to stop changing before reading it.
+ *
+ * The design step sizes itself twice on arrival — once against the fallback
+ * curve, then again once the site's own curve has hydrated — so a count read on
+ * the first frame is a different number a moment later. A baseline captured
+ * there measures that settling rather than whatever the test went on to do.
+ */
+async function waitForStableText(page: Page, testId: string): Promise<string> {
+  const locator = page.getByTestId(testId);
+  await expect(locator).toBeVisible({ timeout: 15_000 });
+  let last = '';
+  let identical = 0;
+  // Eight samples, not two. The second sizing pass can land a third of a second
+  // after the first, and a short window declared the intermediate figure final.
+  for (let i = 0; i < 80; i++) {
+    const now = (await locator.textContent()) ?? '';
+    identical = now === last ? identical + 1 : 0;
+    if (identical >= 8) return now;
+    last = now;
+    await page.waitForTimeout(50);
+  }
+  return last;
+}
+
 async function waitForStableBox(page: Page, testId: string, timeout = 15_000) {
   const locator = page.getByTestId(testId);
   await expect(locator).toBeVisible({ timeout });
@@ -1819,14 +1844,14 @@ test('a PDF shows an icon rather than a broken thumbnail', async ({ page }) => {
   await expect(page.getByTestId('bill-found')).toContainText('scale it to a year');
 });
 
-test('the HUD says what turning the array costs, and can put it back', async ({
+test('pressing the panel control takes the count, and the chip gives it back', async ({
   page,
 }, testInfo) => {
   test.skip(!testInfo.project.name.startsWith('mobile'), 'the HUD is the phone overlay');
 
-  // Sized at due south, pointed east. Rotation never re-sizes the array — see
-  // useSizing — so without this line the customer is quietly short of the
-  // offset they asked for, with nothing on screen saying so.
+  // Sized at due south, pointing east: the state a finished rotation leaves
+  // behind, before anything has re-sized it. The real gesture is covered on a
+  // real map in interaction.spec.ts; this is the manual gate and the way back.
   await page.addInitScript((payload) => {
     if (window.localStorage.getItem('gmq:v3')) return;
     window.localStorage.setItem('gmq:v3', JSON.stringify(payload));
@@ -1836,43 +1861,92 @@ test('the HUD says what turning the array costs, and can put it back', async ({
   await gotoStep(page, 3);
   await waitForSheet(page);
 
-  const line = page.getByTestId('hud-shortfall');
-  await expect(line).toBeVisible();
+  const panels = page.getByTestId('hud-panels');
+  const sizedForSouth = Number(await waitForStableText(page, 'hud-panels'));
+  expect(sizedForSouth).toBeGreaterThan(0);
 
-  // The HUD's "off south" must be the same figure the sheet's own Facing stat
-  // reports, read from one frame rather than recomputed here — a second
-  // calculation in the test only proves the test can do arithmetic, and it
-  // disagreed with the app the moment the array settled a degree off 90.
-  const facing = await page.evaluate(() => {
-    const text = (id: string) =>
-      document.querySelector(`[data-testid="${id}"]`)?.textContent ?? '';
-    return {
-      // "90° · 82%" — the second number is production against due south.
-      statPct: Number(text('stat-facing').match(/(\d+)%/)?.[1]),
-      hudOff: Number(text('hud-off-south').match(/(\d+)%/)?.[1]),
-    };
-  });
-  expect(facing.statPct, 'no vs-south figure on the design step').toBeGreaterThan(0);
-  expect(facing.hudOff, 'the HUD and the sheet disagree about how far off south').toBe(
-    100 - facing.statPct
-  );
-  // A quarter turn in Texas is a real loss, not a rounding wobble.
-  expect(facing.hudOff).toBeGreaterThan(10);
+  // Auto to begin with: no chip, because there is nothing to return from.
+  await expect(page.getByTestId('hud-auto-size')).toHaveCount(0);
 
-  const before = Number(await page.getByTestId('hud-panels').textContent());
-  const asked = Number(
-    ((await page.getByTestId('hud-shortfall-panels').textContent()) ?? '').match(/\d+/)?.[0]
-  );
-  expect(asked, 'the line did not name a number of panels').toBeGreaterThan(0);
+  // Pressing + hands the count over, and says so.
+  await page.getByTestId('panel-plus').click();
+  await expect(panels).toHaveText(String(sizedForSouth + 1));
+  await expect(page.getByTestId('hud-auto-size')).toBeVisible();
+  await expect(page.getByTestId('auto-size')).toBeVisible();
 
-  // The button says the same number as the sentence.
-  await expect(page.getByTestId('hud-add-panels')).toContainText(String(asked));
+  // And the chip gives it back, sizing for the heading the array is on now
+  // rather than waiting for the next turn.
+  await page.getByTestId('auto-size').click();
+  await expect(page.getByTestId('hud-auto-size')).toHaveCount(0);
 
-  await page.getByTestId('hud-add-panels').click();
+  const auto = Number(await panels.textContent());
+  expect(
+    auto,
+    'auto-sizing for an easterly array did not add panels over the south count'
+  ).toBeGreaterThan(sizedForSouth);
 
-  // Exactly that many, and then it has nothing left to say.
-  await expect(page.getByTestId('hud-panels')).toHaveText(String(before + asked));
-  await expect(line).toHaveCount(0);
+  // The hand adjustment is dropped rather than carried on top of the new count.
+  await expect(panels).toHaveText(String(auto));
+});
+
+test('the desktop layout is one centred column on steps with no map', async ({
+  page,
+}, testInfo) => {
+  test.skip(testInfo.project.name.startsWith('mobile'), 'this is the two-column layout');
+
+  // Owner QA: the map column rendered as an empty grey band across 60% of the
+  // window while the form was squeezed into a 40% strip beside it.
+  await mockGeocoding(page);
+
+  for (const step of [1, 4, 5]) {
+    await gotoStep(page, step);
+    await expectOnStep(page, step);
+
+    const size = page.viewportSize()!;
+    const column = (await page.getByTestId('content-column').boundingBox())!;
+
+    // Centred, within a pixel or two of dead centre.
+    const leftGap = column.x;
+    const rightGap = size.width - (column.x + column.width);
+    expect(
+      Math.abs(leftGap - rightGap),
+      `step ${step} column is off centre by ${Math.round(Math.abs(leftGap - rightGap))}px`
+    ).toBeLessThanOrEqual(8);
+
+    // A reading width, not the whole window.
+    expect(column.width, `step ${step} column is wider than 720px`).toBeLessThanOrEqual(720);
+
+    // Full height.
+    expect(column.height, `step ${step} column is not full height`).toBeGreaterThanOrEqual(
+      size.height - 2
+    );
+
+    // And nothing of substance to the left of it — no map container, no grey
+    // band, no stray line of the step description.
+    const wide = await page.evaluate((columnLeft) => {
+      const out: string[] = [];
+      const column = document.querySelector('[data-testid="content-column"]')!;
+      for (const el of document.querySelectorAll<HTMLElement>('body *')) {
+        // Its own ancestors span the window by definition — they are the
+        // layout, not something sitting beside the content.
+        if (el.contains(column)) continue;
+        const style = getComputedStyle(el);
+        if (style.display === 'none' || style.visibility === 'hidden') continue;
+        const r = el.getBoundingClientRect();
+        if (r.height === 0) continue;
+        // How much of this element sits left of the content column.
+        const overhang = Math.max(0, Math.min(r.right, columnLeft) - Math.max(r.left, 0));
+        if (overhang > 40) {
+          out.push(
+            `${el.dataset.testid ?? el.tagName.toLowerCase()}: ${Math.round(overhang)}px`
+          );
+        }
+      }
+      return out;
+    }, column.x);
+
+    expect(wide, `step ${step} has elements left of the column:\n${wide.join('\n')}`).toEqual([]);
+  }
 });
 
 test('the suggestions are not crushed by the side panel on a desktop', async ({

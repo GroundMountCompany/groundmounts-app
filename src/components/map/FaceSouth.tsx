@@ -5,6 +5,7 @@ import { UI } from '@/config/copy';
 import { useQuoteStore } from '@/store/quoteStore';
 import { subscribeHandleScreen, type ScreenPoint } from './MapCanvas';
 import { easeAzimuthTo, isFacingSouth, SOUTH } from '@/lib/easeAzimuth';
+import { applyAutoSize } from '@/lib/applyAutoSize';
 
 /** Half the button, so it can be centred on a point. */
 const HALF = 24;
@@ -51,7 +52,12 @@ export default function FaceSouth() {
       title={UI.faceSouth}
       onClick={() => {
         cancelRef.current?.();
-        cancelRef.current = easeAzimuthTo(azimuth, SOUTH, setAzimuth);
+        cancelRef.current = easeAzimuthTo(azimuth, SOUTH, (next) => {
+          setAzimuth(next);
+          // The end of the ease is the end of the turn, and settles the count
+          // exactly as letting go of the grip does.
+          if (next === SOUTH) applyAutoSize();
+        });
       }}
       className="pointer-events-auto fixed z-30 flex h-12 w-12 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-white/95 text-[13px] font-semibold text-neutral-900 shadow-md"
       style={{ left, top }}

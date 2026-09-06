@@ -33,6 +33,30 @@ export function allowedStep(requested: number): number {
   return DESIGN_STEPS.includes(requested) ? LOCKED_LANDING : requested;
 }
 
+/**
+ * Write a history entry without throwing away Next's router state.
+ *
+ * The App Router patches history.pushState/replaceState during hydration and
+ * stamps each entry with its own marker and route tree. Child effects run
+ * before parent ones, so this hook's first write happened before that patch was
+ * installed and produced an entry holding nothing but `{ step: 0 }`.
+ *
+ * Next reads that back on popstate, finds no router state, and concludes the
+ * entry belongs to somebody else — so the back button did a full document
+ * reload instead of a soft step back. On a phone that is a white flash and a
+ * re-download of the whole app; in the suite it was a back-navigation that
+ * missed its budget whenever the machine was busy, and passed in isolation.
+ *
+ * Spreading the existing state keeps whatever Next has already put there, and
+ * every later write goes through the patched functions anyway.
+ */
+function writeStep(kind: 'pushState' | 'replaceState', url: URL, step: number): void {
+  window.history[kind]({ ...window.history.state, step }, '', url);
+}
+
+const pushStep = (url: URL, step: number) => writeStep('pushState', url, step);
+const replaceStep = (url: URL, step: number) => writeStep('replaceState', url, step);
+
 function stepFromLocation(): number | null {
   const raw = new URLSearchParams(window.location.search).get('step');
   if (raw === null) return null;
@@ -75,7 +99,7 @@ export function useStepUrl() {
 
     url.searchParams.delete('reset');
     url.searchParams.set('step', '0');
-    window.history.replaceState({ step: 0 }, '', url);
+    replaceStep(url, 0);
     useQuoteStore.getState().setCurrentStepIndex(0);
   }, []);
 
@@ -98,8 +122,8 @@ export function useStepUrl() {
     if (url.searchParams.get('step') === String(step)) return;
 
     url.searchParams.set('step', String(step));
-    const first = stepFromLocation() === null;
-    window.history[first ? 'replaceState' : 'pushState']({ step }, '', url);
+    if (stepFromLocation() === null) replaceStep(url, step);
+    else pushStep(url, step);
   }, [step]);
 
   // Mirror URL -> store when the user presses back.

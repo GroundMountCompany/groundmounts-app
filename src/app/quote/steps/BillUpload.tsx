@@ -87,8 +87,10 @@ export default function BillUpload({ onConfirm, onDiscard }: BillUploadProps) {
 
       // Test hook. What matters is the size of what leaves the browser, and
       // Playwright does not hand back the body of a multipart upload — so the
-      // e2e reads it here instead. `next build` strips this branch.
-      if (process.env.NODE_ENV !== 'production') {
+      // e2e reads it here instead. Set only by playwright.config.ts; the
+      // comparison inlines to `false` in a real build and the branch is
+      // dropped. See MapCanvas for why this is not gated on NODE_ENV.
+      if (process.env.NEXT_PUBLIC_E2E_HOOKS === '1') {
         cameraRef.current?.setAttribute('data-upload-bytes', String(upload.size));
         cameraRef.current?.setAttribute('data-original-bytes', String(file.size));
       }

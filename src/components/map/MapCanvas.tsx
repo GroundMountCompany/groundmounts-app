@@ -226,7 +226,7 @@ export default function MapStage({ mode }: { mode: MapMode }) {
       e.preventDefault();
 
       const ll = map.unproject(pointFor(e));
-      if (process.env.NODE_ENV !== 'production') {
+      if (process.env.NEXT_PUBLIC_E2E_HOOKS === '1') {
         (window as unknown as Record<string, unknown>).__gmLastPointer = [ll.lng, ll.lat];
       }
       const store = useQuoteStore.getState();
@@ -400,9 +400,16 @@ export default function MapStage({ mode }: { mode: MapMode }) {
     };
 
     // Test hook. Interaction tests need the live map's camera and the rendered
-    // feature counts, neither of which is observable from the DOM. Dev-only:
-    // `next build` strips this branch from production output.
-    if (process.env.NODE_ENV !== 'production') {
+    // feature counts, neither of which is observable from the DOM.
+    //
+    // Gated on an explicit flag rather than on NODE_ENV, because the e2e suite
+    // now runs against a production build — `next dev` was compiling routes on
+    // demand while four workers hydrated against them, which is what the
+    // flaky navigation and hydration timeouts were. The flag is set only by
+    // playwright.config.ts, so a real deploy still has no hook: the comparison
+    // inlines to `false` at build time and the branch is dropped.
+    // `npm run verify:hooks` proves that against the built output.
+    if (process.env.NEXT_PUBLIC_E2E_HOOKS === '1') {
       (window as unknown as Record<string, unknown>).__gmTest = {
         state: () => useQuoteStore.getState(),
         mapCenter: (): [number, number] => [map.getCenter().lng, map.getCenter().lat],

@@ -78,6 +78,18 @@ Airtable will not let the API add an option to an existing single-select. Those
 are reported as a warning, and every write uses `typecast`, so the first record
 carrying a new value creates it.
 
+### `npm run verify:hooks`
+
+Greps the built output for `__gmTest`, `__gmLastPointer` and
+`data-upload-bytes`. These are e2e hooks — `__gmTest` hands out the whole store
+and the live map camera — and they are behind
+`process.env.NEXT_PUBLIC_E2E_HOOKS === '1'`, a flag only `playwright.config.ts`
+sets. `next.config.mjs` declares the variable so an unset flag compiles to a
+literal `"" === "1"` and the branch is dropped; without that declaration Next
+leaves it as a runtime lookup and the hook ships.
+
+Run it after `next build`. Exit 1 means a hook reached the bundle.
+
 ### `npm run eval:bills`
 
 Runs the four fixture bills in `e2e/fixtures/bills/` through the **real** model
@@ -130,6 +142,32 @@ on step 5, is priced, and reaches the lead. Nothing else needs changing.
 
 ---
 
+## Running the e2e suite
+
+`playwright.config.ts` builds and starts a **production** server rather than
+running `next dev`. The dev server compiles routes on demand, and with four
+workers hydrating against them a page could sit in compilation long enough to
+miss a navigation budget — failures that were green in isolation and had
+nothing to do with the app.
+
+Two consequences:
+
+- The first run of a session pays for a `next build` (hence the 600s webServer
+  budget). Later runs reuse the running server.
+- **Two suites cannot cold-start at once** on one machine: they both build into
+  `.next` and clobber each other. To run concurrent suites deliberately, start
+  one server first (`next build && next start --port 3100`) and let both runs
+  reuse it.
+
+The `interaction` and `desktop-map` projects render real WebGL through
+SwiftShader, which is CPU rasterisation. They are configured to run alone
+(`dependencies`, `fullyParallel: false`) for that reason, and **two copies of
+them cannot share a machine** — the second starves the first's renderer and the
+drag-drift assertions fail with a several-hundred-millisecond worst frame,
+which the failure message reports.
+
+---
+
 ## Known advisories
 
 `npm audit` reports two, and CI runs it report-only so they stay visible
@@ -167,6 +205,7 @@ Promote `v2` to production:
 git checkout v2
 npm run test          # lint, typecheck, unit tests, Airtable schema
 npm run build
+npm run verify:hooks
 npx playwright test
 npx vercel --prod
 ```

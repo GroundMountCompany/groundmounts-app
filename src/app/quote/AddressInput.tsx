@@ -13,6 +13,14 @@ import { UI } from '@/config/copy';
 /** Where the portalled list is drawn, in viewport coordinates. */
 type Anchor = { left: number; top: number; width: number; maxHeight: number };
 
+/**
+ * How long the settle loop will keep re-measuring before giving up.
+ *
+ * Not a guess at how long the sheet takes — it stops as soon as the answer
+ * stops changing. This is only the backstop for a page that never settles.
+ */
+const SETTLE_TIMEOUT_MS = 2000;
+
 interface AddressInputProps {
   /**
    * Called when the address field takes focus. The shell drops the sheet to
@@ -33,51 +41,121 @@ export const AddressInput = ({ onFocusRequestPeek }: AddressInputProps = {}): JS
   const inputAddressRef = useRef<HTMLInputElement>(null);
   const [mounted, setMounted] = useState<boolean>(false);
   const [anchor, setAnchor] = useState<Anchor | null>(null);
+  /** What the last measurement produced, so a no-op frame writes nothing. */
+  const lastAnchor = useRef<string>('');
+  const rafRef = useRef<number | null>(null);
 
   useEffect(() => setMounted(true), []);
 
   /**
-   * Measure the gap between the bottom of the input and the top of the
-   * keyboard.
+   * Measure the gap between the bottom of the input and whatever is below it.
    *
-   * iOS Safari shrinks the *visual* viewport when the keyboard comes up and
-   * leaves the layout viewport alone, so `window.innerHeight` still claims the
-   * full screen. visualViewport is the only thing that knows where the keyboard
-   * starts, and that boundary is what caps the list's height.
+   * Two things can be: the keyboard, and the sheet. iOS Safari shrinks the
+   * *visual* viewport when the keyboard comes up and leaves the layout viewport
+   * alone, so `window.innerHeight` still claims the full screen — visualViewport
+   * is the only thing that knows where the keys start. The sheet is lifted to
+   * sit on top of the keyboard, so its own top edge is usually the higher of the
+   * two limits. The list stops at whichever comes first.
+   *
+   * Returns a signature of what it measured, so the settle loop below can tell
+   * a frame that changed something from one that did not.
    */
-  const measure = useCallback((): void => {
+  const measure = useCallback((): string => {
     const input = inputAddressRef.current;
-    if (!input) return;
+    if (!input) return '';
     const rect = input.getBoundingClientRect();
     const vv = window.visualViewport;
-    const bottom = vv ? vv.offsetTop + vv.height : window.innerHeight;
-    setAnchor({
+    const keyboardTop = vv ? vv.offsetTop + vv.height : window.innerHeight;
+    // The sheet only counts when it is actually underneath this list. On a
+    // phone it is a fixed overlay across the bottom of the screen and it is
+    // always the binding limit; above md it is a static column beside the map,
+    // whose top edge is level with the input rather than below it — treating
+    // that as a ceiling capped the list at its 96px floor for no reason.
+    const sheet = document
+      .querySelector<HTMLElement>('[data-testid="bottom-sheet"]')
+      ?.getBoundingClientRect();
+    const inTheWay =
+      sheet &&
+      sheet.top >= rect.bottom &&
+      sheet.right > rect.left &&
+      sheet.left < rect.right;
+    const bottom = Math.min(keyboardTop, inTheWay ? sheet.top : Number.POSITIVE_INFINITY);
+    const next: Anchor = {
       left: rect.left,
       top: rect.bottom + 6,
       width: rect.width,
+      // A floor, so a cramped screen shows a scrollable list rather than a
+      // sliver — one row is worse than no room at all.
       maxHeight: Math.max(96, bottom - rect.bottom - 6 - 8),
-    });
+    };
+    const signature = `${next.left},${next.top},${next.width},${next.maxHeight}`;
+    // Only write when something moved. The settle loop runs every frame, and a
+    // fresh object each time would re-render the list sixty times a second for
+    // nothing.
+    if (signature !== lastAnchor.current) {
+      lastAnchor.current = signature;
+      setAnchor(next);
+    }
+    return signature;
   }, []);
+
+  /**
+   * Re-measure every frame until the layout stops moving.
+   *
+   * Two things defeat a simpler approach. The sheet's drop to peek is a 220ms
+   * CSS height transition that emits no event. And when the keyboard opens, the
+   * sheet *moves* without resizing — it is lifted by `bottom: keyboardInset` —
+   * so a ResizeObserver on it never fires, and the visualViewport handler runs
+   * before React has committed the sheet's new position, measuring the old one.
+   * Both failure modes shipped a list sized against a sheet that was somewhere
+   * else, overlapping it by 184px.
+   *
+   * A ladder of timeouts covered the common case and lost under load. This
+   * watches for the answer to stop changing instead, which has no duration in
+   * it to be wrong about: three identical frames and it stops, with a hard cap
+   * so a permanently animating page cannot pin a rAF loop open.
+   */
+  const settle = useCallback(() => {
+    // Measure now, before waiting on a frame. The list does not render until it
+    // has an anchor, and requestAnimationFrame is throttled hard on a busy or
+    // occluded page — leaving the first paint of the suggestions dependent on a
+    // frame arriving meant that under load they simply never appeared.
+    measure();
+    if (rafRef.current !== null) return;
+    const deadline = performance.now() + SETTLE_TIMEOUT_MS;
+    let identical = 0;
+    let last = '';
+    const tick = () => {
+      const now = measure();
+      identical = now === last ? identical + 1 : 0;
+      last = now;
+      if (identical >= 3 || performance.now() > deadline) {
+        rafRef.current = null;
+        return;
+      }
+      rafRef.current = requestAnimationFrame(tick);
+    };
+    rafRef.current = requestAnimationFrame(tick);
+  }, [measure]);
 
   useEffect(() => {
     if (!showSuggestions) return;
-    measure();
+    settle();
     const vv = window.visualViewport;
-    // The sheet animating to peek and the keyboard sliding up both move the
-    // input; re-measure until things settle rather than guessing a duration.
-    const frames = [0, 60, 120, 240, 400].map((d) => window.setTimeout(measure, d));
-    window.addEventListener('resize', measure);
-    window.addEventListener('scroll', measure, true);
-    vv?.addEventListener('resize', measure);
-    vv?.addEventListener('scroll', measure);
+
+    window.addEventListener('resize', settle);
+    window.addEventListener('scroll', settle, true);
+    vv?.addEventListener('resize', settle);
+    vv?.addEventListener('scroll', settle);
     return () => {
-      frames.forEach(window.clearTimeout);
-      window.removeEventListener('resize', measure);
-      window.removeEventListener('scroll', measure, true);
-      vv?.removeEventListener('resize', measure);
-      vv?.removeEventListener('scroll', measure);
+      if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+      window.removeEventListener('resize', settle);
+      window.removeEventListener('scroll', settle, true);
+      vv?.removeEventListener('resize', settle);
+      vv?.removeEventListener('scroll', settle);
     };
-  }, [showSuggestions, suggestions.length, measure]);
+  }, [showSuggestions, suggestions.length, settle]);
 
   useEffect(() => {
     const fetchSuggestions = async (): Promise<void> => {

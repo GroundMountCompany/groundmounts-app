@@ -11,6 +11,19 @@ const frameAncestors = process.env.ALLOWED_FRAME_ORIGINS?.trim() || "*";
 
 export default withAnalyzer({
   reactStrictMode: true,
+  /**
+   * Declared so it is always inlined as a literal, even when it is unset.
+   *
+   * The e2e test hooks (`__gmTest` and friends) are behind
+   * `process.env.NEXT_PUBLIC_E2E_HOOKS === '1'`. Next only substitutes a
+   * NEXT_PUBLIC_ variable it can see at build time — an unset one is left as a
+   * runtime lookup, which the minifier cannot fold, and the hook shipped.
+   * Naming it here means an unset flag compiles to `"" === "1"` and the whole
+   * branch is dropped. `npm run verify:hooks` checks the built output.
+   */
+  env: {
+    NEXT_PUBLIC_E2E_HOOKS: process.env.NEXT_PUBLIC_E2E_HOOKS ?? "",
+  },
   experimental: {
     // helps tree-shake framer-motion submodules
     optimizePackageImports: ["framer-motion"],

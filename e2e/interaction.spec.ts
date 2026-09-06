@@ -1263,37 +1263,57 @@ test.describe('design step gestures', () => {
     );
     expect(overlaps, 'the HUD is sitting on top of the array at the fitted zoom').toBe(false);
 
-    // And it is live. Drag the array away from the meter and the trench grows
-    // under the customer's finger, read off the HUD rather than off the store.
-    const trenchBefore = Number(await page.getByTestId('hud-trench').textContent());
+    // And it is live *during* the gesture, which is the whole point: a customer
+    // dragging the array has to see the trench grow while their finger is still
+    // down, not learn about it after they let go. So the reading is taken with
+    // the touch held.
+    const trenchOf = async () => Number(await page.getByTestId('hud-trench').textContent());
+    const trenchBefore = await trenchOf();
     expect(trenchBefore, 'no trench to begin with').toBeGreaterThan(0);
 
     const client = await page.context().newCDPSession(page);
-    let dragged = false;
-    for (let attempt = 0; attempt < 4 && !dragged; attempt++) {
-      const grab = await findArrayGrab(page);
-      if (!grab) {
-        await page.waitForTimeout(300);
-        continue;
-      }
-      await waitForCameraStill(page);
-      await touchStart(client, [{ x: grab[0], y: grab[1], id: 1 }]);
-      for (let i = 1; i <= 12; i++) {
-        await touchMove(client, [{ x: grab[0], y: grab[1] - i * 6, id: 1 }]);
-      }
-      await touchEnd(client);
-      dragged =
-        Number(await page.getByTestId('hud-trench').textContent()) !== trenchBefore ||
-        attempt === 3;
-    }
+    let held = false;
+    let trenchWhileHeld = trenchBefore;
 
-    const trenchAfter = Number(await page.getByTestId('hud-trench').textContent());
-    expect(
-      trenchAfter,
-      `the HUD trench read ${trenchBefore} ft before the drag and ${trenchAfter} ft after`
-    ).not.toBe(trenchBefore);
-    // The sheet never moved to show it.
-    await expect(sheet).toHaveAttribute('data-snap', 'peek');
+    try {
+      for (let attempt = 0; attempt < 4 && trenchWhileHeld === trenchBefore; attempt++) {
+        const grab = await findArrayGrab(page);
+        if (!grab) {
+          await page.waitForTimeout(300);
+          continue;
+        }
+        await waitForCameraStill(page);
+
+        await touchStart(client, [{ x: grab[0], y: grab[1], id: 1 }]);
+        held = true;
+        for (let i = 1; i <= 12 && trenchWhileHeld === trenchBefore; i++) {
+          await touchMove(client, [{ x: grab[0], y: grab[1] - i * 6, id: 1 }]);
+          // Read between moves, with the finger still down.
+          trenchWhileHeld = await trenchOf();
+        }
+
+        if (trenchWhileHeld === trenchBefore) {
+          // This attempt missed the array. Let go before trying again, so the
+          // next touchStart is not a second finger.
+          await touchEnd(client);
+          held = false;
+        }
+      }
+
+      expect(
+        trenchWhileHeld,
+        `the HUD trench still read ${trenchBefore} ft with the finger down; ` +
+          'it only updates after the gesture ends'
+      ).not.toBe(trenchBefore);
+      expect(held, 'the drag was not still in progress when the HUD was read').toBe(true);
+
+      // The sheet never moved to show it.
+      await expect(sheet).toHaveAttribute('data-snap', 'peek');
+    } finally {
+      // Release whatever this test left held, whether it passed or not — a
+      // stuck touch point outlives the test and poisons the next one.
+      if (held) await touchEnd(client);
+    }
   });
 
   test('the real Continue button stores a screenshot containing the design', async ({

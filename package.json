@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
+    "verify:hooks": "node scripts/verify-no-test-hooks.mjs",
     "test": "npm run lint && npm run typecheck && vitest run && npm run verify:airtable",
     "test:unit": "vitest run",
     "test:watch": "vitest",

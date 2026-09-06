@@ -65,13 +65,41 @@ async function gotoStep(page: Page, step: number) {
 async function waitForSheet(page: Page) {
   await page.waitForSelector('[data-testid="bottom-sheet"]', { timeout: 15_000 });
   let last = -1;
-  for (let i = 0; i < 30; i++) {
+  // 50ms, not 100: this is called two or three times per step in the loops that
+  // walk all six, and its floor is two polls. The sheet's transition is 220ms,
+  // so a finer poll costs nothing in accuracy and gives back a second a test.
+  for (let i = 0; i < 60; i++) {
     const height = await page
       .getByTestId('bottom-sheet')
       .evaluate((el) => Math.round(el.getBoundingClientRect().height));
     if (height === last) return;
     last = height;
-    await page.waitForTimeout(100);
+    await page.waitForTimeout(50);
+  }
+}
+
+/**
+ * Wait for an element's box to stop changing before measuring it.
+ *
+ * Same reason as waitForSheet: a layout that is still settling gives a reading
+ * that was true for one frame. Waiting for stability is not the same as
+ * waiting for the assertion to pass — a box that settles in the wrong place
+ * still fails.
+ */
+async function waitForStableBox(page: Page, testId: string, timeout = 15_000) {
+  const locator = page.getByTestId(testId);
+  await expect(locator).toBeVisible({ timeout });
+  let last = '';
+  let identical = 0;
+  for (let i = 0; i < 40; i++) {
+    const now = await locator.evaluate((el) => {
+      const r = el.getBoundingClientRect();
+      return `${Math.round(r.top)},${Math.round(r.height)}`;
+    });
+    identical = now === last ? identical + 1 : 0;
+    if (identical >= 2) return;
+    last = now;
+    await page.waitForTimeout(50);
   }
 }
 
@@ -133,6 +161,18 @@ test('the page never scrolls under the map, on any step', async ({ page }, testI
     !testInfo.project.name.startsWith('mobile'),
     'the bottom sheet is the phone layout'
   );
+  /*
+    Six full page loads in one test, each with hydration and — on three of the
+    steps — a WebGL map. Measured solo at 11-16s on this project against
+    Playwright's generic 30s budget, which leaves under 2x headroom; running a
+    second suite alongside pushed it to 31s and 34s.
+
+    test.slow() triples the budget. This is sizing it to the work rather than
+    papering over a race: the same loop passes on the other two projects under
+    the same contention, and the failures were the whole loop running long, not
+    one step hanging.
+  */
+  test.slow();
 
   await page.addInitScript(() => {
     const pending = window.sessionStorage.getItem('e2e:seed');
@@ -238,7 +278,14 @@ test('sheet drags land on exact snap points and the map does not move', async ({
     await page.waitForTimeout(400);
   }
 
+  // The map is created lazily — the Mapbox chunk, then a WebGL context — so
+  // the canvas exists with a zero box before it has laid out. Taking the
+  // baseline then recorded height 0 and compared it against a real 844 at the
+  // end, which under a second concurrent suite is exactly when the chunk was
+  // still arriving. Wait for geometry before claiming to measure it.
+  await waitForStableBox(page, 'map-canvas');
   const before = await mapRect();
+  expect(before.height, 'the map had no geometry to preserve').toBeGreaterThan(0);
   await expect(sheet).toHaveAttribute('data-snap', 'peek');
 
   // peek -> half. A tap-cycle firing after the drag used to overshoot to full.
@@ -314,6 +361,18 @@ test('every interactive control is at least 44px, on every step', async ({
   page,
 }, testInfo) => {
   test.skip(!testInfo.project.name.startsWith('mobile'), 'phone layout');
+  /*
+    Six full page loads in one test, each with hydration and — on three of the
+    steps — a WebGL map. Measured solo at 11-16s on this project against
+    Playwright's generic 30s budget, which leaves under 2x headroom; running a
+    second suite alongside pushed it to 31s and 34s.
+
+    test.slow() triples the budget. This is sizing it to the work rather than
+    papering over a race: the same loop passes on the other two projects under
+    the same contention, and the failures were the whole loop running long, not
+    one step hanging.
+  */
+  test.slow();
 
   // Seeded per step and reloaded, rather than driven through the map: the
   // WebKit phone project has no WebGL, so there is no map instance to talk to.
@@ -1074,7 +1133,7 @@ test('a failed email retries only the email, never re-filing the lead', async ({
     contactStepSeed('retry-email-test')
   );
 
-  const calls: Array<{ resend?: boolean }> = [];
+  const calls: Array<{ resend?: boolean; email?: string }> = [];
   await page.route('**/api/leads', (route) => {
     const body = JSON.parse(route.request().postData() ?? '{}');
     calls.push(body);
@@ -1115,7 +1174,7 @@ test('a failed lead write sends no email at all', async ({ page }) => {
     contactStepSeed('retry-lead-test')
   );
 
-  const calls: Array<{ resend?: boolean }> = [];
+  const calls: Array<{ resend?: boolean; email?: string }> = [];
   await page.route('**/api/leads', (route) => {
     calls.push(JSON.parse(route.request().postData() ?? '{}'));
     return route.fulfill({
@@ -1137,11 +1196,21 @@ test('a failed lead write sends no email at all', async ({ page }) => {
 
   // Never promise a customer an email about a lead that was never filed, and
   // never let a retry skip the write by asking for a resend.
-  expect(calls, 'the lead should have been retried').toHaveLength(2);
+  //
+  // A lower bound, not an exact count: the queue re-flushes a 5xx on its own
+  // backoff, so on a fast server a third write lands inside this window and on
+  // a slow one it does not. That timer is not what this test is about — what
+  // matters is that every attempt is a full lead write. Pinning the count to 2
+  // was measuring the backoff.
+  expect(calls.length, 'the lead should have been retried').toBeGreaterThanOrEqual(2);
   expect(
     calls.some((c) => c.resend),
     'a retry asked to resend an email for a lead that was never filed'
   ).toBe(false);
+  // And each one carries the lead, rather than a retry shrinking to a nudge.
+  for (const call of calls) {
+    expect(call.email, 'a retry went out without the lead on it').toBe('bert@example.com');
+  }
   await expect(page.getByTestId('success-screen')).toHaveCount(0);
 });
 
@@ -1478,10 +1547,69 @@ test('the bill field rounds to whole dollars on blur', async ({ page }) => {
  * on screen at once rather than about what the DOM contains.
  */
 
-test('the address suggestions are not covered by the sheet', async ({ page }, testInfo) => {
+/**
+ * How much of the screen an iOS keyboard takes on a 390x844 phone.
+ *
+ * The number is the point of the test: a headless browser has no keyboard, so
+ * everything below the input looked free and the suggestions "passed" while
+ * being invisible on the owner's phone. 336px is the iPhone 13 QuickType
+ * keyboard with its prediction bar.
+ */
+const IOS_KEYBOARD_PX = 336;
+
+/**
+ * Put a keyboard on screen.
+ *
+ * iOS Safari does not resize the layout viewport — it shrinks the *visual*
+ * viewport and leaves `innerHeight` alone. So that is what this simulates:
+ * `visualViewport.height` drops and a resize fires, exactly the signal both
+ * the sheet and the suggestion list listen for. Overriding `innerHeight` would
+ * be simulating Android, and would let a layout that only reads `innerHeight`
+ * pass.
+ */
+async function raiseKeyboard(page: Page, keyboardPx = IOS_KEYBOARD_PX) {
+  await page.evaluate((kb) => {
+    const vv = window.visualViewport;
+    if (!vv) throw new Error('no visualViewport to shrink');
+    Object.defineProperty(vv, 'height', {
+      value: window.innerHeight - kb,
+      configurable: true,
+    });
+    vv.dispatchEvent(new Event('resize'));
+  }, keyboardPx);
+}
+
+/** Where the keyboard's top edge is, read the way the app reads it. */
+const visualBottom = (page: Page) =>
+  page.evaluate(() => {
+    const vv = window.visualViewport;
+    return vv ? vv.offsetTop + vv.height : window.innerHeight;
+  });
+
+test('the address suggestions clear the sheet and the keyboard', async ({ page }, testInfo) => {
   test.skip(!testInfo.project.name.startsWith('mobile'), 'the bottom sheet is the phone layout');
 
-  await openFunnel(page);
+  // Five results, which is what Mapbox actually returns. One suggestion would
+  // fit almost anywhere; a full list is what has to find room.
+  await page.route('**/api.mapbox.com/geocoding/**', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        features: [
+          { id: SUGGESTION.id, place_name: SUGGESTION.place_name, center: SUGGESTION.center },
+          ...Array.from({ length: 4 }, (_, i) => ({
+            id: `address.other${i}`,
+            place_name: `${i + 200} Main St, Fort Worth, Texas 76131, United States`,
+            center: SUGGESTION.center,
+          })),
+        ],
+      }),
+    })
+  );
+
+  await page.goto('/quote');
+  await waitForHydration(page);
   await waitForSheet(page);
 
   // Start with the sheet pulled up, which is where the owner found it: the
@@ -1498,38 +1626,94 @@ test('the address suggestions are not covered by the sheet', async ({ page }, te
 
   const suggestion = page.getByRole('button', { name: SUGGESTION.place_name });
   await expect(suggestion).toBeVisible();
-  await waitForSheet(page);
 
-  const [row, sheet, viewport] = await Promise.all([
+  // Now the keyboard, in the order a phone does it: field first, keys after.
+  await raiseKeyboard(page);
+  await waitForSheet(page);
+  // And the list itself, which resizes in response to the sheet.
+  await waitForStableBox(page, 'address-suggestions');
+
+  const keyboardTop = await visualBottom(page);
+  const layoutHeight = await page.evaluate(() => window.innerHeight);
+  expect(keyboardTop, 'the simulated keyboard did not shrink the visual viewport').toBe(
+    layoutHeight - IOS_KEYBOARD_PX
+  );
+
+  const [row, list, sheet] = await Promise.all([
     suggestion.boundingBox(),
+    page.getByTestId('address-suggestions').boundingBox(),
     page.getByTestId('bottom-sheet').boundingBox(),
-    page.viewportSize(),
   ]);
   expect(row, 'the first suggestion has no box').not.toBeNull();
   expect(sheet, 'the sheet has no box').not.toBeNull();
 
-  // Fully on screen...
+  // Inside the VISUAL viewport, not the layout viewport. The layout viewport
+  // still claims all 844px on iOS; the bottom 336 of it are under the keys.
   expect(row!.y, 'the suggestion starts above the viewport').toBeGreaterThanOrEqual(0);
   expect(
     row!.y + row!.height,
-    `the suggestion runs past the bottom of the ${viewport!.height}px screen`
-  ).toBeLessThanOrEqual(viewport!.height);
+    `the suggestion is ${Math.round(row!.y + row!.height - keyboardTop)}px under the keyboard`
+  ).toBeLessThanOrEqual(keyboardTop);
 
-  // ...and clear of the sheet, not merely painted over it. A rect that
-  // overlaps is a rect that would be hidden the moment the stacking order
-  // changed, which is exactly what happened on the phone.
+  // The whole list, not just its first row: a list that overflows the gap is
+  // one the customer has to scroll a container they cannot see the edge of.
   expect(
-    row!.y + row!.height,
-    `the suggestion overlaps the sheet by ${Math.round(row!.y + row!.height - sheet!.y)}px`
+    list!.y + list!.height,
+    `the list runs ${Math.round(list!.y + list!.height - keyboardTop)}px under the keyboard`
+  ).toBeLessThanOrEqual(keyboardTop);
+
+  // And clear of the sheet, not merely painted over it. A rect that overlaps
+  // is a rect that would be hidden the moment the stacking order changed,
+  // which is exactly what happened on the phone.
+  expect(
+    list!.y + list!.height,
+    `the list overlaps the sheet by ${Math.round(list!.y + list!.height - sheet!.y)}px`
   ).toBeLessThanOrEqual(sheet!.y);
 
-  // And it is the topmost thing at its own centre, so it is the element a
-  // thumb would actually hit.
+  // Topmost at its own centre, so it is the element a thumb would hit.
   const onTop = await page.evaluate(([x, y]) => {
     const el = document.elementFromPoint(x, y);
     return !!el?.closest('[data-testid="address-suggestions"]');
   }, [row!.x + row!.width / 2, row!.y + row!.height / 2] as const);
   expect(onTop, 'something else is on top of the suggestion').toBe(true);
+
+  // It still works: this is a list, not a picture of one.
+  await suggestion.click();
+  await expect(page.locator('#address')).toHaveValue(SUGGESTION.place_name);
+});
+
+test('the suggestions are not crushed by the side panel on a desktop', async ({
+  page,
+}, testInfo) => {
+  test.skip(testInfo.project.name.startsWith('mobile'), 'this is the two-column layout');
+
+  // Above md the sheet is a static column beside the map, not an overlay under
+  // the input. Reading its top edge as a ceiling capped the list at its 96px
+  // floor — a five-result list in a one-result box, on the widest screen we
+  // support.
+  await openFunnel(page);
+  await page.locator('#address').click();
+  await page.locator('#address').fill('123 Main St');
+
+  const suggestion = page.getByRole('button', { name: SUGGESTION.place_name });
+  await expect(suggestion).toBeVisible();
+  await waitForStableBox(page, 'address-suggestions');
+
+  const list = (await page.getByTestId('address-suggestions').boundingBox())!;
+  const maxHeight = await page
+    .getByTestId('address-suggestions')
+    .evaluate((el) => parseFloat(getComputedStyle(el).maxHeight));
+
+  // Room to grow, rather than pinned to the floor.
+  expect(maxHeight, 'the list is capped at its minimum on a full-size screen').toBeGreaterThan(200);
+
+  // And still on screen.
+  const viewport = page.viewportSize()!;
+  expect(list.y).toBeGreaterThanOrEqual(0);
+  expect(list.y + list.height).toBeLessThanOrEqual(viewport.height);
+
+  await suggestion.click();
+  await expect(page.locator('#address')).toHaveValue(SUGGESTION.place_name);
 });
 
 test('a bill can be chosen from the library, not only shot with the camera', async ({ page }) => {
@@ -1623,17 +1807,46 @@ test('the design step can be finished without opening the sheet', async ({ page 
   // The numbers, on the map — and the same numbers the sheet's own grid holds,
   // rather than a second reading of the design that could drift from it.
   const hud = await fullyVisible('design-hud');
-  const digits = (text: string | null) => (text ?? '').replace(/[^\d.]/g, '');
-  await expect(page.getByTestId('hud-panels')).toHaveText(
-    digits(await page.getByTestId('stat-panels').textContent())
+
+  // The design settles after the map places the array: the seeded trench is
+  // replaced by the real one. Wait for that, then read the HUD and the grid in
+  // ONE evaluation. Reading them with two round trips compared a value from
+  // before the change against one from after, and reported a drift that never
+  // existed in any single frame.
+  await expect
+    .poll(async () => (await page.getByTestId('hud-trench').textContent()) ?? '', {
+      timeout: 15_000,
+    })
+    .not.toBe('');
+  let last = '';
+  for (let i = 0; i < 40; i++) {
+    const now = await page.getByTestId('hud-trench').textContent();
+    if (now === last) break;
+    last = now ?? '';
+    await page.waitForTimeout(50);
+  }
+
+  const figures = await page.evaluate(() => {
+    const text = (id: string) =>
+      (document.querySelector(`[data-testid="${id}"]`)?.textContent ?? '').replace(
+        /[^\d.]/g,
+        ''
+      );
+    return {
+      hudPanels: text('hud-panels'),
+      statPanels: text('stat-panels'),
+      hudTrench: text('hud-trench'),
+      statTrench: text('stat-trench'),
+    };
+  });
+
+  expect(figures.hudPanels, 'the HUD and the grid disagree on the panel count').toBe(
+    figures.statPanels
   );
-  await expect(page.getByTestId('hud-trench')).toHaveText(
-    digits(await page.getByTestId('stat-trench').textContent())
+  expect(figures.hudTrench, 'the HUD and the grid disagree on the trench').toBe(
+    figures.statTrench
   );
-  expect(
-    Number(await page.getByTestId('hud-trench').textContent()),
-    'no trench on the HUD to read'
-  ).toBeGreaterThan(0);
+  expect(Number(figures.hudTrench), 'no trench on the HUD to read').toBeGreaterThan(0);
 
   // The controls, in the peek row.
   await fullyVisible('panel-minus');

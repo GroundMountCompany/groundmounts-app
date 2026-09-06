@@ -143,12 +143,33 @@ export default defineConfig({
       },
     },
   ],
+  /**
+   * A production build, not `next dev`.
+   *
+   * The dev server compiles a route the first time it is asked for. With four
+   * workers navigating in parallel, a page could sit in on-demand compilation
+   * long enough that hydration and a back-navigation missed their budgets —
+   * six failures on an independent full run, every one of them green in
+   * isolation. That is the dev server's scheduling, not the app's, and no
+   * timeout would have fixed it honestly.
+   *
+   * `next build` also strips the e2e hooks, so NEXT_PUBLIC_E2E_HOOKS below
+   * asks for them back. Nothing outside this file sets it; `npm run
+   * verify:hooks` proves a real build has none.
+   */
   webServer: {
-    command: `node node_modules/next/dist/bin/next dev --port ${PORT}`,
+    command:
+      `node node_modules/next/dist/bin/next build && ` +
+      `node node_modules/next/dist/bin/next start --port ${PORT}`,
     url: BASE_URL,
     reuseExistingServer: !process.env.CI,
-    timeout: 120_000,
+    // A build, then a boot. The old 120s budget only had to cover the boot.
+    timeout: 600_000,
     env: {
+      // Asks for __gmTest and the upload-size attributes, which a production
+      // build otherwise drops. See next.config.mjs.
+      NEXT_PUBLIC_E2E_HOOKS: '1',
+
       // A real token when the machine has one, otherwise a dummy so the mocked
       // smoke suite still runs on a clean checkout with no secrets.
       NEXT_PUBLIC_MAPBOX_TOKEN: realToken ?? DUMMY_TOKEN,

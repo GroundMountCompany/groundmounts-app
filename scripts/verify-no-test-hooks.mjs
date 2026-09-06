@@ -20,6 +20,21 @@ import path from 'node:path';
 const ROOT = path.join(import.meta.dirname, '..', '.next');
 const HOOKS = ['__gmTest', '__gmLastPointer', 'data-upload-bytes'];
 
+/*
+  NEXT_PUBLIC_DEMO_PARAMS is deliberately not in that list.
+
+  It looks like it belongs — ?demo=results opens a screen claiming a quote, and
+  it must be inert in production. But the flag inlines to a literal either way,
+  so the variable name is absent from the bundle whether it was set or not, and
+  the demo seed itself survives both builds. A check that passes in both
+  directions proves nothing and reads as assurance, which is worse than no
+  check at all.
+
+  What guards it instead: demoMode.test.ts asserts the gate returns null for
+  every value that is not exactly "1", and the e2e runs ?demo=results against
+  both a flagged and an unflagged server. See the RUNBOOK.
+*/
+
 async function* files(dir) {
   let entries;
   try {
@@ -47,8 +62,9 @@ for (const dir of ['static', 'server']) {
 if (found.length) {
   console.error('Test hooks reached the build:');
   for (const line of found) console.error(`  ${line}`);
-  console.error('\nThey must be behind `process.env.NEXT_PUBLIC_E2E_HOOKS === \'1\'`');
-  console.error('as a literal comparison, so the bundler can drop the branch.');
+  console.error('\nThey must be behind a literal `process.env.NEXT_PUBLIC_* === \'1\'`');
+  console.error('comparison, and the variable declared in next.config.mjs, so the');
+  console.error('bundler substitutes it and drops the branch.');
   process.exit(1);
 }
 

@@ -88,7 +88,7 @@ export const DEFAULT_RATE_CENTS = 14;
 export const RATE_CENTS_MIN = 5;
 export const RATE_CENTS_MAX = 40;
 
-interface QuoteState {
+export interface QuoteState {
   hydrated: boolean;
   currentStepIndex: number;
   address: string;

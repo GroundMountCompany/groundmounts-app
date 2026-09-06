@@ -226,6 +226,10 @@ export default function ResultsSection({
         />
       </div>
 
+      {/* One unit per figure. This read "$1,522/month. a month. With this
+          system:" — the same duplication as the spread line below, and the
+          reason both are now asserted with exact text rather than by
+          fragment. */}
       <p data-testid="result-year-25" className="text-[17px] leading-snug text-neutral-800">
         {UI.resultsYear25Prefix} {model.final.calendarYear} {UI.resultsYear25Middle}{' '}
         <span className="font-semibold">{money(model.final.withoutMonthly)}</span>
@@ -237,11 +241,13 @@ export default function ResultsSection({
       {/* The secondary figure, and labelled as one. Nobody is offering to take
           the price monthly — this is a way of feeling the size of it. */}
       <p data-testid="result-monthly-equivalent" className="text-[17px] text-neutral-600">
+        {/* One unit, not two. This read "$108/month a month." — the suffix
+            was saying again what /month had already said. */}
         {UI.resultsSpreadPrefix} {model.assumptions.horizonYears} {UI.resultsSpreadMiddle}{' '}
         <span className="font-semibold text-neutral-900">
           {money(model.monthlyEquivalent)}
         </span>
-        {UI.resultsPerMonth} {UI.resultsSpreadSuffix}
+        {UI.resultsPerMonth}.
       </p>
 
       <div className="rounded-xl border border-neutral-200 p-3">

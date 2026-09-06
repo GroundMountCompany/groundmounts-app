@@ -23,6 +23,13 @@ export default withAnalyzer({
    */
   env: {
     NEXT_PUBLIC_E2E_HOOKS: process.env.NEXT_PUBLIC_E2E_HOOKS ?? "",
+    /**
+     * Same reason as above: declared so an unset flag inlines as a literal.
+     *
+     * Left unset, `?demo=` does nothing and the seed is dropped from the
+     * bundle. The owner sets it on Preview only.
+     */
+    NEXT_PUBLIC_DEMO_PARAMS: process.env.NEXT_PUBLIC_DEMO_PARAMS ?? "",
   },
   experimental: {
     // helps tree-shake framer-motion submodules

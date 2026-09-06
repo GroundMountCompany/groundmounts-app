@@ -48,12 +48,12 @@ export default defineConfig({
       // The funnel is mobile-first and customers are overwhelmingly on phones,
       // so the phone viewport is the default target, not an afterthought.
       name: 'mobile',
-      testIgnore: /(interaction|mouse)\.spec\.ts/,
+      testIgnore: /(interaction|mouse|screenshots)\.spec\.ts/,
       use: { ...devices['iPhone 13'], viewport: { width: 390, height: 844 } },
     },
     {
       name: 'desktop',
-      testIgnore: /(interaction|mouse)\.spec\.ts/,
+      testIgnore: /(interaction|mouse|screenshots)\.spec\.ts/,
       use: { ...devices['Desktop Chrome'] },
     },
     {
@@ -158,9 +158,10 @@ export default defineConfig({
    * verify:hooks` proves a real build has none.
    */
   webServer: {
-    command:
-      `node node_modules/next/dist/bin/next build && ` +
-      `node node_modules/next/dist/bin/next start --port ${PORT}`,
+    // Behind a build lock: two suites started within a second of each other
+    // both find nothing listening and would otherwise both build into `.next`.
+    // See scripts/e2e-server.mjs.
+    command: `node scripts/e2e-server.mjs ${PORT}`,
     url: BASE_URL,
     reuseExistingServer: !process.env.CI,
     // A build, then a boot. The old 120s budget only had to cover the boot.
@@ -169,6 +170,17 @@ export default defineConfig({
       // Asks for __gmTest and the upload-size attributes, which a production
       // build otherwise drops. See next.config.mjs.
       NEXT_PUBLIC_E2E_HOOKS: '1',
+
+      /*
+        The Preview-only demo parameter, on by default so ?demo=results is
+        exercised by the normal run.
+
+        Overridable, because the off state needs proving too and there is no
+        build-level signal that distinguishes them — the flag inlines to a
+        literal either way. `E2E_DEMO_PARAMS= npx playwright test -g "flag is
+        off"` on a spare port runs the other half. See the RUNBOOK.
+      */
+      NEXT_PUBLIC_DEMO_PARAMS: process.env.E2E_DEMO_PARAMS ?? '1',
 
       // A real token when the machine has one, otherwise a dummy so the mocked
       // smoke suite still runs on a clean checkout with no secrets.

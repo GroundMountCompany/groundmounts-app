@@ -11,6 +11,7 @@ import { useStepUrl, MAX_STEP, allowedStep } from '@/lib/useStepUrl';
 import { captureAndAdvance } from '@/lib/leadPayload';
 import { useSizing } from './steps/useSizing';
 import { usePartialSave } from './usePartialSave';
+import { useDemoSeed } from '@/lib/demoMode';
 import { fitDesignView, rearmDesignFraming } from '@/components/map/MapCanvas';
 
 import { Suspense } from 'react';
@@ -41,6 +42,9 @@ const MAP_FIRST_STEPS = [0, 2, 3];
 
 export default function FunnelShell() {
   useStepUrl();
+  // Before sizing, so the seeded design is what gets sized. Does nothing at
+  // all unless NEXT_PUBLIC_DEMO_PARAMS is set — see demoMode.ts.
+  useDemoSeed();
   useSizing();
   usePartialSave();
 

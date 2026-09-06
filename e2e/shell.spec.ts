@@ -1484,6 +1484,69 @@ test('the sheet fills the screen on steps with no map', async ({ page }, testInf
   }
 });
 
+test('?demo=results opens the finished screen without sending anything', async ({ page }) => {
+  test.skip(
+    (process.env.E2E_DEMO_PARAMS ?? '1') !== '1',
+    'this run built the server with demo parameters off'
+  );
+
+  // Reviewing this screen used to mean filing a real lead with a real email
+  // address and leaving a real record in the owner's Airtable. Nothing may
+  // leave the browser here.
+  const leadCalls: string[] = [];
+  await page.route('**/api/leads', (route) => {
+    leadCalls.push(route.request().method());
+    return route.fulfill({ status: 500, body: 'the demo must not call this' });
+  });
+
+  await mockGeocoding(page);
+  await page.goto('/quote?demo=results');
+  await waitForHydration(page);
+
+  await expect(page.getByTestId('success-screen')).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByTestId('results-section')).toBeVisible();
+  await expect(page.getByTestId('result-breakeven')).toBeVisible();
+
+  expect(leadCalls, `the demo sent ${leadCalls.length} request(s) to /api/leads`).toEqual([]);
+
+  // The revealed range is the page's own arithmetic for the seeded design, so
+  // it agrees with the line items beside it rather than being a stray figure.
+  const revealed = pricesIn(await page.getByTestId('price-revealed').innerText());
+  expect(revealed, 'no range on the demo screen').toHaveLength(2);
+  const items = await page.evaluate(() =>
+    Array.from(document.querySelectorAll('[data-testid="line-items"] dd')).map((d) =>
+      Number((d.textContent ?? '').replace(/[^\d]/g, ''))
+    )
+  );
+  const total = items.reduce((sum, n) => sum + n, 0);
+  expect(total, 'the line items do not add up to the revealed range').toBeGreaterThan(revealed[0]);
+  expect(total).toBeLessThan(revealed[1]);
+
+  // And it did not pretend a lead was filed: the design is not locked.
+  const filed = await page.evaluate(() => {
+    const raw = window.localStorage.getItem('gmq:v3');
+    return raw ? JSON.parse(raw).state?.leadFiled : 'no store';
+  });
+  expect(filed, 'the demo marked the lead as filed').toBeNull();
+});
+
+test('?demo=results does nothing when the flag is off', async ({ page }) => {
+  test.skip(
+    (process.env.E2E_DEMO_PARAMS ?? '1') === '1',
+    'needs a server built without the flag: E2E_DEMO_PARAMS= E2E_PORT=3101 ...'
+  );
+
+  // In production the comparison inlines to false and the parameter is inert.
+  // A demo screen that opened for anybody would be claiming a quote nobody
+  // was given.
+  await mockGeocoding(page);
+  await page.goto('/quote?demo=results');
+  await waitForHydration(page);
+
+  await expect(page.getByTestId('success-screen')).toHaveCount(0);
+  await expect(page.getByTestId('results-section')).toHaveCount(0);
+});
+
 test('the results section answers the number it sits under', async ({ page }) => {
   // A five-figure quote is only frightening on its own. Most people have never
   // added up what the utility is going to take over the same twenty-five
@@ -1546,7 +1609,11 @@ test('the results section answers the number it sits under', async ({ page }) =>
   // The three figures, and the year-25 line.
   await expect(page.getByTestId('result-utility-total')).toBeVisible();
   await expect(page.getByTestId('result-system-total')).toBeVisible();
-  await expect(page.getByTestId('result-year-25')).toContainText('/month');
+  // Read exactly, for the same reason as the spread line: a fragment match
+  // let a duplicated unit ship.
+  await expect(page.getByTestId('result-year-25')).toHaveText(
+    /^In \d{4} at this rate your bill is \$[\d,]+\/month\. With this system: \$[\d,]+\/month\.$/
+  );
 
   // The system figure is the midpoint of the range they were just shown, not a
   // fourth number.
@@ -1560,9 +1627,15 @@ test('the results section answers the number it sits under', async ({ page }) =>
   const startYear = new Date().getFullYear();
   await expect(page.getByTestId('result-breakeven')).toHaveText(`10 (${startYear + 9})`);
 
-  // The spread figure is present and labelled as arithmetic, not as a payment.
-  await expect(page.getByTestId('result-monthly-equivalent')).toContainText('$108');
-  await expect(page.getByTestId('result-monthly-equivalent')).toContainText('Spread over 25');
+  /*
+    The spread figure, read exactly.
+
+    A `toContainText` on the number alone let "$108/month a month." ship: the
+    sentence said its unit twice and nothing was checking the whole of it.
+  */
+  await expect(page.getByTestId('result-monthly-equivalent')).toHaveText(
+    'Spread over 25 years, this system works out to $108/month.'
+  );
 
   // The chart is cumulative: the utility line has to reach six figures over
   // twenty-five years, which a monthly chart never would.
@@ -2046,8 +2119,13 @@ test('choosing a bill shows what is happening, start to finish', async ({ page }
   release!();
 
   // What was found, said out loud, before the table replaces it.
-  await expect(page.getByTestId('bill-found')).toBeVisible({ timeout: BILL_HOLD_TIMEOUT });
-  await expect(page.getByTestId('bill-found')).toContainText('12');
+  //
+  // One assertion, not two: the card is only up for FOUND_HOLD_MS, so a
+  // separate toBeVisible followed by a text check gives the hold a window to
+  // expire in between — which under load it does.
+  await expect(page.getByTestId('bill-found')).toContainText('12', {
+    timeout: BILL_HOLD_TIMEOUT,
+  });
   expect(
     await page.getByTestId('bill-review').count(),
     'the table appeared before the customer was told anything was found'
@@ -2076,10 +2154,14 @@ test('a bill that cannot be read says so before dropping to manual', async ({ pa
 
   // The failure is on the card, in the place the customer is already looking,
   // rather than appearing as a line under buttons that came back.
-  await expect(page.getByTestId('bill-card-failed')).toBeVisible({
+  //
+  // The state attribute first: it is on the card that is already on screen, so
+  // it cannot expire between two assertions the way a second look at the
+  // failure line can.
+  await expect(card).toHaveAttribute('data-card-state', 'failed', {
     timeout: BILL_HOLD_TIMEOUT,
   });
-  await expect(card).toHaveAttribute('data-card-state', 'failed');
+  await expect(page.getByTestId('bill-card-failed')).toBeVisible();
 
   // Then it hands over. Nothing to dismiss.
   await expect(card).toHaveCount(0, { timeout: BILL_HOLD_TIMEOUT });

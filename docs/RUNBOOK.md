@@ -21,6 +21,7 @@ when a variable is missing, because "required" is rarely the whole truth.
 | `KV_REST_API_URL`<br>`KV_REST_API_TOKEN`<br>*(or `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN`)* | Vercel + `.env.local` | Rate limiting, the site cache and submit idempotency all fall back to per-instance memory. Nothing breaks, but each of them becomes per-instance: duplicate submits can slip through and the site cache stops being shared. |
 | `BLOB_READ_WRITE_TOKEN` | Vercel (auto) | Map screenshots are not attached to leads. The lead is still filed. |
 | `NEXT_PUBLIC_BRAND` | Vercel | Defaults to `groundmounts`. Set to `neutral` for a brandless deployment. |
+| `NEXT_PUBLIC_DEMO_PARAMS` | Vercel, **Preview only** | Without it `?demo=results` does nothing. Set it to `1` on Preview so the results screen can be reviewed without filing a lead. **Never set it on Production**: the screen it opens claims a quote was produced. |
 | `ANTHROPIC_MODEL` | Vercel (optional) | Defaults to `claude-sonnet-5`. Change the model without a code change. |
 | `ALLOWED_FRAME_ORIGINS` | Vercel (optional) | `frame-ancestors *`, which is deliberate: partner funnels embed this. Set a space-separated origin list to lock it down. |
 
@@ -51,6 +52,7 @@ The client also sends the honeypot as `x-gm-hp` alongside the body field, so
 the server's pre-parse check applies to real traffic rather than only to
 whatever a bot chooses to send. Both are checked.
 | `?state=` | Sets the state on the lead. Defaults to `TX`. | `/quote?state=TX` |
+| `?demo=results` | **Preview only.** Seeds a worked example and opens the revealed success screen, with the results section, **without sending anything** — no Airtable write, no email, no request to `/api/leads` at all. Needs `NEXT_PUBLIC_DEMO_PARAMS=1`; without it the parameter does nothing. | `/quote?demo=results` |
 
 ---
 
@@ -89,6 +91,41 @@ literal `"" === "1"` and the branch is dropped; without that declaration Next
 leaves it as a runtime lookup and the hook ships.
 
 Run it after `next build`. Exit 1 means a hook reached the bundle.
+
+### Reviewing the results screen without filing a lead
+
+`/quote?demo=results` on a Preview deployment. It seeds a coherent worked
+example, opens the success screen already revealed, and makes no request of
+any kind — the e2e asserts zero calls to `/api/leads` and that `leadFiled`
+stays null, so nothing claims to have been filed.
+
+The gate is `NEXT_PUBLIC_DEMO_PARAMS === '1'`, checked in `demoMode.ts`. There
+is deliberately **no** build-level check for this in `verify:hooks`: the flag
+inlines to a literal whether it was set or not, so the variable name is absent
+from the bundle either way and the demo seed survives both builds. A check that
+passes in both directions is worse than none. What guards it instead:
+
+- `demoMode.test.ts` — the gate returns null for every value that is not
+  exactly `"1"`, including `"0"`, `"true"` and `"preview"`.
+- The e2e runs `?demo=results` against **both** a flagged and an unflagged
+  server. The default run has the flag on; the other half is:
+
+  ```bash
+  E2E_DEMO_PARAMS= E2E_PORT=3101 npx playwright test -g "flag is off"
+  ```
+
+### Capturing the results screen
+
+`e2e/screenshots.spec.ts`, excluded from the normal run because it writes files
+and asserts almost nothing:
+
+```bash
+npx playwright test --project=mobile --project=desktop e2e/screenshots.spec.ts
+```
+
+Writes to `docs/screenshots/`. It stubs `/api/leads` to fail loudly, so a
+capture that somehow submitted would be obvious rather than quietly landing in
+the owner's Airtable.
 
 ### `npm run eval:bills`
 
@@ -172,16 +209,17 @@ Two consequences:
 
 - The first run of a session pays for a `next build` (hence the 600s webServer
   budget). Later runs reuse the running server.
-- **Two suites cannot cold-start at once** on one machine: they both build into
-  `.next` and clobber each other. To run concurrent suites deliberately, start
-  one server first (`next build && next start --port 3100`) and let both runs
-  reuse it.
+- **Two suites can cold-start at once.** `scripts/e2e-server.mjs` puts the
+  build behind an atomic lock: the run that wins builds and serves, and the one
+  that loses waits for that server instead of building over it.
 
-  When this is ignored, the symptom is not obvious. The half-written build
-  either fails to boot with `SyntaxError: Unexpected end of JSON input`, or —
-  worse — boots and serves a broken bundle, and the suite comes back with a
-  scatter of unrelated timeouts and a wall-clock two to three times its usual.
-  Before believing a contention result, check that the server was already up.
+  Before that lock existed, two concurrent cold starts wrote into the same
+  `.next`, and the half-written build either refused to boot with
+  `SyntaxError: Unexpected end of JSON input` or — worse — booted and served a
+  broken bundle, producing a scatter of unrelated timeouts at two to three
+  times the usual wall-clock. It happened four times and cost one wrong
+  diagnosis, blamed on a phase that had nothing to do with it. A note here did
+  not stop it; the lock does.
 
 The `interaction` and `desktop-map` projects render real WebGL through
 SwiftShader, which is CPU rasterisation. They are configured to run alone

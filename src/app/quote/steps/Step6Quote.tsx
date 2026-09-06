@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import EducationCard from '@/components/shell/EducationCard';
 import { STEPS, UI } from '@/config/copy';
@@ -24,6 +24,7 @@ import { useBrand } from '@/contexts/BrandContext';
 import { PANELS } from '@/config/pricing';
 import { annualKwh } from '@/lib/production';
 import { useQuote } from './useQuote';
+import { demoFromParam } from '@/lib/demoMode';
 
 
 /** Whole dollars; nobody quotes a ground mount to the cent. */
@@ -85,6 +86,29 @@ export default function Step6Quote() {
     lineItems: Array<{ key: string; label: string; detail?: string; amount: number }>;
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  /*
+    ?demo=results opens this screen already revealed, on the worked example,
+    without sending anything anywhere.
+
+    The results section only exists after a submit, so reviewing a wording
+    change meant putting a real name and a real email through the real route
+    and leaving a real record in the owner's Airtable. This is the same screen
+    from a URL. It is deliberately not a shortcut past the form: nothing is
+    filed, so `leadFiled` stays untouched and the funnel is not marked as done.
+
+    Gated on NEXT_PUBLIC_DEMO_PARAMS, which is set on Preview and nowhere else.
+    In production the comparison inlines to false and the parameter does
+    nothing at all — see demoMode.ts.
+  */
+  const demo = demoFromParam(searchParams.get('demo'));
+  useEffect(() => {
+    if (demo !== 'results') return;
+    // `filed` stays null, so the screen reveals its own arithmetic for the
+    // seeded design — the same numbers the blurred preview was showing a
+    // moment earlier. Nothing pretends a server answered.
+    setDone(true);
+  }, [demo]);
 
   const curve = useQuoteStore((s) => s.productionCurve);
   const quote = useQuote();

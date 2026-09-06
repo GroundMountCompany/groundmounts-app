@@ -21,6 +21,7 @@ import Step3Meter from './steps/Step3Meter';
 import Step4Design from './steps/Step4Design';
 import PanelStepper from './steps/PanelStepper';
 import DesignHud from '@/components/map/DesignHud';
+import FaceSouth from '@/components/map/FaceSouth';
 import Step5Options from './steps/Step5Options';
 import Step6Quote from './steps/Step6Quote';
 
@@ -188,6 +189,7 @@ export default function FunnelShell() {
               </div>
             )}
             {step === 3 && <DesignHud />}
+            {step === 3 && <FaceSouth />}
             {step === 3 && (
               <button
                 type="button"

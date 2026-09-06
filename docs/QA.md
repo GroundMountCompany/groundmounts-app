@@ -44,7 +44,14 @@ the system font size turned up, use it.
 - [ ] **"Choose a photo or PDF" offers Photo Library and Browse**, and a bill
       already saved on the phone can be picked. This is the one the owner could
       not reach in 8.6, so check it on a real iPhone every time.
-- [ ] While it reads, the button says so and cannot be pressed again.
+- [ ] **The moment you choose a file**, the buttons are replaced by a card with
+      a thumbnail of your own bill (or a PDF icon), a moving bar, and how long
+      it usually takes. There must be no moment where you wonder whether the
+      tap registered.
+- [ ] On success the card says how many months it found **before** the table
+      appears.
+- [ ] A bad photo says "Couldn't read that one" on the card for a couple of
+      seconds, then hands over to the manual fields with nothing to dismiss.
 - [ ] The months come back in a table you can actually read at arm's length.
 - [ ] Correct one figure. The annual total updates as you type.
 - [ ] Confirm. The table collapses to one line with **Change**.
@@ -83,6 +90,11 @@ This is the step the whole tool exists for. Take your time.
       sensibly rather than losing it.
 - [ ] **Turn the array with the compass grip.** It rotates smoothly, the grip
       stays under your finger, and the panel count does *not* change.
+- [ ] Once it is off south, the HUD adds a line naming the loss and how many
+      panels would cover it. Tapping **Add N** adds exactly that many and the
+      line goes.
+- [ ] The **S** button appears beside the grip. Tapping it turns the array back
+      to south with a short ease — not a jump — and then disappears.
 - [ ] The trench line follows the array and its "N ft" label stays legible.
 - [ ] The compass grip does not sit on top of the array at any zoom.
 - [ ] ± panel buttons are easy to hit with a thumb.

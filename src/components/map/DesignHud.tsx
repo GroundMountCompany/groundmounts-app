@@ -4,6 +4,9 @@ import { UI } from '@/config/copy';
 import { useQuoteStore } from '@/store/quoteStore';
 import { annualKwh } from '@/lib/production';
 import { PANELS } from '@/config/pricing';
+import { targetAnnualKwh } from '@/lib/sizing';
+import { rotationShortfall } from '@/lib/shortfall';
+import { dollarsPerKwhFromCents } from '@/lib/rate';
 
 /**
  * The four numbers, on the map.
@@ -26,9 +29,31 @@ export default function DesignHud() {
   const azimuth = useQuoteStore((s) => s.azimuth);
   const trenchFeet = useQuoteStore((s) => s.trenchFeet);
   const curve = useQuoteStore((s) => s.productionCurve);
+  const billAnnualKwh = useQuoteStore((s) => s.billAnnualKwh);
+  const avgValue = useQuoteStore((s) => s.avgValue);
+  const rateCents = useQuoteStore((s) => s.rateCentsPerKwh);
+  const percentage = useQuoteStore((s) => s.percentage);
+  const panelAdjust = useQuoteStore((s) => s.panelAdjust);
+  const setPanelAdjust = useQuoteStore((s) => s.setPanelAdjust);
 
   const kw = (totalPanels * PANELS[panelTier].watts) / 1000;
   const production = annualKwh(curve, kw, azimuth);
+
+  // The same target the sizing effect uses, from the same function, so the
+  // offer here can never disagree with the count the array was given.
+  const target = targetAnnualKwh({
+    billAnnualKwh,
+    monthlyBillUsd: avgValue,
+    ratePerKwh: dollarsPerKwhFromCents(rateCents),
+    offsetPercent: percentage,
+  });
+  const shortfall = rotationShortfall({
+    curve,
+    targetAnnualKwh: target,
+    azimuth,
+    tier: panelTier,
+    totalPanels,
+  });
 
   const items: Array<[string, string, string]> = [
     ['hud-panels', String(totalPanels), UI.hudPanels],
@@ -70,6 +95,43 @@ export default function DesignHud() {
           </span>
         ))}
       </div>
+
+      {/*
+        What the turn costs, and the one tap that undoes it.
+
+        Rotation never changes the panel count — see useSizing — so without this
+        a customer who turned their array east was quietly short of the offset
+        they asked for, with nothing on screen saying so. Adding the panels is
+        their call; the number is not a guess.
+      */}
+      {shortfall && (
+        <div
+          data-testid="hud-shortfall"
+          // The rest of the HUD is deliberately untouchable so the array can be
+          // dragged underneath it. This part has a button, so it opts back in.
+          className="pointer-events-auto mt-2 flex items-center gap-2 border-t border-neutral-200 pt-2"
+        >
+          <p className="text-[14px] leading-snug text-neutral-700">
+            <span data-testid="hud-off-south">
+              {UI.hudOffSouth} &minus;{shortfall.offSouthPct}%
+            </span>{' '}
+            <span aria-hidden className="text-neutral-300">
+              &middot;
+            </span>{' '}
+            <span data-testid="hud-shortfall-panels">
+              {UI.hudAdd} {shortfall.addPanels} {UI.hudToStayAt} {percentage}%
+            </span>
+          </p>
+          <button
+            type="button"
+            data-testid="hud-add-panels"
+            onClick={() => setPanelAdjust(panelAdjust + shortfall.addPanels)}
+            className="ml-auto h-12 shrink-0 rounded-xl bg-neutral-900 px-3 text-[15px] font-semibold text-white"
+          >
+            {UI.hudAdd} {shortfall.addPanels}
+          </button>
+        </div>
+      )}
     </div>
   );
 }

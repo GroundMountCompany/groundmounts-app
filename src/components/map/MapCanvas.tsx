@@ -370,6 +370,10 @@ export default function MapStage({ mode }: { mode: MapMode }) {
     const onZoomEnd = () => syncFromStore();
     map.on('zoomend', onZoomEnd);
 
+    // A pan or a zoom moves the grip on screen without touching the store, so
+    // anything anchored to it has to follow the camera as well as the design.
+    map.on('move', publishHandleScreen);
+
     const unsubscribeStore = useQuoteStore.subscribe(syncFromStore);
 
     // Frame the design on every entry to the step, not once per map lifetime.
@@ -514,6 +518,7 @@ export default function MapStage({ mode }: { mode: MapMode }) {
       canvas.removeEventListener('pointercancel', onPointerUp);
       map.off('click', onClick);
       map.off('zoomend', onZoomEnd);
+      map.off('move', publishHandleScreen);
       map.off('move', onMapMove);
       // Only on funnel unmount — never between steps.
       map.remove();
@@ -681,6 +686,59 @@ export function fitDesignView() {
   fitRef.current?.();
 }
 
+/**
+ * Where the compass grip currently is, in viewport pixels.
+ *
+ * Published rather than put in the store: this changes on every frame of a
+ * drag, a rotate and a pan, and a store write per frame would re-render the
+ * whole funnel. Subscribers get the coordinate and nothing else re-renders.
+ */
+export type ScreenPoint = { x: number; y: number };
+
+const handleScreenListeners = new Set<(p: ScreenPoint | null) => void>();
+let lastHandleScreen: ScreenPoint | null = null;
+
+export function subscribeHandleScreen(fn: (p: ScreenPoint | null) => void): () => void {
+  handleScreenListeners.add(fn);
+  fn(lastHandleScreen);
+  return () => {
+    handleScreenListeners.delete(fn);
+  };
+}
+
+/** Recompute the grip's screen position and tell anybody who cares. */
+function publishHandleScreen() {
+  const map = mapRef.current;
+  const s = useQuoteStore.getState();
+  let next: ScreenPoint | null = null;
+
+  if (map && currentMode.current === 'design' && s.arrayCenter && s.totalPanels > 0) {
+    const ll = currentHandlePosition(map, {
+      center: s.arrayCenter,
+      azimuth: s.azimuth,
+      panelCount: s.totalPanels,
+      tier: s.panelTier,
+    });
+    if (ll) {
+      const rect = map.getCanvas().getBoundingClientRect();
+      const p = map.project(ll);
+      next = { x: rect.left + p.x, y: rect.top + p.y };
+    }
+  }
+
+  // Sub-pixel churn is not worth a React render.
+  const same =
+    (next === null && lastHandleScreen === null) ||
+    (next !== null &&
+      lastHandleScreen !== null &&
+      Math.abs(next.x - lastHandleScreen.x) < 0.5 &&
+      Math.abs(next.y - lastHandleScreen.y) < 0.5);
+  if (same) return;
+
+  lastHandleScreen = next;
+  for (const fn of handleScreenListeners) fn(next);
+}
+
 /** Redraw from store state and write back the trench length. */
 function syncFromStore() {
   const map = mapRef.current;
@@ -705,4 +763,6 @@ function syncFromStore() {
     const feet = buildTrench(spec, s.electricalMeterPosition).feet;
     if (feet !== s.trenchFeet) s.setTrenchFeet(feet);
   }
+
+  publishHandleScreen();
 }

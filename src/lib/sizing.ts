@@ -20,6 +20,31 @@ export function panelsForTarget(
   return Math.max(1, Math.ceil((kw * 1000) / PANELS[tier].watts));
 }
 
+/**
+ * The annual kWh the array is sized to cover.
+ *
+ * One function, because two callers have to agree: the sizing effect that
+ * chooses the panel count, and the rotation shortfall on the map that says how
+ * many panels a turn costs. If they computed the target separately they would
+ * drift, and the HUD would offer to add panels the sizing did not think were
+ * missing.
+ *
+ * A year read off the customer's own bill beats a monthly dollar figure divided
+ * by an assumed rate, so it wins when we have one.
+ */
+export function targetAnnualKwh(input: {
+  billAnnualKwh: number | null;
+  monthlyBillUsd: number;
+  ratePerKwh: number;
+  offsetPercent: number;
+}): number {
+  const { billAnnualKwh, monthlyBillUsd, ratePerKwh, offsetPercent } = input;
+  if (billAnnualKwh !== null && billAnnualKwh > 0) {
+    return billAnnualKwh * (offsetPercent / 100);
+  }
+  return annualTargetKwh(monthlyBillUsd, ratePerKwh, offsetPercent);
+}
+
 /** Annual kWh a bill implies, at a given rate and offset. */
 export function annualTargetKwh(
   monthlyBillUsd: number,

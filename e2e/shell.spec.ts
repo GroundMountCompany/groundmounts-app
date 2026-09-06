@@ -1682,6 +1682,199 @@ test('the address suggestions clear the sheet and the keyboard', async ({ page }
   await expect(page.locator('#address')).toHaveValue(SUGGESTION.place_name);
 });
 
+/**
+ * Owner QA round 2. Choosing a file changed nothing on screen until the table
+ * appeared twenty seconds later, so there was no way to tell the tap had
+ * registered at all.
+ */
+test('choosing a bill shows what is happening, start to finish', async ({ page }) => {
+  // Held open, so the reading state cannot be skipped past.
+  let release: (() => void) | null = null;
+  const inFlight = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+
+  await page.route('**/api/bill/extract', async (route) => {
+    await inFlight;
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        ok: true,
+        extraction: {
+          months: Array.from({ length: 12 }, (_, i) => ({
+            month: `M${i + 1}`,
+            kwh: 1200,
+            cost: 168,
+          })),
+          ratePerKwh: 0.14,
+          confidence: 'high',
+        },
+      }),
+    });
+  });
+
+  await mockGeocoding(page);
+  await gotoStep(page, 1);
+
+  const card = page.getByTestId('bill-card');
+  const started = Date.now();
+  await page.getByTestId('bill-file-library').setInputFiles('e2e/fixtures/bill.png');
+
+  // In the same breath as the file being chosen — the state is set in the
+  // change handler, before the downscale and before the request.
+  await expect(card).toBeVisible({ timeout: 200 });
+  expect(
+    Date.now() - started,
+    'the card took too long to acknowledge the file'
+  ).toBeLessThan(2000);
+
+  // Reading: a thumbnail of their own bill, a bar that moves, and how long it
+  // usually takes.
+  await expect(card).toHaveAttribute('data-card-state', 'reading');
+  await expect(page.getByTestId('bill-thumb')).toBeVisible();
+  await expect(page.getByRole('progressbar')).toBeVisible();
+  await expect(card).toContainText('20 seconds');
+
+  // The buttons are gone, not greyed: leaving them there was part of the
+  // confusion.
+  await expect(page.getByTestId('bill-upload')).toHaveCount(0);
+  await expect(page.getByTestId('bill-upload-library')).toHaveCount(0);
+  // And the table is not up yet.
+  await expect(page.getByTestId('bill-review')).toHaveCount(0);
+
+  release!();
+
+  // What was found, said out loud, before the table replaces it.
+  await expect(page.getByTestId('bill-found')).toBeVisible();
+  await expect(page.getByTestId('bill-found')).toContainText('12');
+  expect(
+    await page.getByTestId('bill-review').count(),
+    'the table appeared before the customer was told anything was found'
+  ).toBe(0);
+
+  await expect(page.getByTestId('bill-review')).toBeVisible();
+  await expect(card).toHaveCount(0);
+});
+
+test('a bill that cannot be read says so before dropping to manual', async ({ page }) => {
+  await page.route('**/api/bill/extract', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ ok: false, reason: "Couldn't read that one. Type it in instead." }),
+    })
+  );
+
+  await mockGeocoding(page);
+  await gotoStep(page, 1);
+
+  await page.getByTestId('bill-file').setInputFiles('e2e/fixtures/bill.png');
+
+  const card = page.getByTestId('bill-card');
+  await expect(card).toBeVisible({ timeout: 200 });
+
+  // The failure is on the card, in the place the customer is already looking,
+  // rather than appearing as a line under buttons that came back.
+  await expect(page.getByTestId('bill-card-failed')).toBeVisible();
+  await expect(card).toHaveAttribute('data-card-state', 'failed');
+
+  // Then it hands over. Nothing to dismiss.
+  await expect(card).toHaveCount(0, { timeout: 5000 });
+  await expect(page.getByTestId('bill-failed')).toBeVisible();
+  await expect(page.getByTestId('bill-upload')).toBeVisible();
+  await expect(page.locator('#avg-bill')).toBeVisible();
+});
+
+test('a PDF shows an icon rather than a broken thumbnail', async ({ page }) => {
+  await page.route('**/api/bill/extract', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        ok: true,
+        extraction: {
+          months: [{ month: 'Jan 2026', kwh: 1450, cost: 203.5 }],
+          ratePerKwh: 0.14,
+          confidence: 'high',
+        },
+      }),
+    })
+  );
+
+  await mockGeocoding(page);
+  await gotoStep(page, 1);
+
+  await page.getByTestId('bill-file-library').setInputFiles({
+    name: 'bill.pdf',
+    mimeType: 'application/pdf',
+    buffer: Buffer.from('%PDF-1.4 not a real bill, only a real content type'),
+  });
+
+  await expect(page.getByTestId('bill-pdf-icon')).toBeVisible({ timeout: 2000 });
+  await expect(page.getByTestId('bill-thumb')).toHaveCount(0);
+
+  // One month is a partial year, and the card says what happens to it rather
+  // than letting the scaled figure appear unexplained.
+  await expect(page.getByTestId('bill-found')).toContainText('scale it to a year');
+});
+
+test('the HUD says what turning the array costs, and can put it back', async ({
+  page,
+}, testInfo) => {
+  test.skip(!testInfo.project.name.startsWith('mobile'), 'the HUD is the phone overlay');
+
+  // Sized at due south, pointed east. Rotation never re-sizes the array — see
+  // useSizing — so without this line the customer is quietly short of the
+  // offset they asked for, with nothing on screen saying so.
+  await page.addInitScript((payload) => {
+    if (window.localStorage.getItem('gmq:v3')) return;
+    window.localStorage.setItem('gmq:v3', JSON.stringify(payload));
+  }, { ...siteCurveSeed(3), state: { ...siteCurveSeed(3).state, azimuth: 90 } });
+
+  await mockGeocoding(page);
+  await gotoStep(page, 3);
+  await waitForSheet(page);
+
+  const line = page.getByTestId('hud-shortfall');
+  await expect(line).toBeVisible();
+
+  // The HUD's "off south" must be the same figure the sheet's own Facing stat
+  // reports, read from one frame rather than recomputed here — a second
+  // calculation in the test only proves the test can do arithmetic, and it
+  // disagreed with the app the moment the array settled a degree off 90.
+  const facing = await page.evaluate(() => {
+    const text = (id: string) =>
+      document.querySelector(`[data-testid="${id}"]`)?.textContent ?? '';
+    return {
+      // "90° · 82%" — the second number is production against due south.
+      statPct: Number(text('stat-facing').match(/(\d+)%/)?.[1]),
+      hudOff: Number(text('hud-off-south').match(/(\d+)%/)?.[1]),
+    };
+  });
+  expect(facing.statPct, 'no vs-south figure on the design step').toBeGreaterThan(0);
+  expect(facing.hudOff, 'the HUD and the sheet disagree about how far off south').toBe(
+    100 - facing.statPct
+  );
+  // A quarter turn in Texas is a real loss, not a rounding wobble.
+  expect(facing.hudOff).toBeGreaterThan(10);
+
+  const before = Number(await page.getByTestId('hud-panels').textContent());
+  const asked = Number(
+    ((await page.getByTestId('hud-shortfall-panels').textContent()) ?? '').match(/\d+/)?.[0]
+  );
+  expect(asked, 'the line did not name a number of panels').toBeGreaterThan(0);
+
+  // The button says the same number as the sentence.
+  await expect(page.getByTestId('hud-add-panels')).toContainText(String(asked));
+
+  await page.getByTestId('hud-add-panels').click();
+
+  // Exactly that many, and then it has nothing left to say.
+  await expect(page.getByTestId('hud-panels')).toHaveText(String(before + asked));
+  await expect(line).toHaveCount(0);
+});
+
 test('the suggestions are not crushed by the side panel on a desktop', async ({
   page,
 }, testInfo) => {

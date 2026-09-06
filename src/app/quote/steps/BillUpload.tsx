@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { UI } from '@/config/copy';
 import { useQuoteStore } from '@/store/quoteStore';
 import { MAX_MONTHS, sanitiseExtraction, type BillMonth } from '@/lib/billSchema';
@@ -52,6 +52,23 @@ export function annualFromMonths(months: BillMonth[]): { annual: number; scaled:
 const money = (amount: number) =>
   amount.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
 
+/**
+ * How long the "Got it" line holds before the table replaces it, and how long
+ * a failure is shown before the manual fields take over.
+ *
+ * Both exist so the outcome is legible. Swapping straight from a spinner to a
+ * table of numbers reads as if nothing was ever read; a failure that vanishes
+ * on the same frame reads as a tap that did nothing.
+ */
+const FOUND_HOLD_MS = 1100;
+const FAILED_HOLD_MS = 2000;
+
+/** What the feedback card is showing about the attempt in progress. */
+type Card =
+  | { kind: 'reading'; preview: string | null; isPdf: boolean; name: string }
+  | { kind: 'found'; preview: string | null; isPdf: boolean; name: string; months: number }
+  | { kind: 'failed'; preview: string | null; isPdf: boolean; name: string };
+
 export default function BillUpload({ onConfirm, onDiscard }: BillUploadProps) {
   const phase = useQuoteStore((s) => s.billPhase);
   const setPhase = useQuoteStore((s) => s.setBillPhase);
@@ -64,8 +81,41 @@ export default function BillUpload({ onConfirm, onDiscard }: BillUploadProps) {
 
   // Only the failure message is local: it describes one attempt, not the
   // funnel's state, and it should not survive a refresh.
-  const [reason, setReason] = useState(UI.billFailed);
+  const [reason, setReason] = useState<string>(UI.billFailed);
   const [failed, setFailed] = useState(false);
+
+  /*
+    The attempt in progress, shown as a card in place of the two buttons.
+
+    Owner QA: it was impossible to tell whether choosing a file had registered
+    at all. Nothing changed on screen between the picker closing and the table
+    appearing twenty seconds later — no thumbnail, no progress, no wording. The
+    card is set synchronously in the change handler, before the downscale and
+    the request, so it is on screen in the same frame the file arrives.
+
+    Local, not in the store: it describes one attempt, and a refresh mid-read
+    should land on the buttons rather than on a card for an upload that is no
+    longer happening.
+  */
+  const [card, setCard] = useState<Card | null>(null);
+  const timers = useRef<number[]>([]);
+  const previewUrl = useRef<string | null>(null);
+
+  const after = (ms: number, fn: () => void) => {
+    timers.current.push(window.setTimeout(fn, ms));
+  };
+
+  // A pending hold that fires after this component is gone would set state on
+  // nothing; an object URL that is never revoked holds the whole photo in
+  // memory for the life of the tab.
+  useEffect(
+    () => () => {
+      timers.current.forEach(window.clearTimeout);
+      timers.current = [];
+      if (previewUrl.current) URL.revokeObjectURL(previewUrl.current);
+    },
+    []
+  );
   // Two inputs, because one cannot be both.
   //
   // `capture` is not a hint on iOS — it *replaces* the picker with the camera,
@@ -102,9 +152,7 @@ export default function BillUpload({ onConfirm, onDiscard }: BillUploadProps) {
       const json = await res.json().catch(() => ({}));
 
       if (!res.ok || !json?.ok || !json.extraction?.months?.length) {
-        setReason(typeof json?.reason === 'string' ? json.reason : UI.billFailed);
-        setFailed(true);
-        setPhase('none');
+        fail(typeof json?.reason === 'string' ? json.reason : UI.billFailed);
         return;
       }
 
@@ -114,17 +162,31 @@ export default function BillUpload({ onConfirm, onDiscard }: BillUploadProps) {
       // thirteenth month whatever the response says.
       const clean = sanitiseExtraction(json.extraction);
       if (!clean.months.length) {
-        setReason(UI.billFailed);
-        setFailed(true);
-        setPhase('none');
+        fail(UI.billFailed);
         return;
       }
-      setDraft(clean.months, clean.ratePerKwh);
+
+      // Say what was found before showing it. The table on its own does not
+      // tell anybody the upload worked — it just appears.
+      setCard((c) => (c ? { ...c, kind: 'found', months: clean.months.length } : c));
+      after(FOUND_HOLD_MS, () => {
+        setCard(null);
+        setDraft(clean.months, clean.ratePerKwh);
+      });
     } catch {
-      setReason(UI.billFailed);
+      fail(UI.billFailed);
+    }
+  };
+
+  /** Show the failure long enough to read, then hand over to manual entry. */
+  const fail = (why: string) => {
+    setReason(why);
+    setCard((c) => (c ? { ...c, kind: 'failed' } : c));
+    after(FAILED_HOLD_MS, () => {
+      setCard(null);
       setFailed(true);
       setPhase('none');
-    }
+    });
   };
 
   const editKwh = (index: number, raw: string) => {
@@ -144,9 +206,23 @@ export default function BillUpload({ onConfirm, onDiscard }: BillUploadProps) {
   /** Both inputs land here — the file is a file however it was chosen. */
   const onPick = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) void upload(file);
     // Cleared so choosing the same file twice still fires.
     e.target.value = '';
+    if (!file) return;
+
+    // Synchronous, before anything is awaited: this is what makes the card
+    // appear in the same frame the file was chosen rather than after a
+    // multi-megabyte downscale.
+    timers.current.forEach(window.clearTimeout);
+    timers.current = [];
+    if (previewUrl.current) URL.revokeObjectURL(previewUrl.current);
+
+    const isPdf = file.type === 'application/pdf';
+    previewUrl.current = isPdf ? null : URL.createObjectURL(file);
+    setFailed(false);
+    setCard({ kind: 'reading', preview: previewUrl.current, isPdf, name: file.name });
+
+    void upload(file);
   };
 
   const { annual, scaled } = annualFromMonths(months);
@@ -195,7 +271,79 @@ export default function BillUpload({ onConfirm, onDiscard }: BillUploadProps) {
         </div>
       )}
 
-      {phase !== 'review' && phase !== 'confirmed' && (
+      {/*
+        The attempt, while it is happening. Replaces the two buttons entirely —
+        leaving them on screen, greyed, was part of what made it unclear whether
+        the tap had done anything.
+      */}
+      {card && (
+        <div
+          data-testid="bill-card"
+          data-card-state={card.kind}
+          aria-live="polite"
+          className="flex items-center gap-3 rounded-xl border border-neutral-200 p-3"
+        >
+          <div className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-neutral-100">
+            {card.preview ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={card.preview}
+                alt={UI.billThumbAlt}
+                data-testid="bill-thumb"
+                className="h-full w-full object-cover"
+              />
+            ) : (
+              <span
+                data-testid="bill-pdf-icon"
+                className="text-[13px] font-semibold text-neutral-500"
+              >
+                {UI.billPdfLabel}
+              </span>
+            )}
+          </div>
+
+          <div className="min-w-0 flex-1">
+            {card.kind === 'reading' && (
+              <>
+                <p className="text-[17px] font-semibold text-neutral-900">{UI.billReading}</p>
+                <div
+                  role="progressbar"
+                  aria-label={UI.billReadingProgressLabel}
+                  className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-neutral-200"
+                >
+                  <div className="gm-indeterminate-bar h-full w-1/3 rounded-full bg-neutral-900" />
+                </div>
+                <p className="mt-1.5 text-[15px] text-neutral-500">{UI.billReadingNote}</p>
+              </>
+            )}
+
+            {card.kind === 'found' && (
+              <p data-testid="bill-found" className="text-[17px] font-semibold text-neutral-900">
+                {card.months === 1 ? (
+                  <>
+                    {card.months} {UI.billFoundMonth} {UI.billFoundScaled}
+                  </>
+                ) : (
+                  <>
+                    {UI.billGotIt} {card.months} {UI.billFoundMonths}
+                  </>
+                )}
+              </p>
+            )}
+
+            {card.kind === 'failed' && (
+              <p
+                data-testid="bill-card-failed"
+                className="text-[17px] font-semibold text-neutral-900"
+              >
+                {UI.billFailedShort}
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+
+      {!card && phase !== 'review' && phase !== 'confirmed' && (
         <div className="space-y-2">
           <button
             type="button"

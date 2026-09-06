@@ -3,7 +3,7 @@
 import { useEffect } from 'react';
 import { useQuoteStore } from '@/store/quoteStore';
 import { dollarsPerKwhFromCents } from '@/lib/rate';
-import { annualTargetKwh, applyAdjust, panelsForTarget } from '@/lib/sizing';
+import { applyAdjust, panelsForTarget, targetAnnualKwh } from '@/lib/sizing';
 
 /**
  * Size the array, once.
@@ -34,12 +34,13 @@ export function useSizing() {
   useEffect(() => {
     if (step < 3) return;
 
-    // A year read off their own bill beats a monthly dollar figure divided by
-    // an assumed rate, so it wins when we have one.
-    const target =
-      billAnnualKwh && billAnnualKwh > 0
-        ? billAnnualKwh * (percentage / 100)
-        : annualTargetKwh(avgValue, dollarsPerKwhFromCents(rateCents), percentage);
+    // Shared with the rotation shortfall on the map, so the two cannot drift.
+    const target = targetAnnualKwh({
+      billAnnualKwh,
+      monthlyBillUsd: avgValue,
+      ratePerKwh: dollarsPerKwhFromCents(rateCents),
+      offsetPercent: percentage,
+    });
     const sized = panelsForTarget(curve, target, sizedAzimuth, tier);
     if (sized <= 0 || sized === sizedPanels) return;
 

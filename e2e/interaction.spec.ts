@@ -1316,6 +1316,99 @@ test.describe('design step gestures', () => {
     }
   });
 
+  test('turning the array offers the panels it costs, and Face south undoes it', async ({
+    page,
+  }) => {
+    // Rotation deliberately never changes the count (see useSizing). What it
+    // does change is production, and a customer who turned their array east was
+    // quietly under the offset they asked for with nothing saying so.
+    await openDesignStep(page);
+    await waitForArray(page, 15_000);
+    await bringMapIntoView(page);
+    await page.waitForFunction(() => window.__gmTest.renderedHandles() > 0, null, {
+      timeout: 10_000,
+    });
+    await page.evaluate(() => window.__gmTest.setZoom(18.8));
+    await waitForStableHandle(page);
+
+    // Facing south, sized for south: nothing to say, and nowhere to go back to.
+    await expect(page.getByTestId('hud-shortfall')).toHaveCount(0);
+    await expect(page.getByTestId('face-south')).toHaveCount(0);
+
+    expect(
+      await page.evaluate(() => window.__gmTest.state().totalPanels),
+      'nothing was sized to begin with'
+    ).toBeGreaterThan(0);
+
+    const client = await page.context().newCDPSession(page);
+    await swingCompassTo(page, client, 90);
+    await waitForStableHandle(page);
+
+    const turned = await page.evaluate(() => window.__gmTest.state().azimuth);
+    const norm = (a: number) => ((a % 360) + 360) % 360;
+    expect(
+      Math.abs(norm(turned) - 90),
+      'the array did not actually turn, so the rest proves nothing'
+    ).toBeLessThan(25);
+
+    // The cost, named.
+    const line = page.getByTestId('hud-shortfall');
+    await expect(line).toBeVisible();
+
+    // The count and the offer read from one frame, immediately before the tap.
+    // Sizing settles against the site's real curve after the step opens, so a
+    // count captured before the rotation is a different number by the time the
+    // button exists — and the assertion would be measuring that drift rather
+    // than what the button did.
+    const { before, asked } = await page.evaluate(() => {
+      const text = document.querySelector('[data-testid="hud-shortfall-panels"]')?.textContent;
+      return {
+        before: window.__gmTest.state().totalPanels,
+        asked: Number(text?.match(/\d+/)?.[0] ?? 0),
+      };
+    });
+    expect(asked, 'the line did not name a number of panels').toBeGreaterThan(0);
+    await expect(page.getByTestId('hud-add-panels')).toContainText(String(asked));
+
+    // Taking the offer adds exactly that many, and settles the matter.
+    await page.getByTestId('hud-add-panels').click();
+    await expect
+      .poll(() => page.evaluate(() => window.__gmTest.state().totalPanels))
+      .toBe(before + asked);
+    await expect(line).toHaveCount(0);
+
+    // Face south is beside the grip, because that is where the thumb already
+    // is, and it only exists while there is something to undo.
+    const faceSouth = page.getByTestId('face-south');
+    await expect(faceSouth).toBeVisible();
+    const button = (await faceSouth.boundingBox())!;
+    expect(button.width, 'the target is smaller than a thumb').toBeGreaterThanOrEqual(48);
+    expect(button.height).toBeGreaterThanOrEqual(48);
+
+    const grip = await page.evaluate(() => {
+      const t = window.__gmTest;
+      const r = t.canvasRect();
+      const h = t.handleLngLat();
+      if (!h) return null;
+      const p = t.project(h);
+      return { x: r.left + p[0], y: r.top + p[1] };
+    });
+    expect(grip, 'the grip is not on screen').not.toBeNull();
+    const gap = Math.hypot(
+      button.x + button.width / 2 - grip!.x,
+      button.y + button.height / 2 - grip!.y
+    );
+    expect(gap, `the button is ${Math.round(gap)}px from the grip it belongs to`).toBeLessThan(120);
+
+    await faceSouth.click();
+
+    // Eased, not snapped, and it lands exactly on south rather than near it.
+    await expect
+      .poll(() => page.evaluate(() => Math.round(window.__gmTest.state().azimuth)))
+      .toBe(180);
+    await expect(faceSouth).toHaveCount(0);
+  });
+
   test('the real Continue button stores a screenshot containing the design', async ({
     page,
   }) => {

@@ -5,6 +5,7 @@ import { persist, createJSONStorage } from 'zustand/middleware';
 import * as turf from '@turf/turf';
 import { v4 as uuid } from 'uuid';
 import { TRENCH, type SlopeAnswer } from '@/config/pricing';
+import { RESULTS } from '@/config/results';
 import type { PanelTier } from '@/config/pricing';
 import type { SlopeTier } from '@/lib/slope';
 import { TX_FALLBACK_CURVE, type ProductionCurve } from '@/lib/production';
@@ -158,6 +159,8 @@ interface QuoteState {
   rocky: boolean;
   batteryInterest: boolean;
   siteAnswered: boolean;
+  /** The rate rise the customer chose on the results chart. */
+  utilityInflationPct: number;
   sizeNotice: SizeNotice | null;
   /**
    * The count sizing produced, before any manual adjustment. Kept so the ±
@@ -244,6 +247,7 @@ interface QuoteActions {
   setSlopeAnswer: (answer: SlopeAnswer) => void;
   setRocky: (rocky: boolean) => void;
   setBatteryInterest: (interested: boolean) => void;
+  setUtilityInflationPct: (pct: number) => void;
   /** Apply the survey's suggestion, only while the customer has not answered. */
   suggestSiteAnswers: (suggestion: { slopeAnswer: SlopeAnswer; rocky: boolean }) => void;
   setSizeNotice: (notice: SizeNotice | null) => void;
@@ -307,6 +311,7 @@ const initialState: QuoteState = {
   rocky: false,
   batteryInterest: false,
   siteAnswered: false,
+  utilityInflationPct: RESULTS.utilityInflationPct,
   sizeNotice: null,
   sizedPanels: 0,
   sizedAzimuth: 180,
@@ -448,6 +453,9 @@ export const useQuoteStore = create<QuoteStore>()(
       setSlopeAnswer: (slopeAnswer) => set({ slopeAnswer, siteAnswered: true }),
       setRocky: (rocky) => set({ rocky, siteAnswered: true }),
       setBatteryInterest: (batteryInterest) => set({ batteryInterest, siteAnswered: true }),
+      // Not a site answer: moving the chart's slider is the customer arguing
+      // with our forecast, not telling us about their land.
+      setUtilityInflationPct: (utilityInflationPct) => set({ utilityInflationPct }),
       suggestSiteAnswers: ({ slopeAnswer, rocky }) => {
         if (get().siteAnswered) return;
         set({ slopeAnswer, rocky });
@@ -518,6 +526,7 @@ export const useQuoteStore = create<QuoteStore>()(
         rocky: state.rocky,
         batteryInterest: state.batteryInterest,
         siteAnswered: state.siteAnswered,
+        utilityInflationPct: state.utilityInflationPct,
         sizedPanels: state.sizedPanels,
         sizedAzimuth: state.sizedAzimuth,
         leadFiled: state.leadFiled,

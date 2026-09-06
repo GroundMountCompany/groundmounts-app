@@ -17,6 +17,8 @@ import EmailTemplate from "@/components/common/EmailTemplate";
 import type { ReactElement } from "react";
 import { brandFor } from "@/config/brands";
 import type { SlopeAnswer } from "@/config/pricing";
+import { RESULTS } from "@/config/results";
+import { projectResults, type ResultsInput } from "@/lib/results";
 import {
   storeGet,
   storeSet,
@@ -24,6 +26,29 @@ import {
   releaseLease,
   StoreUnavailable,
 } from "@/lib/server/redis";
+
+/**
+ * The twenty-five year comparison, from server figures only.
+ *
+ * The screen builds the same thing from the store; this rebuilds it from the
+ * price the server actually computed, so the email cannot claim a payback for
+ * a number nobody was quoted.
+ */
+function resultsFor(
+  lead: LeadPayload,
+  estimate: number,
+  inflationPct: number
+): ResultsInput | undefined {
+  const bill = lead.quote?.avgBill;
+  if (!bill || bill <= 0 || estimate <= 0) return undefined;
+  return {
+    monthlyBillUsd: bill,
+    systemPriceUsd: estimate,
+    offsetFraction: (lead.quote?.percentage ?? 100) / 100,
+    inflationPct,
+    startYear: new Date().getFullYear(),
+  };
+}
 
 /** How the customer's slope answer reads in Airtable's single-select. */
 const SLOPE_ANSWER_LABEL: Record<SlopeAnswer, string> = {
@@ -106,6 +131,8 @@ interface SubmitRecord {
    * missing its picture — the upload happens once, before either send.
    */
   mapScreenshotUrl?: string;
+  /** What the twenty-five year table said, so a resend says the same. */
+  results?: ResultsInput;
   estimate: number;
 }
 
@@ -155,6 +182,7 @@ interface LeadPayload {
     azimuth?: number;
     percentage?: number;
     avgBill?: number;
+    utilityInflationPct?: number;
     highBill?: number;
     billMonths?: Array<{ month: string; kwh: number; cost: number | null }> | null;
     billAnnualKwh?: number | null;
@@ -269,6 +297,12 @@ function validateContext(quote: unknown): LeadPayload['quote'] {
     azimuth: bounded(raw.azimuth, 0, 360),
     percentage: bounded(raw.percentage, 0, 200),
     avgBill: bounded(raw.avgBill, 0, 100_000),
+    // Bounded to the slider's own range: this figure goes into the customer's
+    // email and onto the record, so a payload claiming 400% a year must not
+    // reach either.
+    utilityInflationPct:
+      bounded(raw.utilityInflationPct, RESULTS.inflationMinPct, RESULTS.inflationMaxPct) ??
+      RESULTS.utilityInflationPct,
     highBill: bounded(raw.highBill, 0, 100_000),
     billMonths: billMonths.length ? billMonths : null,
     billAnnualKwh: bounded(raw.billAnnualKwh, 0, 1_000_000) ?? null,
@@ -372,7 +406,8 @@ async function sendQuoteEmail(
     annualProductionKwh: number;
     quote: { lineItems: Array<{ key: string; label: string; detail?: string; amount: number }>; estimate: number; low: number; high: number };
   },
-  mapScreenshotUrl?: string
+  mapScreenshotUrl?: string,
+  results?: ResultsInput
 ): Promise<boolean> {
   try {
     const resend = getResendOrThrow();
@@ -399,7 +434,9 @@ async function sendQuoteEmail(
       calendlyUrl: brand.calendlyUrl,
       brandName: brand.name,
       brandColor: brand.primaryColor,
+      brandLogoUrl: brand.logoUrl,
       mapScreenshotUrl,
+      results,
     }) as ReactElement;
 
     const { error } = await resend.emails.send(
@@ -835,7 +872,8 @@ export async function POST(req: NextRequest) {
             high: stored.priceHigh,
           },
         },
-        stored.mapScreenshotUrl
+        stored.mapScreenshotUrl,
+        stored.results
       );
       console.log('[LEAD_EMAIL_RESEND]', lead.id, emailSent ? 'sent' : 'failed');
 
@@ -1003,6 +1041,17 @@ export async function POST(req: NextRequest) {
     // Parse address components
     const addressParts = lead.address ? parseAddress(lead.address) : {};
 
+    /*
+      The twenty-five year comparison, from the price the server computed.
+
+      Built here rather than taken from the payload so the record and the
+      email cannot claim a payback for a number nobody was quoted. The
+      inflation figure is the customer's, bounded to the slider's range.
+    */
+    const inflationPct = lead.quote?.utilityInflationPct ?? RESULTS.utilityInflationPct;
+    const results = resultsFor(lead, priced.quote.estimate, inflationPct);
+    const breakEvenYear = results ? projectResults(results).breakEvenYear ?? undefined : undefined;
+
     // Build Airtable fields
     // Source options in Airtable: groundmounts.com, texasgroundmountsolar.com, backyardsolartexas.com, groundmountsolar.guide
     // Status options in Airtable: New, Contacted, Qualified, etc.
@@ -1046,6 +1095,10 @@ export async function POST(req: NextRequest) {
       'Slope Answer': SLOPE_ANSWER_LABEL[inputs.slopeAnswer],
       Rocky: inputs.rocky,
       'Battery Interest': inputs.batteryInterest,
+      // What the customer was shown after the reveal, so a call can start from
+      // the same arithmetic they were looking at.
+      'Utility Inflation Pct': inflationPct,
+      'Break Even Year': breakEvenYear,
       'Soil Class': conditions.soilClass ?? undefined,
       'Est Annual Production kWh': priced.annualProductionKwh,
       // Whether that production figure came from the site's own PVWatts curve
@@ -1173,11 +1226,13 @@ export async function POST(req: NextRequest) {
           lead.brand,
           inputs,
           priced,
-          mapScreenshotUrl
+          mapScreenshotUrl,
+          results
         )
       : false;
 
     record.emailSent = emailSent;
+    record.results = results;
     // Kept on the record so a resend reproduces the same email, picture and all.
     record.mapScreenshotUrl = mapScreenshotUrl;
 

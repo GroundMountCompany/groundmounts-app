@@ -24,6 +24,8 @@ export interface LeadQuote {
   soilClass: string | null;
   percentage: number;
   avgBill: number;
+  /** The rate rise the customer chose on the results chart. */
+  utilityInflationPct: number;
   highBill: number;
   /** Present only when they uploaded a bill and confirmed what we read. */
   billMonths: Array<{ month: string; kwh: number; cost: number | null }> | null;
@@ -114,6 +116,7 @@ export function buildLeadPayload(
       soilClass: s.soilClass,
       percentage: s.percentage,
       avgBill: s.avgValue,
+      utilityInflationPct: s.utilityInflationPct,
       highBill: s.highestValue,
       billMonths: s.billMonths,
       billAnnualKwh: s.billAnnualKwh,

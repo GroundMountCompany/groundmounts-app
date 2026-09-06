@@ -1,17 +1,18 @@
-/*
-  No logo field.
-
-  It pointed at /logos/groundmount-company.png, which is not in the repository,
-  so every quote email opened with a broken image where the sender's name
-  should be. The email now leads with a wordmark in the brand colour: it cannot
-  404, and an inbox that blocks remote images still shows it. Adding an image
-  back means adding the asset first.
-*/
 export type BrandConfig = {
   // Identity
   name: string;
   tagline: string;
   domain: string;
+  /**
+   * The header image on the emails, as an absolute URL.
+   *
+   * Absolute because an inbox has no origin to resolve a path against. It
+   * previously pointed at /logos/groundmount-company.png — a path with no file
+   * behind it — so every quote opened with a broken image icon. The brand name
+   * is the alt text, so an inbox that blocks remote images still shows who the
+   * mail is from.
+   */
+  logoUrl: string;
 
   // Colors
   primaryColor: string;
@@ -51,6 +52,7 @@ export const brands: Record<string, BrandConfig> = {
     name: "The Ground Mount Company",
     tagline: "Your Ground Mount Guys",
     domain: "groundmounts.com",
+    logoUrl: "https://www.groundmounts.com/images/logo-email.png",
     primaryColor: "#1e3a5f",
     accentColor: "#dc2626",
     phone: "(469) 809-7099",
@@ -80,6 +82,7 @@ export const brands: Record<string, BrandConfig> = {
     tagline: "Ground mount solar design",
     // The one verified sending domain, worn under a neutral display name.
     domain: "groundmounts.com",
+    logoUrl: "https://www.groundmounts.com/images/logo-email.png",
     primaryColor: "#1e3a5f",
     accentColor: "#16a34a",
     phone: "(469) 809-7099",

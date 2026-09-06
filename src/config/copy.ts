@@ -291,6 +291,39 @@ export const UI = {
   included: 'Included',
   priceRangeLabel: 'Your range',
   lineItemsTitle: 'What that covers',
+
+  /*
+    Step 6, after the number is revealed.
+
+    Plain and flat. The chart is the argument; the words around it should not
+    try to help it along.
+  */
+  resultsTitle: 'What it costs to do nothing',
+  resultsIntro:
+    'The utility raises its rates. You can move the number below to whatever you think is right.',
+  resultsChartLabel: '25 years of monthly cost',
+  resultsWithout: 'Without solar',
+  resultsWith: 'With this system',
+  resultsCrossover: 'They cross here',
+  resultsInflationLabel: 'Utility rate rise each year',
+  resultsPaysForItself: 'Pays for itself in year',
+  resultsNoPayback: "At this rate it doesn't pay for itself in 25 years.",
+  resultsUtilityTotal: '25 years of utility bills',
+  resultsSystemTotal: 'This system',
+  resultsYear25Prefix: 'In',
+  resultsYear25Middle: 'at this rate your bill is',
+  resultsYear25With: 'a month. With this system:',
+  resultsYear25Suffix: 'a month.',
+  resultsPerMonth: '/month',
+  resultsAssumptionsTitle: 'Our assumptions',
+  resultsAssumptionBill: 'Your monthly bill, as you entered it',
+  resultsAssumptionOffset: 'Share of your power this array covers',
+  resultsAssumptionInflation: 'Utility rate rise each year',
+  resultsAssumptionDegradation: 'Panel output lost each year',
+  resultsAssumptionHorizon: 'Years compared',
+  resultsAssumptionPrice: 'System price, spread evenly over those years',
+  resultsAssumptionFinancing: 'Financing',
+  resultsAssumptionNoFinancing: 'None. This is arithmetic, not a loan.',
   trenchNote: 'We route the trench around anything in the way once we are on site.',
   slopeChecking: 'checking',
   soilLabel: 'Soil',
@@ -331,6 +364,12 @@ export const UI = {
  * one exception the brief carves out.
  */
 export const BANNED_WORDS = [
+  // Nothing in this funnel may imply a credit or a rebate. The owner does not
+  // control whether a given customer qualifies for one, and a number quoted
+  // net of something they turn out not to get is a number that was wrong.
+  'tax credit',
+  'itc',
+  '30%',
   'leverage',
   'comprehensive',
   'solutions',

@@ -1,6 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { projectResults } from '@/lib/results';
+import { RESULTS } from '@/config/results';
 import type { ReactElement } from 'react';
 import { __resetRateLimits } from '@/lib/guard';
 import { priceFromInputs, parseQuoteInputs } from '@/lib/quoteInputs';
@@ -659,6 +661,66 @@ describe('submitting twice', () => {
   });
 });
 
+describe('the twenty-five year comparison', () => {
+  it('reaches the email as a table, and the record as two figures', async () => {
+    await POST(post(validLead()));
+
+    const expected = priceFromInputs(parseQuoteInputs(INPUTS), SITE_CURVE);
+    const model = projectResults({
+      monthlyBillUsd: validLead().quote!.avgBill as number,
+      systemPriceUsd: expected.quote.estimate,
+      offsetFraction: (validLead().quote!.percentage as number) / 100,
+      inflationPct: RESULTS.utilityInflationPct,
+      startYear: new Date().getFullYear(),
+    });
+
+    const html = quoteHtml();
+    expect(html).toContain('What it costs to do nothing');
+    expect(html, 'the utility total is missing').toContain(
+      model.totalWithout.toLocaleString('en-US')
+    );
+    expect(html, 'the year-25 line is missing').toContain(String(model.final.calendarYear));
+    // The assumption the whole table rests on is stated in it.
+    expect(html).toContain(`${RESULTS.utilityInflationPct}% a year`);
+    // Static, not a chart: an inbox cannot run one and a rendered image is one
+    // more thing that arrives broken.
+    expect(html).not.toContain('<svg');
+
+    expect(written[0]['Break Even Year']).toBe(model.breakEvenYear);
+    expect(written[0]['Utility Inflation Pct']).toBe(RESULTS.utilityInflationPct);
+  });
+
+  it('uses the rate the customer chose, bounded to the slider', async () => {
+    failEmail = false;
+    await POST(
+      post(validLead({ utilityInflationPct: 7 }))
+    );
+
+    expect(written[0]['Utility Inflation Pct']).toBe(7);
+    expect(quoteHtml()).toContain('7% a year');
+  });
+
+  it('refuses a rate outside the slider rather than emailing it', async () => {
+    // The figure goes into the customer's inbox and onto the record, so a
+    // payload claiming 400% a year must reach neither.
+    failEmail = false;
+    await POST(
+      post(validLead({ utilityInflationPct: 400 }))
+    );
+
+    expect(written[0]['Utility Inflation Pct']).toBe(RESULTS.utilityInflationPct);
+    expect(quoteHtml()).not.toContain('400%');
+  });
+
+  it('says nothing at all when there is no bill to compare against', async () => {
+    failEmail = false;
+    await POST(post(validLead({ avgBill: 0 })));
+
+    expect(quoteHtml()).not.toContain('What it costs to do nothing');
+    expect(written[0]['Break Even Year']).toBeUndefined();
+  });
+});
+
 describe('the brand on the email', () => {
   it('is the build default when nothing asks for another', async () => {
     await POST(post(validLead()));
@@ -668,24 +730,27 @@ describe('the brand on the email', () => {
     expect(quote.subject).toContain('The Ground Mount Company');
   });
 
-  it('leads with a wordmark, not a logo that 404s', async () => {
-    // The header pointed at /logos/groundmount-company.png, which is not in
-    // the repository, so every quote email opened with a broken image icon
-    // where the sender's name should be.
+  it('leads with a logo an inbox can actually fetch', async () => {
+    // The header pointed at /logos/groundmount-company.png — a relative path
+    // with no file behind it — so every quote email opened with a broken image
+    // icon where the sender's name should be. An inbox has no origin to
+    // resolve a path against, so this has to be absolute.
     await POST(post({ ...validLead(), mapScreenshot: undefined }));
     const html = quoteHtml();
 
-    // Above the heading, where the logo used to be — not merely somewhere in
-    // the page, which the footer signature would satisfy on its own.
-    expect(html.indexOf('The Ground Mount Company')).toBeGreaterThanOrEqual(0);
-    expect(
-      html.indexOf('The Ground Mount Company'),
-      'the wordmark is not at the top of the email'
-    ).toBeLessThan(html.indexOf('Your ground mount estimate'));
     expect(html, 'the dead logo path is back').not.toContain('/logos/');
-    // The only image in the email is the customer's own map, and this lead
-    // has none — so there should be no <img> at all.
-    expect(html, 'an image crept back into the header').not.toContain('<img');
+    expect(html).toContain('https://www.groundmounts.com/images/logo-email.png');
+    expect(html, 'the logo is a relative path again').not.toMatch(/src="\/[^/]/);
+
+    // Above the heading, where a header belongs.
+    expect(
+      html.indexOf('logo-email.png'),
+      'the logo is not at the top of the email'
+    ).toBeLessThan(html.indexOf('Your ground mount estimate'));
+
+    // And the brand name is the alt text, so an inbox that blocks remote
+    // images still says who the mail is from.
+    expect(html).toMatch(/<img[^>]*alt="The Ground Mount Company"/);
   });
 
   it('honours an explicit brand', async () => {

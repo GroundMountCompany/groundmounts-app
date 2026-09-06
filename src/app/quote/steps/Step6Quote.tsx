@@ -5,6 +5,19 @@ import { useSearchParams } from 'next/navigation';
 import EducationCard from '@/components/shell/EducationCard';
 import { STEPS, UI } from '@/config/copy';
 import { useQuoteStore, clearPersistedQuote } from '@/store/quoteStore';
+import dynamic from 'next/dynamic';
+
+/*
+  Loaded when it is needed, not before.
+
+  Recharts is 110 kB, and this section only exists after the customer has
+  filed a lead — so putting it in the first-load bundle taxes every visitor on
+  LTE for a screen most of them have not reached yet.
+*/
+const ResultsSection = dynamic(() => import('@/components/results/ResultsSection'), {
+  ssr: false,
+  loading: () => <div data-testid="results-loading" className="h-[220px]" />,
+});
 import { buildLeadPayload } from '@/lib/leadPayload';
 import { enqueueOrSend } from '@/lib/leadQueue';
 import { useBrand } from '@/contexts/BrandContext';
@@ -34,6 +47,10 @@ export default function Step6Quote() {
   const panelTier = useQuoteStore((s) => s.panelTier);
   const azimuth = useQuoteStore((s) => s.azimuth);
   const trenchFeet = useQuoteStore((s) => s.trenchFeet);
+  // What the results comparison is built from: the bill they typed on step 2
+  // and the share of it they asked the array to cover.
+  const avgValue = useQuoteStore((s) => s.avgValue);
+  const percentage = useQuoteStore((s) => s.percentage);
 
   // Contact details live in the store so a reload keeps them, and so the email
   // is guaranteed to go to the address that was filed with the lead.
@@ -186,6 +203,21 @@ export default function Step6Quote() {
             ))}
           </dl>
         </div>
+
+        {/* The number above is only frightening on its own. This is what the
+            utility takes over the same twenty-five years, which most people
+            have never added up. */}
+        <ResultsSection
+          monthlyBillUsd={avgValue}
+          // The midpoint of the range, which is the estimate the server filed:
+          // low and high are that figure spread either side by a fixed
+          // percentage, so the midpoint is it exactly.
+          systemPriceUsd={Math.round(
+            ((filed?.low ?? quote.low) + (filed?.high ?? quote.high)) / 2
+          )}
+          offsetFraction={percentage / 100}
+          startYear={new Date().getFullYear()}
+        />
 
         <h3 className="text-[22px] font-semibold text-neutral-900">{UI.successTitle}</h3>
         <p className="text-[17px] text-neutral-700">{UI.successBody}</p>

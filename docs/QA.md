@@ -141,6 +141,15 @@ This is the step the whole tool exists for. Take your time.
       call link opens.
 - [ ] Exactly **one** disclaimer under the range, on the screen and in the
       email. Not two saying the same thing.
+- [ ] Below the line items: the 25-year chart, two lines clearly labelled, and
+      a marker where they cross. Readable at arm's length.
+- [ ] Drag the inflation slider. The chart and the three figures move with it,
+      with no lag you would call a lag.
+- [ ] The three figures and the "In 2050..." line all make sense read aloud.
+- [ ] Open **Our assumptions**. Every number the chart used is in there,
+      including your own bill and the system price.
+- [ ] Nothing anywhere on the screen or in the email mentions a credit, a
+      rebate, or a percentage off.
 - [ ] Press back. It steps back through the funnel rather than leaving the page
       or reloading the whole thing.
 - [ ] **Edge-swipe back** on iOS (swipe from the left edge). Same thing: a step

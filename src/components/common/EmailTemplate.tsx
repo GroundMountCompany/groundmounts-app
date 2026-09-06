@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { projectResults, type ResultsInput } from '@/lib/results';
 
 export interface EmailLineItem {
   key: string;
@@ -23,6 +24,15 @@ export interface EmailTemplateProps {
   /** Who the quote is from, as the customer knows them. */
   brandName: string;
   brandColor: string;
+  /** Absolute URL of the header logo. Falls back to the name if it cannot load. */
+  brandLogoUrl: string;
+  /**
+   * What twenty-five years of doing nothing costs, if we know enough to say.
+   *
+   * A static table, not the chart: an inbox cannot run Recharts, and a chart
+   * rendered to an image is one more thing that can arrive broken.
+   */
+  results?: ResultsInput;
   /** The design they drew, as a publicly reachable image. */
   mapScreenshotUrl?: string;
 }
@@ -60,8 +70,11 @@ export default function EmailTemplate({
   calendlyUrl,
   brandName,
   brandColor,
+  brandLogoUrl,
   mapScreenshotUrl,
+  results,
 }: EmailTemplateProps) {
+  const projection = results ? projectResults(results) : null;
   const cell: React.CSSProperties = {
     padding: '10px 0',
     borderBottom: '1px solid #e5e5e5',
@@ -78,25 +91,27 @@ export default function EmailTemplate({
       }}
     >
       {/*
-        A wordmark, not an image.
+        The logo, with the brand name as its alt text.
 
-        The logo was pointed at /logos/groundmount-company.png, which does not
-        exist in the repository — so every quote email opened with a broken
-        image icon where the sender's name should be. A brand name in the brand
-        colour cannot 404, cannot be blocked by an inbox that refuses remote
-        images, and needs no asset pipeline to stay working.
+        Absolute, because an inbox has no origin to resolve a path against —
+        the old relative path is what produced a broken image icon at the top
+        of every quote. An inbox that blocks remote images shows the alt text,
+        which is the wordmark, so the header still says who this is from.
       */}
-      <p
+      {/* eslint-disable-next-line @next/next/no-img-element -- an email client
+          renders plain HTML; next/image would emit markup no inbox can use. */}
+      <img
+        src={brandLogoUrl}
+        alt={brandName}
         style={{
-          margin: '0 0 12px',
+          display: 'block',
+          maxHeight: '44px',
+          marginBottom: '12px',
+          color: brandColor,
           fontSize: '18px',
           fontWeight: 700,
-          letterSpacing: '0.01em',
-          color: brandColor,
         }}
-      >
-        {brandName}
-      </p>
+      />
       <h1 style={{ fontSize: '22px', marginBottom: '4px', color: brandColor }}>
         Your ground mount estimate
       </h1>
@@ -194,6 +209,49 @@ export default function EmailTemplate({
           </tr>
         </tbody>
       </table>
+
+      {projection ? (
+        <>
+          <h2 style={{ fontSize: '17px', marginTop: '24px', marginBottom: '8px' }}>
+            What it costs to do nothing
+          </h2>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <tbody>
+              <tr>
+                <td style={{ ...cell, color: '#666' }}>Pays for itself in year</td>
+                <td style={{ ...cell, textAlign: 'right', fontWeight: 600 }}>
+                  {projection.breakEvenYear === null
+                    ? "It doesn't, in 25 years"
+                    : projection.rows[projection.breakEvenYear - 1].calendarYear}
+                </td>
+              </tr>
+              <tr>
+                <td style={{ ...cell, color: '#666' }}>25 years of utility bills</td>
+                <td style={{ ...cell, textAlign: 'right', fontWeight: 600 }}>
+                  {money(projection.totalWithout)}
+                </td>
+              </tr>
+              <tr>
+                <td style={{ ...cell, color: '#666' }}>This system</td>
+                <td style={{ ...cell, textAlign: 'right', fontWeight: 600 }}>
+                  {money(projection.systemPriceUsd)}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+          <p style={{ marginTop: '10px', fontSize: '15px', color: '#444' }}>
+            In {projection.final.calendarYear} at this rate your bill is{' '}
+            <strong>{money(projection.final.withoutMonthly)}</strong>/month. With this system:{' '}
+            <strong>{money(projection.final.withMonthly)}</strong>/month.
+          </p>
+          <p style={{ marginTop: '6px', fontSize: '13px', color: '#999' }}>
+            Assumes the utility raises its rates {projection.inflationPct}% a year and the panels
+            lose {projection.assumptions.degradationPctPerYear}% of their output a year, over{' '}
+            {projection.assumptions.horizonYears} years. No financing: the system price is spread
+            evenly across those years.
+          </p>
+        </>
+      ) : null}
 
       <div style={{ marginTop: '24px' }}>
         <a

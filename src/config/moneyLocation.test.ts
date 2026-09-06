@@ -107,7 +107,7 @@ function costValues(): Map<number, string> {
  * people work around rather than fix.
  */
 const NON_MONEY_UNITS =
-  /azimuth|bearing|angle|\bdeg\b|tilt|rotate|zoom|timeout|delay|\bms\b|duration|opacity|rgba?\b|channel|\bpx\b|latitude|longitude/i;
+  /azimuth|bearing|angle|\bdeg\b|tilt|rotate|zoom|timeout|delay|\bms\b|duration|opacity|rgba?\b|channel|\bpx\b|latitude|longitude|inflation|degradation|horizon/i;
 
 /**
  * Strip comments and string bodies so prose and copy are not scanned as code.

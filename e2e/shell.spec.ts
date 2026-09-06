@@ -788,6 +788,32 @@ function contactStepSeed(leadId: string) {
   };
 }
 
+/** Files a lead with a fixed server price, so the results maths is predictable. */
+async function submitWithServerPrice(page: Page, low: number, high: number) {
+  await page.route('**/api/leads', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        ok: true,
+        leadFiled: true,
+        emailSent: true,
+        priceLow: low,
+        priceHigh: high,
+        lineItems: [
+          { key: 'equipment', label: 'Panels and installation', amount: low },
+          { key: 'trench', label: 'Trenching', amount: high - low },
+        ],
+      }),
+    })
+  );
+  await mockGeocoding(page);
+  await page.goto('/quote');
+  await waitForHydration(page);
+  await fillAndSubmit(page);
+  await expect(page.getByTestId('success-screen')).toBeVisible({ timeout: 15_000 });
+}
+
 async function fillAndSubmit(page: Page) {
   await page.locator('#name').fill('Bert Ortiz');
   await page.locator('#email').fill('bert@example.com');
@@ -1136,7 +1162,7 @@ test.describe('real bills, as the deployed extractor read them', () => {
     await gotoStep(page, 1);
 
     await page.getByTestId('bill-file').setInputFiles('e2e/fixtures/bills/bill-photo-blurry.png');
-    await expect(page.getByTestId('bill-failed')).toBeVisible();
+    await expect(page.getByTestId('bill-failed')).toBeVisible({ timeout: BILL_HOLD_TIMEOUT });
     await expect(page.getByTestId('bill-review')).toHaveCount(0);
   });
 });
@@ -1458,6 +1484,148 @@ test('the sheet fills the screen on steps with no map', async ({ page }, testInf
   }
 });
 
+test('the results section answers the number it sits under', async ({ page }) => {
+  // A five-figure quote is only frightening on its own. Most people have never
+  // added up what the utility is going to take over the same twenty-five
+  // years, and this is where they find out.
+  await page.addInitScript(
+    (payload) => window.localStorage.setItem('gmq:v3', JSON.stringify(payload)),
+    contactStepSeed('a1b2c3d4-5e6f-4a7b-8c9d-0e1f2a3b4c5d')
+  );
+
+  await submitWithServerPrice(page, 29_799, 34_981);
+
+  const section = page.getByTestId('results-section');
+  await expect(section).toBeVisible();
+
+  // It sits below the line items, not above them: the price comes first and
+  // this answers it.
+  const order = await page.evaluate(() => {
+    const items = document.querySelector('[data-testid="line-items"]')!;
+    const results = document.querySelector('[data-testid="results-section"]')!;
+    return items.compareDocumentPosition(results) & Node.DOCUMENT_POSITION_FOLLOWING ? 'after' : 'before';
+  });
+  expect(order, 'the results section is above the line items').toBe('after');
+
+  // The chart, with both lines named in words rather than field names.
+  await expect(page.getByTestId('results-chart')).toBeVisible();
+  await expect(section).toContainText('Without solar');
+  await expect(section).toContainText('With this system');
+
+  // Six x-axis labels at most, or a 390px axis turns to mush — and the first
+  // and last years must be among them. Handing Recharts all twenty-five and
+  // letting it thin them itself produces six labels that start at 2029, so the
+  // chart no longer shows where it begins.
+  const axis = await page.evaluate(() => {
+    const chart = document.querySelector('[data-testid="results-chart"]')!;
+    const ticks = Array.from(
+      chart.querySelectorAll('.recharts-xAxis .recharts-cartesian-axis-tick')
+    );
+    return {
+      labels: ticks.map((t) => (t.textContent ?? '').trim()),
+      fontSizes: ticks.map((t) => {
+        const text = t.querySelector('text');
+        return text ? getComputedStyle(text).fontSize : '';
+      }),
+    };
+  });
+
+  expect(axis.labels.length, `the x-axis carries ${axis.labels.length} labels`).toBeLessThanOrEqual(6);
+  expect(axis.labels.length, 'the x-axis has no labels at all').toBeGreaterThan(1);
+
+  const thisYear = new Date().getFullYear();
+  expect(axis.labels[0], 'the chart does not show the year it starts').toBe(String(thisYear));
+  expect(axis.labels[axis.labels.length - 1], 'the chart does not show the year it ends').toBe(
+    String(thisYear + 24)
+  );
+
+  // Readable at arm's length, which is the whole reason for thinning them.
+  for (const size of axis.fontSizes) expect(size).toBe('17px');
+
+  // The three figures, and the year-25 line.
+  await expect(page.getByTestId('result-breakeven')).toBeVisible();
+  await expect(page.getByTestId('result-utility-total')).toBeVisible();
+  await expect(page.getByTestId('result-system-total')).toBeVisible();
+  await expect(page.getByTestId('result-year-25')).toContainText('/month');
+
+  // The system figure is the midpoint of the range they were just shown, not a
+  // fourth number.
+  await expect(page.getByTestId('result-system-total')).toHaveText('$32,390');
+
+  // Nothing about credits or rebates, anywhere on the screen.
+  const body = (await page.locator('body').innerText()).toLowerCase();
+  for (const banned of ['tax credit', 'itc', '30%']) {
+    expect(body, `the screen says "${banned}"`).not.toContain(banned);
+  }
+});
+
+test('the inflation slider moves the whole comparison', async ({ page }) => {
+  await page.addInitScript(
+    (payload) => window.localStorage.setItem('gmq:v3', JSON.stringify(payload)),
+    contactStepSeed('b2c3d4e5-6f7a-4b8c-9d0e-1f2a3b4c5d6e')
+  );
+
+  await submitWithServerPrice(page, 29_799, 34_981);
+
+  const slider = page.getByTestId('inflation-slider');
+  await expect(slider).toBeVisible();
+  await expect(page.getByTestId('inflation-value')).toHaveText('3.5%');
+
+  const before = await page.getByTestId('result-utility-total').textContent();
+
+  // Drive it from the keyboard: a Radix slider thumb responds to arrows, and
+  // this is also the path somebody using a keyboard takes.
+  await slider.getByRole('slider').focus();
+  for (let i = 0; i < 6; i++) await page.keyboard.press('ArrowRight');
+
+  await expect(page.getByTestId('inflation-value')).toHaveText('6.5%');
+  await expect(page.getByTestId('result-utility-total')).not.toHaveText(before ?? '');
+
+  // A steeper rate means the utility takes more, so the total can only rise.
+  const money = (text: string | null) => Number((text ?? '').replace(/[^\d]/g, ''));
+  expect(money(await page.getByTestId('result-utility-total').textContent())).toBeGreaterThan(
+    money(before)
+  );
+
+  // And it is kept, so the figure the customer settled on is the one that
+  // goes with the lead rather than the default. The success screen itself is
+  // not restored by a reload — a filed lead comes back to the locked contact
+  // form — so this reads the store rather than the screen.
+  const stored = await page.evaluate(() => {
+    const raw = window.localStorage.getItem('gmq:v3');
+    return raw ? JSON.parse(raw).state?.utilityInflationPct : null;
+  });
+  expect(stored, 'the chosen rate was not kept').toBe(6.5);
+});
+
+test('the assumptions are on the page, not just in our heads', async ({ page }) => {
+  await page.addInitScript(
+    (payload) => window.localStorage.setItem('gmq:v3', JSON.stringify(payload)),
+    contactStepSeed('c3d4e5f6-7a8b-4c9d-8e1f-2a3b4c5d6e7f')
+  );
+
+  await submitWithServerPrice(page, 29_799, 34_981);
+
+  // Closed to begin with — the chart is the point, not the footnotes.
+  await expect(page.getByTestId('results-assumptions')).toHaveCount(0);
+
+  await page.getByTestId('results-assumptions-toggle').click();
+  const list = page.getByTestId('results-assumptions');
+  await expect(list).toBeVisible();
+
+  // Every input the model was given, printed.
+  await expect(list).toContainText('$240/mo');
+  await expect(list).toContainText('100%');
+  await expect(list).toContainText('3.5%');
+  await expect(list).toContainText('0.4%');
+  await expect(list).toContainText('25');
+  await expect(list).toContainText('$32,390');
+  await expect(list, 'the no-financing assumption is unstated').toContainText('not a loan');
+
+  await page.getByTestId('results-assumptions-toggle').click();
+  await expect(page.getByTestId('results-assumptions')).toHaveCount(0);
+});
+
 test('a filed lead restores read-only contact details, and Start over clears them', async ({
   page,
 }) => {
@@ -1650,6 +1818,17 @@ test('the bill field rounds to whole dollars on blur', async ({ page }) => {
 const IOS_KEYBOARD_PX = 336;
 
 /**
+ * Budget for anything that waits out one of the bill card's deliberate holds.
+ *
+ * The card shows "Got it — N months found" for 1.1s before the table replaces
+ * it, and a failure for 2s before the manual fields take over. Playwright's
+ * generic 5s leaves under three seconds for the upload round trip on top of
+ * that, which is not enough under a second concurrent suite. This is sized to
+ * the delay the product actually takes, not raised to hide a race.
+ */
+const BILL_HOLD_TIMEOUT = 12_000;
+
+/**
  * Put a keyboard on screen.
  *
  * iOS Safari does not resize the layout viewport — it shrinks the *visual*
@@ -1838,14 +2017,14 @@ test('choosing a bill shows what is happening, start to finish', async ({ page }
   release!();
 
   // What was found, said out loud, before the table replaces it.
-  await expect(page.getByTestId('bill-found')).toBeVisible();
+  await expect(page.getByTestId('bill-found')).toBeVisible({ timeout: BILL_HOLD_TIMEOUT });
   await expect(page.getByTestId('bill-found')).toContainText('12');
   expect(
     await page.getByTestId('bill-review').count(),
     'the table appeared before the customer was told anything was found'
   ).toBe(0);
 
-  await expect(page.getByTestId('bill-review')).toBeVisible();
+  await expect(page.getByTestId('bill-review')).toBeVisible({ timeout: BILL_HOLD_TIMEOUT });
   await expect(card).toHaveCount(0);
 });
 
@@ -1868,12 +2047,14 @@ test('a bill that cannot be read says so before dropping to manual', async ({ pa
 
   // The failure is on the card, in the place the customer is already looking,
   // rather than appearing as a line under buttons that came back.
-  await expect(page.getByTestId('bill-card-failed')).toBeVisible();
+  await expect(page.getByTestId('bill-card-failed')).toBeVisible({
+    timeout: BILL_HOLD_TIMEOUT,
+  });
   await expect(card).toHaveAttribute('data-card-state', 'failed');
 
   // Then it hands over. Nothing to dismiss.
-  await expect(card).toHaveCount(0, { timeout: 5000 });
-  await expect(page.getByTestId('bill-failed')).toBeVisible();
+  await expect(card).toHaveCount(0, { timeout: BILL_HOLD_TIMEOUT });
+  await expect(page.getByTestId('bill-failed')).toBeVisible({ timeout: BILL_HOLD_TIMEOUT });
   await expect(page.getByTestId('bill-upload')).toBeVisible();
   await expect(page.locator('#avg-bill')).toBeVisible();
 });
@@ -1903,12 +2084,14 @@ test('a PDF shows an icon rather than a broken thumbnail', async ({ page }) => {
     buffer: Buffer.from('%PDF-1.4 not a real bill, only a real content type'),
   });
 
-  await expect(page.getByTestId('bill-pdf-icon')).toBeVisible({ timeout: 2000 });
+  await expect(page.getByTestId('bill-pdf-icon')).toBeVisible({ timeout: BILL_HOLD_TIMEOUT });
   await expect(page.getByTestId('bill-thumb')).toHaveCount(0);
 
   // One month is a partial year, and the card says what happens to it rather
   // than letting the scaled figure appear unexplained.
-  await expect(page.getByTestId('bill-found')).toContainText('scale it to a year');
+  await expect(page.getByTestId('bill-found')).toContainText('scale it to a year', {
+    timeout: BILL_HOLD_TIMEOUT,
+  });
 });
 
 test('pressing the panel control takes the count, and the chip gives it back', async ({

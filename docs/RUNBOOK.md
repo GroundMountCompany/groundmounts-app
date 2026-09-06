@@ -177,6 +177,12 @@ Two consequences:
   one server first (`next build && next start --port 3100`) and let both runs
   reuse it.
 
+  When this is ignored, the symptom is not obvious. The half-written build
+  either fails to boot with `SyntaxError: Unexpected end of JSON input`, or —
+  worse — boots and serves a broken bundle, and the suite comes back with a
+  scatter of unrelated timeouts and a wall-clock two to three times its usual.
+  Before believing a contention result, check that the server was already up.
+
 The `interaction` and `desktop-map` projects render real WebGL through
 SwiftShader, which is CPU rasterisation. They are configured to run alone
 (`dependencies`, `fullyParallel: false`) for that reason, and **two copies of

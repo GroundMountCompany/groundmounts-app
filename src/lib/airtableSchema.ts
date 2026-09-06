@@ -62,6 +62,8 @@ export const LEAD_SCHEMA = {
   'Slope Answer': 'select',
   Rocky: 'checkbox',
   'Battery Interest': 'checkbox',
+  'Break Even Year': 'number',
+  'Utility Inflation Pct': 'number',
   'Soil Class': 'text',
   'Est Annual Production kWh': 'number',
   'Curve Source': 'select',
@@ -222,6 +224,7 @@ export const SELECT_CHOICES: Partial<Record<LeadFieldName, string[]>> = {
 const NUMBER_PRECISION: Partial<Record<LeadFieldName, number>> = {
   'System Size kW': 2,
   'Slope %': 1,
+  'Utility Inflation Pct': 1,
   // Six places is about 4 inches: enough to find the array again.
   Latitude: 6,
   Longitude: 6,

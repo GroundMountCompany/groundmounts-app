@@ -61,8 +61,10 @@ describe('voice', () => {
 
   it('catches inflected forms of banned words', () => {
     // Guards the regex itself: a trailing word boundary would miss these.
-    for (const sample of ['fostering growth', 'our solutions', 'leveraged']) {
-      const hit = BANNED_WORDS.some((w) => new RegExp(`\\b${w}`).test(sample));
+    for (const sample of ['fostering growth', 'our solutions', 'leveraged', 'the 30% credit', 'ITC eligible']) {
+      // Lowercased first, exactly as the real check does it — otherwise "ITC"
+      // would sail past a list that holds "itc".
+      const hit = BANNED_WORDS.some((w) => new RegExp(`\\b${w}`).test(sample.toLowerCase()));
       expect(hit, `"${sample}" should trip the banned list`).toBe(true);
     }
   });

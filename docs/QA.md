@@ -141,13 +141,18 @@ This is the step the whole tool exists for. Take your time.
       call link opens.
 - [ ] Exactly **one** disclaimer under the range, on the screen and in the
       email. Not two saying the same thing.
-- [ ] Below the line items: the 25-year chart, two lines clearly labelled, and
-      a marker where they cross. Readable at arm's length.
+- [ ] Below the line items: the 25-year chart. The utility line climbs from
+      nothing; the system line starts at the price and barely moves. The
+      crossing is marked **Paid back**. Readable at arm's length.
+- [ ] The payback figure is a believable number of years — not year 1.
 - [ ] Drag the inflation slider. The chart and the three figures move with it,
       with no lag you would call a lag.
 - [ ] The three figures and the "In 2050..." line all make sense read aloud.
+- [ ] The "Spread over 25 years..." line reads as arithmetic, not as an offer
+      of monthly payments.
 - [ ] Open **Our assumptions**. Every number the chart used is in there,
-      including your own bill and the system price.
+      including your own bill and the system price, and it ends with "Assumes
+      you pay cash. Financing changes the picture."
 - [ ] Nothing anywhere on the screen or in the email mentions a credit, a
       rebate, or a percentage off.
 - [ ] Press back. It steps back through the funnel rather than leaving the page

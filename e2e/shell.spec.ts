@@ -1509,8 +1509,9 @@ test('the results section answers the number it sits under', async ({ page }) =>
 
   // The chart, with both lines named in words rather than field names.
   await expect(page.getByTestId('results-chart')).toBeVisible();
-  await expect(section).toContainText('Without solar');
-  await expect(section).toContainText('With this system');
+  await expect(section).toContainText("What you'd pay the utility");
+  await expect(section).toContainText("This system, plus what you'd still pay");
+  await expect(section, 'the crossing is unlabelled').toContainText('Paid back');
 
   // Six x-axis labels at most, or a 390px axis turns to mush — and the first
   // and last years must be among them. Handing Recharts all twenty-five and
@@ -1543,7 +1544,6 @@ test('the results section answers the number it sits under', async ({ page }) =>
   for (const size of axis.fontSizes) expect(size).toBe('17px');
 
   // The three figures, and the year-25 line.
-  await expect(page.getByTestId('result-breakeven')).toBeVisible();
   await expect(page.getByTestId('result-utility-total')).toBeVisible();
   await expect(page.getByTestId('result-system-total')).toBeVisible();
   await expect(page.getByTestId('result-year-25')).toContainText('/month');
@@ -1551,6 +1551,32 @@ test('the results section answers the number it sits under', async ({ page }) =>
   // The system figure is the midpoint of the range they were just shown, not a
   // fourth number.
   await expect(page.getByTestId('result-system-total')).toHaveText('$32,390');
+
+  /*
+    Payback is the whole point of the section, and the model puts this
+    customer at year 10 — $240 a month against a $32,390 system, with the
+    cheque written on day one rather than spread across the horizon.
+  */
+  const startYear = new Date().getFullYear();
+  await expect(page.getByTestId('result-breakeven')).toHaveText(`10 (${startYear + 9})`);
+
+  // The spread figure is present and labelled as arithmetic, not as a payment.
+  await expect(page.getByTestId('result-monthly-equivalent')).toContainText('$108');
+  await expect(page.getByTestId('result-monthly-equivalent')).toContainText('Spread over 25');
+
+  // The chart is cumulative: the utility line has to reach six figures over
+  // twenty-five years, which a monthly chart never would.
+  const axisMax = await page.evaluate(() => {
+    const chart = document.querySelector('[data-testid="results-chart"]')!;
+    const labels = Array.from(chart.querySelectorAll('.recharts-yAxis text')).map(
+      (t) => t.textContent ?? ''
+    );
+    return labels;
+  });
+  expect(
+    axisMax.some((l) => /\$\d+k/.test(l)),
+    `the y-axis is not showing cumulative money: ${axisMax.join(', ')}`
+  ).toBe(true);
 
   // Nothing about credits or rebates, anywhere on the screen.
   const body = (await page.locator('body').innerText()).toLowerCase();
@@ -1621,6 +1647,9 @@ test('the assumptions are on the page, not just in our heads', async ({ page }) 
   await expect(list).toContainText('25');
   await expect(list).toContainText('$32,390');
   await expect(list, 'the no-financing assumption is unstated').toContainText('not a loan');
+  await expect(list, 'the cash assumption is unstated').toContainText(
+    'Assumes you pay cash. Financing changes the picture.'
+  );
 
   await page.getByTestId('results-assumptions-toggle').click();
   await expect(page.getByTestId('results-assumptions')).toHaveCount(0);

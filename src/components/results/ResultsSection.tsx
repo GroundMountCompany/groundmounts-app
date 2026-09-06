@@ -23,6 +23,15 @@ const money = (amount: number) =>
     maximumFractionDigits: 0,
   });
 
+/**
+ * Axis labels only.
+ *
+ * The cumulative lines reach six figures, and "$112,176" down the side of a
+ * 390px chart leaves no room for the chart.
+ */
+const compactMoney = (amount: number) =>
+  amount >= 1000 ? `$${Math.round(amount / 1000)}k` : `$${Math.round(amount)}`;
+
 /** How many x-axis ticks fit on a 390px screen without turning to mush. */
 const MAX_TICKS = 6;
 
@@ -117,18 +126,22 @@ export default function ResultsSection({
                 tick={{ fontSize: 17, fill: '#525252' }}
                 tickLine={false}
                 axisLine={false}
-                tickFormatter={(v: number) => money(v)}
+                tickFormatter={compactMoney}
               />
-              {model.breakEvenYear !== null && (
+              {model.paybackCalendarYear !== null && (
                 <ReferenceLine
-                  x={model.rows[model.breakEvenYear - 1].calendarYear}
+                  x={model.paybackCalendarYear}
                   stroke="#171717"
                   strokeDasharray="4 4"
                 />
               )}
+              {/* Cumulative, not monthly: what each path has cost by that
+                  year. The utility line starts at nothing and climbs; the
+                  system line starts at the price and barely moves. Where they
+                  meet is the answer to the only question anybody asks. */}
               <Line
                 type="monotone"
-                dataKey="withoutMonthly"
+                dataKey="cumulativeWithout"
                 stroke="#dc2626"
                 strokeWidth={2.5}
                 dot={false}
@@ -136,7 +149,7 @@ export default function ResultsSection({
               />
               <Line
                 type="monotone"
-                dataKey="withMonthly"
+                dataKey="cumulativeWith"
                 stroke="#16a34a"
                 strokeWidth={2.5}
                 dot={false}
@@ -157,7 +170,7 @@ export default function ResultsSection({
             <span aria-hidden className="h-1 w-5 rounded bg-[#16a34a]" />
             <span className="text-neutral-700">{UI.resultsWith}</span>
           </span>
-          {model.breakEvenYear !== null && (
+          {model.paybackCalendarYear !== null && (
             <span className="flex items-center gap-2">
               <span aria-hidden className="h-1 w-5 rounded border-t-2 border-dashed border-neutral-900" />
               <span className="text-neutral-700">{UI.resultsCrossover}</span>
@@ -194,11 +207,11 @@ export default function ResultsSection({
       <div className="flex flex-col gap-2 sm:flex-row">
         <Figure
           testId="result-breakeven"
-          label={UI.resultsPaysForItself}
+          label={model.paybackYear === null ? '' : UI.resultsPaidBack}
           value={
-            model.breakEvenYear === null
+            model.paybackYear === null
               ? UI.resultsNoPayback
-              : String(model.rows[model.breakEvenYear - 1].calendarYear)
+              : `${model.paybackYear} (${model.paybackCalendarYear})`
           }
         />
         <Figure
@@ -217,8 +230,18 @@ export default function ResultsSection({
         {UI.resultsYear25Prefix} {model.final.calendarYear} {UI.resultsYear25Middle}{' '}
         <span className="font-semibold">{money(model.final.withoutMonthly)}</span>
         {UI.resultsPerMonth}. {UI.resultsYear25With}{' '}
-        <span className="font-semibold">{money(model.final.withMonthly)}</span>
+        <span className="font-semibold">{money(model.final.residualMonthly)}</span>
         {UI.resultsPerMonth}.
+      </p>
+
+      {/* The secondary figure, and labelled as one. Nobody is offering to take
+          the price monthly — this is a way of feeling the size of it. */}
+      <p data-testid="result-monthly-equivalent" className="text-[17px] text-neutral-600">
+        {UI.resultsSpreadPrefix} {model.assumptions.horizonYears} {UI.resultsSpreadMiddle}{' '}
+        <span className="font-semibold text-neutral-900">
+          {money(model.monthlyEquivalent)}
+        </span>
+        {UI.resultsPerMonth} {UI.resultsSpreadSuffix}
       </p>
 
       <div className="rounded-xl border border-neutral-200 p-3">
@@ -255,6 +278,9 @@ export default function ResultsSection({
               label={UI.resultsAssumptionFinancing}
               value={UI.resultsAssumptionNoFinancing}
             />
+            <p className="pt-2 text-[16px] leading-snug text-neutral-600">
+              {UI.resultsAssumptionCash}
+            </p>
           </dl>
         )}
       </div>

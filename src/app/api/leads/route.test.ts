@@ -686,7 +686,7 @@ describe('the twenty-five year comparison', () => {
     // more thing that arrives broken.
     expect(html).not.toContain('<svg');
 
-    expect(written[0]['Break Even Year']).toBe(model.breakEvenYear);
+    expect(written[0]['Break Even Year']).toBe(model.paybackYear);
     expect(written[0]['Utility Inflation Pct']).toBe(RESULTS.utilityInflationPct);
   });
 

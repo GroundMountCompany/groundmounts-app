@@ -218,11 +218,11 @@ export default function EmailTemplate({
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <tbody>
               <tr>
-                <td style={{ ...cell, color: '#666' }}>Pays for itself in year</td>
+                <td style={{ ...cell, color: '#666' }}>Paid back in year</td>
                 <td style={{ ...cell, textAlign: 'right', fontWeight: 600 }}>
-                  {projection.breakEvenYear === null
-                    ? "It doesn't, in 25 years"
-                    : projection.rows[projection.breakEvenYear - 1].calendarYear}
+                  {projection.paybackYear === null
+                    ? "Not within 25 years"
+                    : `${projection.paybackYear} (${projection.paybackCalendarYear})`}
                 </td>
               </tr>
               <tr>
@@ -242,13 +242,17 @@ export default function EmailTemplate({
           <p style={{ marginTop: '10px', fontSize: '15px', color: '#444' }}>
             In {projection.final.calendarYear} at this rate your bill is{' '}
             <strong>{money(projection.final.withoutMonthly)}</strong>/month. With this system:{' '}
-            <strong>{money(projection.final.withMonthly)}</strong>/month.
+            <strong>{money(projection.final.residualMonthly)}</strong>/month.
+          </p>
+          <p style={{ marginTop: '10px', fontSize: '15px', color: '#444' }}>
+            Spread over {projection.assumptions.horizonYears} years, this system works out to{' '}
+            <strong>{money(projection.monthlyEquivalent)}</strong>/month.
           </p>
           <p style={{ marginTop: '6px', fontSize: '13px', color: '#999' }}>
             Assumes the utility raises its rates {projection.inflationPct}% a year and the panels
             lose {projection.assumptions.degradationPctPerYear}% of their output a year, over{' '}
-            {projection.assumptions.horizonYears} years. No financing: the system price is spread
-            evenly across those years.
+            {projection.assumptions.horizonYears} years. Assumes you pay cash. Financing changes
+            the picture.
           </p>
         </>
       ) : null}

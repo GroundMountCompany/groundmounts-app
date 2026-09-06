@@ -1050,7 +1050,7 @@ export async function POST(req: NextRequest) {
     */
     const inflationPct = lead.quote?.utilityInflationPct ?? RESULTS.utilityInflationPct;
     const results = resultsFor(lead, priced.quote.estimate, inflationPct);
-    const breakEvenYear = results ? projectResults(results).breakEvenYear ?? undefined : undefined;
+    const breakEvenYear = results ? projectResults(results).paybackYear ?? undefined : undefined;
 
     // Build Airtable fields
     // Source options in Airtable: groundmounts.com, texasgroundmountsolar.com, backyardsolartexas.com, groundmountsolar.guide

@@ -6,7 +6,9 @@ import { RESULTS } from '@/config/results';
  * Twenty-five years, both ways.
  *
  * The number on the quote is only frightening on its own. These cover the
- * arithmetic that puts it next to what the utility is going to take anyway.
+ * arithmetic that puts it next to what the utility is going to take anyway —
+ * and, above all, that the cheque is written on day one rather than smeared
+ * across the horizon.
  */
 
 /** An ordinary Texas customer, on the shipped assumptions. */
@@ -39,129 +41,153 @@ describe('the twenty-five year comparison', () => {
     expect(model.rows[9].withoutMonthly).toBe(Math.round(240 * Math.pow(rate, 9)));
   });
 
-  it('spreads the system evenly and adds back the grid share', () => {
-    // Year one at a full offset: the array covers everything, so the only cost
-    // is the system spread across the horizon.
-    const monthlySystem = ORDINARY.systemPriceUsd / (RESULTS.horizonYears * 12);
-    expect(model.rows[0].withMonthly).toBe(Math.round(monthlySystem));
-
-    // By year ten the panels have aged, so a slice of the bill comes back.
-    const covered = Math.pow(1 - RESULTS.degradationPctPerYear / 100, 9);
-    const inflated = 240 * Math.pow(1 + RESULTS.utilityInflationPct / 100, 9);
-    expect(model.rows[9].withMonthly).toBe(
-      Math.round(monthlySystem + (1 - covered) * inflated)
-    );
+  it('charges the whole system on day one', () => {
+    // Not spread across the horizon. Money spent today is not money spent in
+    // 2049, and a comparison that smears it puts payback in year one for
+    // almost everybody.
+    const firstYearResidual = model.rows[0].residualMonthly * 12;
+    expect(model.rows[0].cumulativeWith).toBe(ORDINARY.systemPriceUsd + firstYearResidual);
+    expect(model.rows[0].cumulativeWith).toBeGreaterThanOrEqual(ORDINARY.systemPriceUsd);
   });
 
-  it('accumulates twelve months of each year, on both paths', () => {
-    // Within a dollar a month of the rounded figures on screen: the running
-    // total is kept unrounded and rounded once, so summing the displayed
-    // monthlies can differ by the rounding on each of them.
-    const closeTo = (actual: number, expected: number, months: number) =>
-      expect(Math.abs(actual - expected)).toBeLessThanOrEqual(months);
+  it('charges nothing but the residual after that', () => {
+    // Year one covers everything, so at a full offset there is no residual at
+    // all and later years add only what the ageing panels give back.
+    expect(model.rows[0].residualMonthly).toBe(0);
 
-    closeTo(model.rows[0].cumulativeWithout, model.rows[0].withoutMonthly * 12, 12);
-    closeTo(
-      model.rows[1].cumulativeWithout,
-      (model.rows[0].withoutMonthly + model.rows[1].withoutMonthly) * 12,
-      24
-    );
-    closeTo(model.rows[0].cumulativeWith, model.rows[0].withMonthly * 12, 12);
+    const covered = Math.pow(1 - RESULTS.degradationPctPerYear / 100, 9);
+    const inflated = 240 * Math.pow(1 + RESULTS.utilityInflationPct / 100, 9);
+    expect(model.rows[9].residualMonthly).toBe(Math.round((1 - covered) * inflated));
+  });
 
-    // And it only ever goes up.
+  it('is paid back in year 10, which is where the hand calculation puts it', () => {
+    // The worked example, checked against the owner's arithmetic.
+    //
+    // By the end of year 9 the utility has taken $29,861 and the residual
+    // bills have come to $500, so the array is $29,361 ahead of where it
+    // started — still short of its $32,390 price. By the end of year 10 that
+    // figure is $33,147, which has passed it. So: year 10.
+    //
+    // (Line comments rather than a block: the money-location guard strips
+    // those, and a block comment full of dollar figures reads to it as prices
+    // escaping pricing.ts.)
+    expect(model.paybackYear).toBe(10);
+    expect(model.paybackCalendarYear).toBe(2035);
+
+    const netAfter = (year: number) => {
+      const row = model.rows[year - 1];
+      return row.cumulativeWithout - (row.cumulativeWith - model.systemPriceUsd);
+    };
+    expect(netAfter(9)).toBe(29361);
+    expect(netAfter(10)).toBe(33147);
+    expect(netAfter(9)).toBeLessThan(model.systemPriceUsd);
+    expect(netAfter(10)).toBeGreaterThan(model.systemPriceUsd);
+  });
+
+  it('finds the month inside that year, not the year boundary', () => {
+    // The lines meet partway through: rounding to the boundary would move
+    // payback by up to a year in either direction.
+    expect(model.paybackMonth).not.toBeNull();
+    expect(Math.ceil(model.paybackMonth! / 12)).toBe(model.paybackYear);
+    expect(model.paybackMonth).toBeGreaterThan(9 * 12);
+    expect(model.paybackMonth).toBeLessThanOrEqual(10 * 12);
+  });
+
+  it('accumulates in one direction only, on both paths', () => {
     for (let i = 1; i < model.rows.length; i++) {
       expect(model.rows[i].cumulativeWithout).toBeGreaterThanOrEqual(
         model.rows[i - 1].cumulativeWithout
       );
-      expect(model.rows[i].cumulativeWith).toBeGreaterThan(model.rows[i - 1].cumulativeWith);
+      expect(model.rows[i].cumulativeWith).toBeGreaterThanOrEqual(
+        model.rows[i - 1].cumulativeWith
+      );
     }
   });
 
-  it('breaks even the first year owning has cost less in total', () => {
-    expect(model.breakEvenYear).not.toBeNull();
-    const row = model.rows[model.breakEvenYear! - 1];
-    expect(row.cumulativeWith).toBeLessThanOrEqual(row.cumulativeWithout);
-
-    // And not before: the year before it must still be behind.
-    if (model.breakEvenYear! > 1) {
-      const previous = model.rows[model.breakEvenYear! - 2];
-      expect(previous.cumulativeWith).toBeGreaterThan(previous.cumulativeWithout);
-    }
+  it('reports the monthly equivalent as arithmetic, not as a payment', () => {
+    expect(model.monthlyEquivalent).toBe(
+      Math.round(ORDINARY.systemPriceUsd / (RESULTS.horizonYears * 12))
+    );
   });
 
   it('matches its snapshot', () => {
     // Locks the model and the arithmetic together. Changing an assumption
     // should move these; a refactor should not.
     expect({
-      breakEvenYear: model.breakEvenYear,
+      paybackYear: model.paybackYear,
+      paybackCalendarYear: model.paybackCalendarYear,
+      paybackMonth: model.paybackMonth,
       totalWithout: model.totalWithout,
       totalWith: model.totalWith,
       systemPriceUsd: model.systemPriceUsd,
+      monthlyEquivalent: model.monthlyEquivalent,
       finalYear: model.final.calendarYear,
       finalWithoutMonthly: model.final.withoutMonthly,
-      finalWithMonthly: model.final.withMonthly,
+      finalResidualMonthly: model.final.residualMonthly,
     }).toMatchInlineSnapshot(`
       {
-        "breakEvenYear": 1,
-        "finalWithMonthly": 158,
+        "finalResidualMonthly": 50,
         "finalWithoutMonthly": 548,
         "finalYear": 2050,
+        "monthlyEquivalent": 108,
+        "paybackCalendarYear": 2035,
+        "paybackMonth": 118,
+        "paybackYear": 10,
         "systemPriceUsd": 32390,
         "totalWith": 38369,
         "totalWithout": 112176,
       }
     `);
-
-    /*
-      Break-even in year one, and that is the model working as specified.
-
-      There is no financing here: the system is spread evenly across the
-      horizon, so the comparison is monthly outlay against monthly outlay
-      rather than cash out of pocket against savings. The system above over
-      three hundred months comes to less than half what this customer is
-      already handing the utility every month, so they are ahead immediately.
-
-      A classic payback figure — years until the savings have repaid the
-      cheque — is a different number and would need the price treated as an
-      upfront outlay.
-    */
   });
 });
 
-describe('when it does not pay for itself', () => {
-  it('reports no break-even rather than inventing one', () => {
-    // A small bill and a large array: the utility never catches up inside the
-    // horizon, and the screen has to say so plainly.
+describe('when it is never paid back', () => {
+  it('says so rather than inventing a year', () => {
+    // A small bill and a large array: the utility never takes enough inside
+    // the horizon to cover the cheque.
     const model = projectResults({
       ...ORDINARY,
       monthlyBillUsd: 40,
       systemPriceUsd: 60000,
     });
 
-    expect(model.breakEvenYear).toBeNull();
+    expect(model.paybackMonth).toBeNull();
+    expect(model.paybackYear).toBeNull();
+    expect(model.paybackCalendarYear).toBeNull();
     expect(model.totalWith).toBeGreaterThan(model.totalWithout);
   });
 
-  it('never reports a break-even the cumulative figures do not support', () => {
+  it('never claims a payback the cumulative figures do not support', () => {
     for (const bill of [0, 25, 80, 240, 600]) {
       const model = projectResults({ ...ORDINARY, monthlyBillUsd: bill });
-      if (model.breakEvenYear === null) {
+      if (model.paybackYear === null) {
         expect(
-          model.rows.every((r) => r.cumulativeWith > r.cumulativeWithout),
-          `bill ${bill} claimed no break-even but crossed anyway`
+          model.rows.every((r) => r.cumulativeWithout < r.cumulativeWith),
+          `bill ${bill} claimed no payback but crossed anyway`
         ).toBe(true);
       } else {
-        const row = model.rows[model.breakEvenYear - 1];
-        expect(row.cumulativeWith, `bill ${bill}`).toBeLessThanOrEqual(row.cumulativeWithout);
+        const row = model.rows[model.paybackYear - 1];
+        expect(row.cumulativeWithout, `bill ${bill}`).toBeGreaterThanOrEqual(row.cumulativeWith);
+        if (model.paybackYear > 1) {
+          const previous = model.rows[model.paybackYear - 2];
+          expect(previous.cumulativeWithout, `bill ${bill}`).toBeLessThan(previous.cumulativeWith);
+        }
       }
     }
+  });
+
+  it('pays a fixed price back sooner on a bigger bill', () => {
+    // Which is the whole shape of the argument.
+    const small = projectResults({ ...ORDINARY, monthlyBillUsd: 150 }).paybackYear ?? Infinity;
+    const large = projectResults({ ...ORDINARY, monthlyBillUsd: 400 }).paybackYear ?? Infinity;
+    expect(large).toBeLessThan(small);
   });
 });
 
 describe('the inflation the customer chooses', () => {
-  it('brings break-even forward as the rate rises', () => {
+  it('brings payback forward as the rate rises', () => {
     const at = (inflationPct: number) =>
-      projectResults({ ...ORDINARY, inflationPct }).breakEvenYear ?? Infinity;
+      projectResults({ ...ORDINARY, inflationPct }).paybackYear ?? Infinity;
 
     expect(at(RESULTS.inflationMaxPct)).toBeLessThanOrEqual(at(RESULTS.utilityInflationPct));
     expect(at(RESULTS.utilityInflationPct)).toBeLessThanOrEqual(at(RESULTS.inflationMinPct));
@@ -182,18 +208,31 @@ describe('the inflation the customer chooses', () => {
 describe('degradation', () => {
   it('gives back a slice of the bill as the panels age', () => {
     const model = projectResults({ ...ORDINARY, inflationPct: 0 });
-    // With inflation held at zero, the only thing that can move the grid
-    // portion is the panels making less.
-    expect(model.final.withMonthly).toBeGreaterThan(model.rows[0].withMonthly);
+    // With inflation held at zero, the only thing that can move the residual
+    // is the panels making less.
+    expect(model.final.residualMonthly).toBeGreaterThan(model.rows[0].residualMonthly);
   });
 
-  it('leaves the bill alone when there is no degradation', () => {
+  it('leaves the residual at nothing when there is no degradation', () => {
     const model = projectResults({
       ...ORDINARY,
       inflationPct: 0,
       assumptions: { ...RESULTS, degradationPctPerYear: 0 },
     });
-    expect(model.final.withMonthly).toBe(model.rows[0].withMonthly);
+    expect(model.final.residualMonthly).toBe(0);
+    // With no residual and no inflation, payback is the price divided by the
+    // bill: $32,390 at $240 a month is 135 months, which lands in year 12.
+    expect(model.paybackMonth).toBe(135);
+    expect(model.paybackYear).toBe(12);
+  });
+
+  it('pushes payback out, never pulls it in', () => {
+    const withDegradation = projectResults(ORDINARY).paybackMonth!;
+    const without = projectResults({
+      ...ORDINARY,
+      assumptions: { ...RESULTS, degradationPctPerYear: 0 },
+    }).paybackMonth!;
+    expect(withDegradation).toBeGreaterThanOrEqual(without);
   });
 });
 
@@ -201,13 +240,14 @@ describe('edge cases', () => {
   it('handles a customer with no bill without dividing by zero', () => {
     const model = projectResults({ ...ORDINARY, monthlyBillUsd: 0 });
     expect(model.totalWithout).toBe(0);
-    expect(model.breakEvenYear).toBeNull();
+    expect(model.paybackYear).toBeNull();
     expect(Number.isFinite(model.totalWith)).toBe(true);
   });
 
-  it('treats a free system as paying for itself at once', () => {
+  it('treats a free system as paid back in the first month', () => {
     const model = projectResults({ ...ORDINARY, systemPriceUsd: 0 });
-    expect(model.breakEvenYear).toBe(1);
+    expect(model.paybackMonth).toBe(1);
+    expect(model.paybackYear).toBe(1);
   });
 
   it('clamps an offset outside nought to one', () => {
@@ -220,9 +260,11 @@ describe('edge cases', () => {
     expect(under.totalWith).toBe(none.totalWith);
   });
 
-  it('pays the whole bill when the array covers nothing', () => {
+  it('never pays back an array that covers nothing', () => {
+    // They pay the whole bill and the whole system, so the utility can never
+    // get ahead.
     const model = projectResults({ ...ORDINARY, offsetFraction: 0 });
-    const monthlySystem = ORDINARY.systemPriceUsd / (RESULTS.horizonYears * 12);
-    expect(model.rows[0].withMonthly).toBe(Math.round(monthlySystem + 240));
+    expect(model.rows[0].residualMonthly).toBe(240);
+    expect(model.paybackYear).toBeNull();
   });
 });

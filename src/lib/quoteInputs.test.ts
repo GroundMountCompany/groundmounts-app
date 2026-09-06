@@ -9,6 +9,9 @@ const GOOD = {
   trenchFeet: 113,
   batteryUnits: 0,
   needsClearing: false,
+  slopeAnswer: 'flat',
+  rocky: false,
+  batteryInterest: false,
   slopePercent: 3,
   slopeTier: 'Flat',
   soilClass: 'clay loam',
@@ -34,11 +37,31 @@ describe('parsing what a browser claims its design is', () => {
       ['a trench to the moon', { ...GOOD, trenchFeet: 1_000_000 }],
       ['more batteries than we sell', { ...GOOD, batteryUnits: BATTERY.maxUnits + 1 }],
       ['an impossible slope', { ...GOOD, slopePercent: 1_000 }],
+      ['an invented slope answer', { ...GOOD, slopeAnswer: 'vertical' }],
+      ['a slope answer that is not a string', { ...GOOD, slopeAnswer: 3 }],
     ];
 
     for (const [what, input] of bad) {
       expect(() => parseQuoteInputs(input), what).toThrow(InvalidQuoteInputs);
     }
+  });
+
+  it('defaults a missing slope answer rather than refusing the lead', () => {
+    // A browser running a cached bundle from before this shipped should still
+    // get a quote, on the answer that adds nothing — not a 400 it cannot
+    // explain. An answer we do not recognise is a different matter and is
+    // refused above.
+    const { slopeAnswer, ...withoutAnswer } = GOOD;
+    void slopeAnswer;
+    expect(parseQuoteInputs(withoutAnswer).slopeAnswer).toBe('flat');
+    expect(parseQuoteInputs({ ...GOOD, slopeAnswer: null }).slopeAnswer).toBe('flat');
+  });
+
+  it('treats the two booleans as booleans, not as anything truthy', () => {
+    expect(parseQuoteInputs({ ...GOOD, rocky: 'yes' }).rocky).toBe(false);
+    expect(parseQuoteInputs({ ...GOOD, rocky: true }).rocky).toBe(true);
+    expect(parseQuoteInputs({ ...GOOD, batteryInterest: 1 }).batteryInterest).toBe(false);
+    expect(parseQuoteInputs({ ...GOOD, batteryInterest: true }).batteryInterest).toBe(true);
   });
 
   it('normalises an azimuth rather than rejecting it', () => {

@@ -59,6 +59,9 @@ export const LEAD_SCHEMA = {
   'Site Prep': 'checkbox',
   'Slope %': 'number',
   'Slope Tier': 'select',
+  'Slope Answer': 'select',
+  Rocky: 'checkbox',
+  'Battery Interest': 'checkbox',
   'Soil Class': 'text',
   'Est Annual Production kWh': 'number',
   'Curve Source': 'select',
@@ -209,6 +212,7 @@ export const SELECT_CHOICES: Partial<Record<LeadFieldName, string[]>> = {
   // writes; Airtable select options are case-sensitive.
   'Panel Tier': ['standard', 'premium'],
   'Slope Tier': ['Flat', 'Rolling', 'Steep', 'Unknown'],
+  'Slope Answer': ['Flat', 'Slight', 'Big'],
   // Matches SiteResponse.curveSource exactly; deliberately not renamed.
   'Curve Source': ['pvwatts', 'fallback'],
   Status: ['Partial', 'New', 'Contacted', 'Quoted', 'Won', 'Lost'],

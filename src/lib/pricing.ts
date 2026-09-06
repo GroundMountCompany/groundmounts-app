@@ -7,7 +7,7 @@ import {
   RACKING,
   type PanelTier,
   type RackingConfig,
-  type SlopeTierName,
+  type SlopeAnswer,
   batteryPrice,
 } from '@/config/pricing';
 import { footprintFt } from './geo/array';
@@ -31,17 +31,17 @@ export interface PricingOptions {
 }
 
 /**
- * What we found out about the ground, or failed to.
+ * What the customer told us about the ground.
+ *
+ * Not what the survey found. The terrain and soil lookups still run and still
+ * reach the lead, but from Phase 9 they only *pre-select* these answers — the
+ * price follows the person standing on the land. A DEM tile sampled at 200 ft
+ * was deciding a five-figure number on their behalf, and it has no way to know
+ * about the ledge under the corner of the field.
  */
 export interface PricingSite {
-  slopePercent: number | null;
-  /**
-   * The tier the customer picked when the terrain lookup failed. Takes
-   * precedence: an answer from somebody standing on the land beats no answer.
-   */
-  slopeTier?: SlopeTierName | null;
-  /** SSURGO texture description, or null when the lookup failed. */
-  soilClass: string | null;
+  slopeAnswer: SlopeAnswer;
+  rocky: boolean;
 }
 
 export interface LineItem {
@@ -60,13 +60,22 @@ export interface Quote {
   estimate: number;
   lineItems: LineItem[];
   systemKw: number;
-  slopeTier: SlopeTierName;
+  /** The answers the price was built from, for the record. */
+  slopeAnswer: SlopeAnswer;
+  rocky: boolean;
   /** Percentage adders that were applied, for the record. */
   slopeAdderPct: number;
-  soilAdderPct: number;
+  rockyAdderPct: number;
 }
 
 const round = (n: number) => Math.round(n);
+
+/** How each slope answer reads on the line item. */
+const SLOPE_DETAIL: Record<SlopeAnswer, string> = {
+  flat: 'flat ground',
+  slight: 'slight slope',
+  big: 'big slope',
+};
 
 /** Which conduit row applies to this system. */
 export function conduitFor(systemKw: number, hasBattery: boolean) {
@@ -84,40 +93,27 @@ export function conduitFor(systemKw: number, hasBattery: boolean) {
   };
 }
 
-/** The slope tier a measured grade falls into. */
-export function slopeTierFor(
-  slopePercent: number | null,
-  chosenTier?: SlopeTierName | null
-): {
-  name: SlopeTierName;
-  adderPct: number;
-} {
-  if (slopePercent === null) {
-    if (!chosenTier || chosenTier === 'Unknown') return { name: 'Unknown', adderPct: 0 };
-    const picked = SITE.slopeTiers.find((t) => t.name === chosenTier);
-    return { name: chosenTier, adderPct: picked?.adderPct ?? 0 };
-  }
-  const tier =
-    SITE.slopeTiers.find((t) => slopePercent < t.maxPercent) ??
-    SITE.slopeTiers[SITE.slopeTiers.length - 1];
-  return { name: tier.name, adderPct: tier.adderPct };
+/** What the customer's slope answer adds to the groundwork. */
+export function slopeAdderFor(answer: SlopeAnswer): number {
+  return SITE.slopeAnswers[answer] ?? SITE.slopeAnswers.flat;
+}
+
+/** What answering "rocky" adds to the groundwork. */
+export function rockyAdderFor(rocky: boolean): number {
+  return rocky ? SITE.rockyAdderPct : 0;
 }
 
 /**
- * The adder for a soil description.
+ * Whether a soil survey description should pre-select "Rocky".
  *
- * SSURGO returns free text like "Windthorst fine sandy loam", so the config is
- * matched by substring. The longest match wins, so "clay loam" beats "clay".
+ * SSURGO returns free text like "Tarrant rock outcrop complex", so the hints
+ * are matched by substring. This only decides which button starts pressed —
+ * the customer's answer is what prices.
  */
-export function soilAdderFor(soilClass: string | null): number {
-  if (!soilClass) return SITE.defaultSoilAdderPct;
+export function looksRocky(soilClass: string | null): boolean {
+  if (!soilClass) return false;
   const text = soilClass.toLowerCase();
-
-  const match = Object.keys(SITE.soilAdders)
-    .filter((key) => text.includes(key))
-    .sort((a, b) => b.length - a.length)[0];
-
-  return match === undefined ? SITE.defaultSoilAdderPct : SITE.soilAdders[match];
+  return SITE.rockySoilHints.some((hint) => text.includes(hint));
 }
 
 /** Acres to clear: the array footprint plus working room on every side. */
@@ -245,23 +241,23 @@ export function priceQuote(
   // slope does not make the battery cost more.
   const groundwork = equipment + trench;
 
-  const slope = slopeTierFor(site.slopePercent, site.slopeTier);
-  if (slope.adderPct > 0) {
+  const slopeAdderPct = slopeAdderFor(site.slopeAnswer);
+  if (slopeAdderPct > 0) {
     lineItems.push({
       key: 'slope',
       label: 'Slope',
-      detail: `${slope.name.toLowerCase()} ground`,
-      amount: round(groundwork * slope.adderPct),
+      detail: SLOPE_DETAIL[site.slopeAnswer],
+      amount: round(groundwork * slopeAdderPct),
     });
   }
 
-  const soilAdderPct = soilAdderFor(site.soilClass);
-  if (soilAdderPct > 0) {
+  const rockyAdderPct = rockyAdderFor(site.rocky);
+  if (rockyAdderPct > 0) {
     lineItems.push({
       key: 'soil',
       label: 'Ground conditions',
-      detail: site.soilClass ?? undefined,
-      amount: round(groundwork * soilAdderPct),
+      detail: 'rocky ground',
+      amount: round(groundwork * rockyAdderPct),
     });
   }
 
@@ -283,9 +279,10 @@ export function priceQuote(
     high: round(estimate * (1 + RANGE_SPREAD_PCT)),
     lineItems,
     systemKw: Number(systemKw.toFixed(2)),
-    slopeTier: slope.name,
-    slopeAdderPct: slope.adderPct,
-    soilAdderPct,
+    slopeAnswer: site.slopeAnswer,
+    rocky: site.rocky,
+    slopeAdderPct,
+    rockyAdderPct,
   };
 }
 

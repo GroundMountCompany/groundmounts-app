@@ -107,21 +107,33 @@ export const STEPS: StepCopy[] = [
 ];
 
 /** Option cards on step 5. */
+/**
+ * The four questions on the options step, in the order they are asked.
+ *
+ * Ground first, because it is what the customer can see out of the window and
+ * what moves the number. The battery question is last and is not priced: it is
+ * a conversation to have on the phone, not a checkbox on a ballpark.
+ */
 export const OPTION_CARDS = [
   {
-    key: 'panels',
-    title: 'Panels',
-    body: 'Premium panels make more power in the same footprint, so you need fewer of them.',
+    key: 'siteprep',
+    title: 'Land clearing',
+    body: 'Is the spot clear, or does it need brush and trees taken out?',
+  },
+  {
+    key: 'slope',
+    title: 'Slope',
+    body: "How's the ground where the panels go?",
+  },
+  {
+    key: 'soil',
+    title: 'Soil',
+    body: 'Is the ground rocky?',
   },
   {
     key: 'battery',
-    title: 'Battery',
-    body: 'Keeps your lights on when the grid goes down. None, one or two.',
-  },
-  {
-    key: 'siteprep',
-    title: 'Site prep',
-    body: 'Is the spot clear, or does it need brush and trees taken out?',
+    title: 'Battery and generator',
+    body: 'Would you like to hear about battery and generator options?',
   },
 ] as const;
 
@@ -265,9 +277,19 @@ export const UI = {
   batteryTwo: 'Two',
   clearingNo: 'It is clear',
   clearingYes: 'Needs clearing',
+
+  // Step 5, the ground questions.
+  slopeAnswerFlat: 'Flat',
+  slopeAnswerSlight: 'Slight slope',
+  slopeAnswerBig: 'Big slope',
+  rockyNo: 'Not rocky',
+  rockyYes: 'Rocky',
+  rockySurveyNote: 'We checked the soil survey — looks rocky here.',
+  batteryInterestYes: 'Yes',
+  batteryInterestNo: 'No',
+  batteryInterestNote: 'No charge either way. We will talk it through on the call.',
   included: 'Included',
   priceRangeLabel: 'Your range',
-  priceEstimateNote: 'An estimate from your design. The real number comes after a site visit.',
   lineItemsTitle: 'What that covers',
   trenchNote: 'We route the trench around anything in the way once we are on site.',
   slopeChecking: 'checking',

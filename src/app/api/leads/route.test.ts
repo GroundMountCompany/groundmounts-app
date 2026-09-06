@@ -167,6 +167,9 @@ const INPUTS = {
   trenchFeet: 113,
   batteryUnits: 0,
   needsClearing: false,
+  slopeAnswer: 'flat',
+  rocky: false,
+  batteryInterest: false,
   slopePercent: 3,
   slopeTier: 'Flat',
   soilClass: 'clay loam',
@@ -245,7 +248,7 @@ describe('POST /api/leads', () => {
     expect(fields['Trenching Cost High']).toBe(expected.trench.high);
     expect(fields['Line Items JSON']).toBe(JSON.stringify(expected.quote.lineItems));
     expect(fields['System Size kW']).toBe(expected.systemSizeKw);
-    expect(fields['Slope Tier']).toBe(expected.quote.slopeTier);
+    expect(fields['Slope Tier']).toBe('Flat');
     expect(fields.Panels).toBe(16);
     expect(fields['Est Annual Production kWh']).toBe(expected.annualProductionKwh);
     expect(fields['Curve Source']).toBe('pvwatts');
@@ -335,9 +338,11 @@ describe('POST /api/leads', () => {
 });
 
 describe('site conditions are the server\'s to decide', () => {
-  it('prices the ground it found, not the ground the payload claimed', async () => {
-    // The payload says sand on the flat. The server finds rock on a steep
-    // grade, both of which cost more, and the price has to reflect that.
+  it('records the ground it found, and prices the ground the customer described', async () => {
+    // From Phase 9 the survey is evidence for the owner, not an input to the
+    // price. The customer standing on the land answers three questions and
+    // those answers are what the number is built from — a DEM tile sampled at
+    // 200 ft has no way to know about the ledge under the corner of the field.
     siteFacts = {
       curve: SITE_CURVE,
       curveSource: 'pvwatts',
@@ -348,78 +353,89 @@ describe('site conditions are the server\'s to decide', () => {
       slopeSource: 'tilequery',
     };
 
-    await POST(post(validLead({ inputs: { ...INPUTS, soilClass: 'sand', slopeTier: 'Flat', slopePercent: 1 } })));
+    // The survey says steep and rocky. The customer says flat and not rocky.
+    await POST(post(validLead({ inputs: { ...INPUTS, slopeAnswer: 'flat', rocky: false } })));
 
-    const asClaimed = priceFromInputs(
-      parseQuoteInputs({ ...INPUTS, soilClass: 'sand', slopeTier: 'Flat', slopePercent: 1 }),
-      SITE_CURVE
-    );
-    const asFound = priceFromInputs(
-      parseQuoteInputs({ ...INPUTS, soilClass: 'rock outcrop', slopeTier: 'Steep', slopePercent: 18 }),
+    const asAnswered = priceFromInputs(
+      parseQuoteInputs({ ...INPUTS, slopeAnswer: 'flat', rocky: false }),
       SITE_CURVE
     );
     const fields = written[0];
 
-    expect(fields['Price Low']).toBe(asFound.quote.low);
-    expect(fields['Price High']).toBe(asFound.quote.high);
+    // Priced on the answer.
+    expect(fields['Price Low']).toBe(asAnswered.quote.low);
+    expect(fields['Price High']).toBe(asAnswered.quote.high);
+    expect(
+      JSON.parse(fields['Line Items JSON'] as string).map((i: { key: string }) => i.key)
+    ).toEqual(['equipment', 'trench']);
+
+    // And the survey is on the record anyway, so the owner can see where the
+    // customer disagreed with the map before anybody drives out there.
     expect(fields['Slope Tier']).toBe('Steep');
     expect(fields['Soil Class']).toBe('rock outcrop');
     expect(fields['Slope %']).toBe(18);
-    expect(JSON.parse(fields['Line Items JSON'] as string).map((i: { key: string }) => i.key)).toEqual(
-      asFound.quote.lineItems.map((i) => i.key)
-    );
-
-    // And the claimed ground would genuinely have been cheaper, so this is a
-    // real override and not two numbers that happen to match.
-    expect(asFound.quote.estimate).toBeGreaterThan(asClaimed.quote.estimate);
+    expect(fields['Slope Answer']).toBe('Flat');
+    expect(fields.Rocky).toBe(false);
   });
 
-  it('accepts the customer\'s answer only where the server has none', async () => {
-    // Both lookups failed. The Flat/Rolling/Steep pick is all there is, and
-    // dropping it would quietly price a steep parcel as if it were flat.
+  it('prices what the customer answered, whatever the survey said', async () => {
+    // The mirror image: the survey finds nothing at all and the customer says
+    // the ground is steep and rocky. Both adders apply.
     siteFacts = { ...NOTHING_KNOWN, curve: SITE_CURVE, curveSource: 'pvwatts' };
-  failEmail = false;
+    failEmail = false;
 
-    await POST(
-      post(
-        validLead({
-          inputs: { ...INPUTS, soilClass: 'caliche', slopeTier: 'Steep', slopePercent: null },
-        })
-      )
-    );
+    await POST(post(validLead({ inputs: { ...INPUTS, slopeAnswer: 'big', rocky: true } })));
 
-    const expected = priceFromInputs(
-      parseQuoteInputs({ ...INPUTS, soilClass: 'caliche', slopeTier: 'Steep', slopePercent: null }),
+    const answered = priceFromInputs(
+      parseQuoteInputs({ ...INPUTS, slopeAnswer: 'big', rocky: true }),
       SITE_CURVE
     );
+    const plain = priceFromInputs(
+      parseQuoteInputs({ ...INPUTS, slopeAnswer: 'flat', rocky: false }),
+      SITE_CURVE
+    );
+    const fields = written[0];
 
-    expect(written[0]['Slope Tier']).toBe('Steep');
-    expect(written[0]['Soil Class']).toBe('caliche');
-    expect(written[0]['Price Low']).toBe(expected.quote.low);
+    expect(fields['Price Low']).toBe(answered.quote.low);
+    expect(
+      JSON.parse(fields['Line Items JSON'] as string).map((i: { key: string }) => i.key)
+    ).toEqual(['equipment', 'trench', 'slope', 'soil']);
+    // Genuinely dearer, so this is a real adder rather than two numbers that
+    // happen to agree.
+    expect(answered.quote.estimate).toBeGreaterThan(plain.quote.estimate);
+
+    expect(fields['Slope Answer']).toBe('Big');
+    expect(fields.Rocky).toBe(true);
   });
 
-  it('lets a server soil answer override a client one on its own', async () => {
-    // Soil found, slope not: each is decided separately.
-    siteFacts = {
-      ...NOTHING_KNOWN,
-      curve: SITE_CURVE,
-      curveSource: 'pvwatts',
-      soilClass: 'rock outcrop',
-      soilSource: 'ssurgo',
-    };
-
-    // slopePercent null, so the manual pick is the only slope answer there is.
-    // A measured grade always beats a picked tier, server or client.
-    await POST(
-      post(
-        validLead({
-          inputs: { ...INPUTS, soilClass: 'sand', slopeTier: 'Rolling', slopePercent: null },
-        })
-      )
+  it('refuses a slope answer it does not recognise', async () => {
+    // The only three site figures a browser can move are bounded here: an
+    // invented answer is a tampered payload, not a lead.
+    const res = await POST(
+      post(validLead({ inputs: { ...INPUTS, slopeAnswer: 'vertical' } }))
     );
+    expect(res.status).toBe(400);
+    expect(written).toHaveLength(0);
+  });
 
-    expect(written[0]['Soil Class']).toBe('rock outcrop');
-    expect(written[0]['Slope Tier']).toBe('Rolling');
+  it('records battery interest without pricing it', async () => {
+    failEmail = false;
+    await POST(post(validLead({ inputs: { ...INPUTS, batteryInterest: true } })));
+
+    const withInterest = priceFromInputs(
+      parseQuoteInputs({ ...INPUTS, batteryInterest: true }),
+      SITE_CURVE
+    );
+    const without = priceFromInputs(parseQuoteInputs(INPUTS), SITE_CURVE);
+
+    expect(written[0]['Battery Interest']).toBe(true);
+    expect(written[0]['Battery Units']).toBe(0);
+    expect(withInterest.quote.estimate).toBe(without.quote.estimate);
+    expect(
+      JSON.parse(written[0]['Line Items JSON'] as string).some(
+        (i: { key: string }) => i.key === 'battery'
+      )
+    ).toBe(false);
   });
 });
 
@@ -650,6 +666,26 @@ describe('the brand on the email', () => {
     const quote = quoteEmail() as unknown as { from: string; replyTo: string; subject: string };
     expect(quote.from).toContain('quotes@groundmounts.com');
     expect(quote.subject).toContain('The Ground Mount Company');
+  });
+
+  it('leads with a wordmark, not a logo that 404s', async () => {
+    // The header pointed at /logos/groundmount-company.png, which is not in
+    // the repository, so every quote email opened with a broken image icon
+    // where the sender's name should be.
+    await POST(post({ ...validLead(), mapScreenshot: undefined }));
+    const html = quoteHtml();
+
+    // Above the heading, where the logo used to be — not merely somewhere in
+    // the page, which the footer signature would satisfy on its own.
+    expect(html.indexOf('The Ground Mount Company')).toBeGreaterThanOrEqual(0);
+    expect(
+      html.indexOf('The Ground Mount Company'),
+      'the wordmark is not at the top of the email'
+    ).toBeLessThan(html.indexOf('Your ground mount estimate'));
+    expect(html, 'the dead logo path is back').not.toContain('/logos/');
+    // The only image in the email is the customer's own map, and this lead
+    // has none — so there should be no <img> at all.
+    expect(html, 'an image crept back into the header').not.toContain('<img');
   });
 
   it('honours an explicit brand', async () => {
@@ -1206,6 +1242,45 @@ describe('the map screenshot', () => {
     ]);
     expect(written.every((f) => f['Lead ID'] === '8f14e45f-ceea-467a-9f34-2c8c3b1a77de')).toBe(true);
     expect(blobs, 'the screenshot was not stored').toHaveLength(1);
+  });
+
+  it('puts the design the customer drew in their own email', async () => {
+    // The quote email had no picture of the thing it was quoting. The upload
+    // happens before either send, so both the customer's copy and the owner's
+    // carry the same URL.
+    await POST(post({ ...validLead(), mapScreenshot: PNG_DATA_URL }));
+
+    const blobUrl =
+      'https://blob.example/map-screenshots/8f14e45f-ceea-467a-9f34-2c8c3b1a77de.png';
+
+    const html = quoteHtml();
+    expect(html, 'the quote email has no map in it').toContain(blobUrl);
+    // Above the range, which is what it explains.
+    expect(html.indexOf(blobUrl)).toBeLessThan(html.indexOf('YOUR RANGE'));
+
+    const owner = notifications.find((n) => !n.react);
+    expect(owner?.html, 'the owner notification has no map in it').toContain(blobUrl);
+  });
+
+  it('sends the same email, picture and all, when the first one failed', async () => {
+    // A resend rebuilds the email from the stored record rather than from the
+    // request. Without the URL on that record the retry would quietly arrive
+    // without its map — the same email minus the only picture in it.
+    failEmail = true;
+    await POST(post({ ...validLead(), mapScreenshot: PNG_DATA_URL }));
+
+    failEmail = false;
+    __resetRateLimits();
+    notifications.length = 0;
+
+    // The retry carries no screenshot of its own; everything it sends has to
+    // come off the stored record.
+    const res = await POST(post({ ...validLead(), resend: true }));
+    expect(await res.json()).toMatchObject({ emailSent: true });
+
+    expect(quoteHtml()).toContain(
+      'https://blob.example/map-screenshots/8f14e45f-ceea-467a-9f34-2c8c3b1a77de.png'
+    );
   });
 
   it('leaves no orphan in storage when the write is rejected', async () => {

@@ -43,7 +43,14 @@ export const PANELS: Record<PanelTier, PanelProduct> = {
     warranty: '25-year product and performance',
   },
   premium: {
-    enabled: true,
+    /*
+      Off, by owner decision in Phase 9.
+
+      The panel choice was one more question on a step that now asks four, and
+      the answer was never the one that moved the number. The product stays
+      here so switching it back on is a one-word change rather than a rebuild.
+    */
+    enabled: false,
     name: 'REC Alpha Pure-RX 460W',
     watts: 460,
     widthIn: 44.6,
@@ -154,7 +161,16 @@ export interface BatteryConfig {
 }
 
 export const BATTERY: BatteryConfig = {
-  enabled: true,
+  /*
+    Off, by owner decision in Phase 9.
+
+    Battery is a conversation, not a checkbox on a ballpark: the options step
+    now asks whether the customer wants to hear about it, and that interest is
+    recorded rather than priced. With this off, `availableOnly` forces battery
+    units to zero, so no quote carries a battery line and the trench never
+    picks up the second-run multiplier.
+  */
+  enabled: false,
   name: 'Tesla Powerwall 3',
   kwh: 13.5,
   firstUnit: 14500,
@@ -172,23 +188,28 @@ export function batteryPrice(units: number): number {
 
 export type SlopeTierName = 'Flat' | 'Rolling' | 'Steep' | 'Unknown';
 
-export interface SlopeTier {
-  name: SlopeTierName;
-  /** Applies up to this grade, as a percentage. */
-  maxPercent: number;
-  /** Added to the equipment and trench subtotal. */
-  adderPct: number;
-}
+/**
+ * What the customer says about the ground the panels go on.
+ *
+ * The terrain survey still runs and still lands on the lead for the owner to
+ * look at, but it no longer prices anything. A person standing on their own
+ * land knows whether it is flat better than a DEM tile sampled at 200 ft does,
+ * and the survey was quietly deciding a five-figure number on their behalf.
+ */
+export type SlopeAnswer = 'flat' | 'slight' | 'big';
 
 export interface SiteConfig {
-  slopeTiers: SlopeTier[];
+  /** Added to the equipment and trench subtotal, by the customer's answer. */
+  slopeAnswers: Record<SlopeAnswer, number>;
+  /** Added to the same subtotal when the customer says the ground is rocky. */
+  rockyAdderPct: number;
   /**
-   * Soil that costs more to auger or drive pile into. Keys are matched against
-   * the SSURGO texture description, lowercased, by substring.
+   * Soil descriptions that pre-select "Rocky" for the customer.
+   *
+   * Matched against the SSURGO texture description, lowercased, by substring.
+   * A hint at the answer, not the answer: whatever they pick is what prices.
    */
-  soilAdders: Record<string, number>;
-  /** Used when the soil lookup fails or returns something unrecognised. */
-  defaultSoilAdderPct: number;
+  rockySoilHints: string[];
   vegetationClearing: {
     /** Whether site prep is offered as a choice on the options step. */
     enabled: boolean;
@@ -203,24 +224,13 @@ export interface SiteConfig {
 }
 
 export const SITE: SiteConfig = {
-  slopeTiers: [
-    { name: 'Flat', maxPercent: 5, adderPct: 0 },
-    { name: 'Rolling', maxPercent: 12, adderPct: 0.05 },
-    { name: 'Steep', maxPercent: Infinity, adderPct: 0.12 },
-  ],
-  /**
-   * Only the ground that costs more to build on is listed.
-   *
-   * Clay, loam and sand are not here on purpose: they carry no adder, and an
-   * explicit zero invites somebody to "tidy up" the config by giving them one.
-   */
-  soilAdders: {
-    caliche: 0.08,
-    rock: 0.15,
-    'rock outcrop': 0.15,
-    limestone: 0.15,
+  slopeAnswers: {
+    flat: 0,
+    slight: 0.05,
+    big: 0.1,
   },
-  defaultSoilAdderPct: 0,
+  rockyAdderPct: 0.1,
+  rockySoilHints: ['rock', 'rock outcrop', 'limestone'],
   vegetationClearing: {
     enabled: true,
     /** Covers mobilisation and anything up to a quarter of an acre. */

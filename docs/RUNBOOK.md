@@ -122,16 +122,34 @@ and shipped `enabled: false`.
 | What | Value |
 |---|---|
 | Standard panel | Mission Solar MSX10-435HN0B, 435 W, $3.50/W |
-| Premium panel | REC Alpha Pure-RX, 460 W, 68.0 × 44.6 in, $4.00/W, 25-yr |
+| Premium panel | REC Alpha Pure-RX, 460 W, $4.00/W — **`enabled: false`** |
 | Racking, tilt | 30° |
 | Trench base rate | $45/ft |
 | Conduit schedule | ≤10 kW ×1.00 · 10–20 kW ×1.05 · >20 kW ×1.20 |
-| Battery trench adder | +0.05 on the multiplier |
-| Battery | Tesla Powerwall 3, 13.5 kWh — first $14,500, second $9,500, max 2 |
-| Slope adders | Flat <5% +0% · Rolling 5–12% +5% · Steep >12% +12% |
-| Soil adders | caliche +8% · rock / rock outcrop / limestone +15% |
+| Battery trench adder | +0.05 on the multiplier — unreachable while battery is off |
+| Battery | Tesla Powerwall 3 — **`enabled: false`** |
+| Slope adders | the customer's answer: Flat +0% · Slight +5% · Big +10% |
+| Rocky adder | the customer's answer: +10% |
 | Vegetation clearing | $1,500 flat to 0.25 acre, then $2,500/acre |
 | Range spread | ±8% |
+
+**The ground is priced from what the customer says, not from what the survey
+found.** Phase 9. The terrain and SSURGO lookups still run: they pre-select the
+answers on the options step and they still land on the lead as `Slope Tier`,
+`Slope %` and `Soil Class`, so the owner can see where the customer disagreed
+with the map. They no longer decide the number. A DEM tile sampled at 200 ft
+has no way to know about the ledge under the corner of the field, and it was
+quietly moving a five-figure figure on the customer's behalf.
+
+The three things a browser can move here are bounded server-side:
+`slopeAnswer` must be one of `flat` / `slight` / `big` (an unrecognised value
+is refused; an absent one defaults to `flat`, so a cached bundle still gets a
+quote), and `rocky` and `batteryInterest` are strict booleans. Nothing else
+from the client touches site pricing.
+
+**Battery interest is recorded, not priced.** The options step asks whether the
+customer wants to hear about batteries and generators; the answer reaches
+Airtable as `Battery Interest` and changes no number.
 
 Clay, loam and sand are **absent** from `soilAdders` rather than present with a
 zero — an explicit zero invites somebody to tidy the config by giving them a

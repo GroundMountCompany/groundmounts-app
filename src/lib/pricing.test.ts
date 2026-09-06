@@ -2,8 +2,9 @@ import { describe, it, expect } from 'vitest';
 import {
   priceQuote,
   conduitFor,
-  slopeTierFor,
-  soilAdderFor,
+  slopeAdderFor,
+  rockyAdderFor,
+  looksRocky,
   clearingAcres,
   clearingPrice,
   spread,
@@ -23,14 +24,14 @@ const ALL_ON = { premiumPanels: true, battery: true, sitePrep: true };
 /**
  * The worked example from the brief, on ground that costs something.
  *
- * Caliche rather than clay loam: with the owner's confirmed adders, clay
- * carries nothing at all, so an example built on it would exercise the soil
- * line by never producing one.
+ * The customer said the ground is rocky. From Phase 9 that is what prices the
+ * soil adder — the SSURGO description only pre-selects the button — so the
+ * example is stated as an answer rather than as a survey result.
  */
 const EXAMPLE = {
   design: { panelCount: 16, tier: 'standard' as const, trenchFeet: 113 },
   options: { batteryUnits: 0, needsClearing: false },
-  site: { slopePercent: 3, soilClass: 'caliche' },
+  site: { slopeAnswer: 'flat' as const, rocky: true },
 };
 
 describe('the worked example', () => {
@@ -54,15 +55,16 @@ describe('the worked example', () => {
   });
 
   it('adds nothing for flat ground', () => {
-    expect(quote.slopeTier).toBe('Flat');
+    expect(quote.slopeAnswer).toBe('flat');
     expect(quote.slopeAdderPct).toBe(0);
     expect(quote.lineItems.some((i) => i.key === 'slope')).toBe(false);
   });
 
-  it('adds the caliche rate to the groundwork only', () => {
+  it('adds the rocky rate to the groundwork only', () => {
     const groundwork = quote.lineItems[0].amount + quote.lineItems[1].amount;
-    expect(quote.soilAdderPct).toBe(SITE.soilAdders.caliche);
-    expect(quote.lineItems[2].amount).toBe(Math.round(groundwork * quote.soilAdderPct));
+    expect(quote.rocky).toBe(true);
+    expect(quote.rockyAdderPct).toBe(SITE.rockyAdderPct);
+    expect(quote.lineItems[2].amount).toBe(Math.round(groundwork * quote.rockyAdderPct));
   });
 
   it('is a range around the total, not a single number', () => {
@@ -93,19 +95,20 @@ describe('the worked example', () => {
           "label": "Trenching",
         },
         {
-          "amount": 2356,
-          "detail": "caliche",
+          "amount": 2945,
+          "detail": "rocky ground",
           "key": "soil",
           "label": "Ground conditions",
         },
       ]
     `);
     // 16 x 435W at $3.50/W = $24,360, plus 113 ft at $45 x1.00 = $5,085,
-    // plus 8% caliche on the $29,445 of groundwork = $2,356. Spread +/-8%.
+    // plus 10% for rocky ground on the $29,445 of groundwork = $2,945.
+    // Spread +/-8%.
     expect({ low: quote.low, estimate: quote.estimate, high: quote.high }).toEqual({
-      low: 29257,
-      estimate: 31801,
-      high: 34345,
+      low: 29799,
+      estimate: 32390,
+      high: 34981,
     });
   });
 });
@@ -128,37 +131,44 @@ describe('conduit schedule', () => {
 });
 
 describe('site conditions', () => {
-  it('maps grades to tiers', () => {
-    expect(slopeTierFor(0).name).toBe('Flat');
-    expect(slopeTierFor(4.9).name).toBe('Flat');
-    expect(slopeTierFor(5).name).toBe('Rolling');
-    expect(slopeTierFor(20).name).toBe('Steep');
+  it('adds what the customer answered, and nothing for flat', () => {
+    expect(slopeAdderFor('flat')).toBe(0);
+    expect(slopeAdderFor('slight')).toBe(SITE.slopeAnswers.slight);
+    expect(slopeAdderFor('big')).toBe(SITE.slopeAnswers.big);
+    expect(slopeAdderFor('big')).toBeGreaterThan(slopeAdderFor('slight'));
   });
 
-  it('adds nothing when the slope is unknown, rather than guessing', () => {
-    expect(slopeTierFor(null)).toEqual({ name: 'Unknown', adderPct: 0 });
+  it('charges for rocky ground only when they say it is rocky', () => {
+    expect(rockyAdderFor(false)).toBe(0);
+    expect(rockyAdderFor(true)).toBe(SITE.rockyAdderPct);
   });
 
-  it('matches soil descriptions by substring, longest first', () => {
-    // SSURGO returns free text, so a longer key must beat a shorter one that
-    // is contained in it.
-    expect(soilAdderFor('Tarrant rock outcrop complex')).toBe(SITE.soilAdders['rock outcrop']);
-    expect(soilAdderFor('Rocky, very gravelly')).toBe(SITE.soilAdders.rock);
-    expect(soilAdderFor('Caliche')).toBe(SITE.soilAdders.caliche);
-    expect(soilAdderFor('Eckrant limestone')).toBe(SITE.soilAdders.limestone);
+  it('reads a soil survey as a hint about which button to pre-select', () => {
+    // SSURGO returns free text, matched by substring. This decides nothing
+    // about the price — only which answer starts pressed.
+    expect(looksRocky('Tarrant rock outcrop complex')).toBe(true);
+    expect(looksRocky('Rocky, very gravelly')).toBe(true);
+    expect(looksRocky('Eckrant limestone')).toBe(true);
   });
 
-  it('charges nothing for ground that is ordinary to build on', () => {
-    // Clay, loam and sand are deliberately absent from the config rather than
-    // present with a zero, so they fall through to the default of nothing.
+  it('leaves ordinary ground unpressed', () => {
     for (const soil of ['Windthorst clay loam', 'Sandy loam', 'Silty clay', 'Fine sand']) {
-      expect(soilAdderFor(soil), soil).toBe(SITE.defaultSoilAdderPct);
+      expect(looksRocky(soil), soil).toBe(false);
     }
+    expect(looksRocky(null)).toBe(false);
+    expect(looksRocky('something we have never heard of')).toBe(false);
   });
 
-  it('falls back for unknown or missing soil', () => {
-    expect(soilAdderFor(null)).toBe(SITE.defaultSoilAdderPct);
-    expect(soilAdderFor('something we have never heard of')).toBe(SITE.defaultSoilAdderPct);
+  it('prices the survey out of it entirely', () => {
+    // The same design on the same ground, quoted twice: once by somebody who
+    // says it is flat and not rocky, once by somebody who says otherwise. The
+    // survey is not an argument in either call.
+    const said = (slopeAnswer: 'flat' | 'slight' | 'big', rocky: boolean) =>
+      priceQuote(EXAMPLE.design, EXAMPLE.options, { slopeAnswer, rocky }).estimate;
+
+    expect(said('flat', false)).toBeLessThan(said('slight', false));
+    expect(said('slight', false)).toBeLessThan(said('big', false));
+    expect(said('flat', false)).toBeLessThan(said('flat', true));
   });
 
   it('scales clearing with the array footprint', () => {
@@ -171,7 +181,7 @@ describe('site conditions', () => {
     const quote = priceQuote(
       { panelCount: 4, tier: 'standard', trenchFeet: 20 },
       { batteryUnits: 0, needsClearing: true },
-      { slopePercent: 0, soilClass: 'loam' },
+      { slopeAnswer: 'flat', rocky: false },
       ALL_ON
     );
     const clearing = quote.lineItems.find((i) => i.key === 'clearing')!;
@@ -245,13 +255,13 @@ describe('options change the price', () => {
     expect(subtotals(premium).equipment).toBeGreaterThan(subtotals(base).equipment);
   });
 
-  it('steep ground costs more than flat', () => {
+  it('a big slope costs more than a flat one', () => {
     const steep = priceQuote(EXAMPLE.design, EXAMPLE.options, {
       ...EXAMPLE.site,
-      slopePercent: 20,
+      slopeAnswer: 'big',
     });
     expect(steep.estimate).toBeGreaterThan(base.estimate);
-    expect(steep.slopeTier).toBe('Steep');
+    expect(steep.slopeAnswer).toBe('big');
   });
 
   it('clearing adds a line', () => {
@@ -269,7 +279,7 @@ describe('edge cases', () => {
     const quote = priceQuote(
       { panelCount: 0, tier: 'standard', trenchFeet: 0 },
       { batteryUnits: 0, needsClearing: false },
-      { slopePercent: null, soilClass: null }
+      { slopeAnswer: 'flat', rocky: false }
     );
     expect(quote.estimate).toBe(0);
     expect(quote.low).toBe(0);
@@ -281,7 +291,7 @@ describe('edge cases', () => {
     const quote = priceQuote(
       { panelCount: 16, tier: 'standard', trenchFeet: 0 },
       { batteryUnits: 0, needsClearing: false },
-      { slopePercent: 0, soilClass: 'loam' }
+      { slopeAnswer: 'flat', rocky: false }
     );
     expect(subtotals(quote).trench).toBe(0);
     expect(quote.estimate).toBeGreaterThan(0);
@@ -292,50 +302,47 @@ describe('edge cases', () => {
   });
 });
 
-describe('a slope the customer told us about', () => {
+describe('the ground is what the customer says it is', () => {
   const design = { panelCount: 40, tier: 'standard' as const, trenchFeet: 100 };
   const options = { batteryUnits: 0, needsClearing: false };
 
-  it('prices a chosen tier exactly like a measured one', () => {
-    const measured = priceQuote(design, options, { slopePercent: 8, soilClass: null });
-    const chosen = priceQuote(design, options, {
-      slopePercent: null,
-      slopeTier: 'Rolling',
-      soilClass: null,
-    });
+  it('takes three answers and prices each of them', () => {
+    const at = (slopeAnswer: 'flat' | 'slight' | 'big') =>
+      priceQuote(design, options, { slopeAnswer, rocky: false });
 
-    expect(measured.slopeTier).toBe('Rolling');
-    expect(chosen.slopeTier).toBe('Rolling');
-    expect(chosen.estimate).toBe(measured.estimate);
+    expect(at('flat').estimate).toBeLessThan(at('slight').estimate);
+    expect(at('slight').estimate).toBeLessThan(at('big').estimate);
+    expect(at('flat').lineItems.some((i) => i.key === 'slope')).toBe(false);
+    expect(at('big').lineItems.find((i) => i.key === 'slope')?.detail).toBe('big slope');
   });
 
-  it('costs more on steep ground than on flat, which is the point of asking', () => {
-    const flat = priceQuote(design, options, {
-      slopePercent: null,
-      slopeTier: 'Flat',
-      soilClass: null,
-    });
-    const steep = priceQuote(design, options, {
-      slopePercent: null,
-      slopeTier: 'Steep',
-      soilClass: null,
-    });
-    const unanswered = priceQuote(design, options, { slopePercent: null, soilClass: null });
+  it('applies the adders to the groundwork, not to the whole quote', () => {
+    const plain = priceQuote(design, options, { slopeAnswer: 'flat', rocky: false });
+    const groundwork = subtotals(plain).equipment + subtotals(plain).trench;
 
-    expect(steep.estimate).toBeGreaterThan(flat.estimate);
-    // No answer prices as no adder, so an unanswered steep site under-quotes —
-    // which is exactly why the picker exists.
-    expect(unanswered.slopeTier).toBe('Unknown');
-    expect(unanswered.estimate).toBe(flat.estimate);
+    const big = priceQuote(design, options, { slopeAnswer: 'big', rocky: false });
+    expect(big.lineItems.find((i) => i.key === 'slope')!.amount).toBe(
+      Math.round(groundwork * SITE.slopeAnswers.big)
+    );
+
+    const rocky = priceQuote(design, options, { slopeAnswer: 'flat', rocky: true });
+    expect(rocky.lineItems.find((i) => i.key === 'soil')!.amount).toBe(
+      Math.round(groundwork * SITE.rockyAdderPct)
+    );
   });
 
-  it('ignores a measured grade being present, since there is none to ignore', () => {
-    // A measurement always wins: the picker only appears when there is none.
-    const q = priceQuote(design, options, {
-      slopePercent: 2,
-      slopeTier: 'Steep',
-      soilClass: null,
-    });
-    expect(q.slopeTier).toBe('Flat');
+  it('stacks slope and rock', () => {
+    const both = priceQuote(design, options, { slopeAnswer: 'big', rocky: true });
+    expect(both.lineItems.filter((i) => i.key === 'slope' || i.key === 'soil')).toHaveLength(2);
+    expect(both.slopeAdderPct).toBe(SITE.slopeAnswers.big);
+    expect(both.rockyAdderPct).toBe(SITE.rockyAdderPct);
+  });
+
+  it('records the answers it priced from', () => {
+    // The record has to say what the number was built on, or a disagreement
+    // between the quote and the site visit has nothing to be settled against.
+    const q = priceQuote(design, options, { slopeAnswer: 'slight', rocky: true });
+    expect(q.slopeAnswer).toBe('slight');
+    expect(q.rocky).toBe(true);
   });
 });

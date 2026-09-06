@@ -127,6 +127,26 @@ describe('naming the heading', () => {
     }
   });
 
+  it('names the exact half-degree boundary itself', () => {
+    // Codex, 8.11: the sectors were only checked a tenth of a degree either
+    // side, so the boundary value itself was never asserted. It belongs to the
+    // sector it opens — 112.5 is southeast, not east.
+    for (const { point, from } of SECTORS) {
+      expect(compassPoint(from), `${from} opens the ${point} sector`).toBe(point);
+    }
+
+    // Spelled out once more in full, so a reader can check the rule without
+    // reconstructing the table.
+    expect(compassPoint(22.5)).toBe('northeast');
+    expect(compassPoint(67.5)).toBe('east');
+    expect(compassPoint(112.5)).toBe('southeast');
+    expect(compassPoint(157.5)).toBe('south');
+    expect(compassPoint(202.5)).toBe('southwest');
+    expect(compassPoint(247.5)).toBe('west');
+    expect(compassPoint(292.5)).toBe('northwest');
+    expect(compassPoint(337.5)).toBe('north');
+  });
+
   it('hands over at each boundary rather than overlapping or leaving a gap', () => {
     for (const { point, from } of SECTORS) {
       const justBelow = (from - 0.1 + 360) % 360;

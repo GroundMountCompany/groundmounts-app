@@ -1398,11 +1398,13 @@ test.describe('design step gestures', () => {
     ).toBeLessThanOrEqual(sheetBox.y);
 
     // Full width bar the eye cannot miss, not a chip in a corner: 8px margins.
+    // Bounded below as well as above — Codex, 8.11: a negative margin is a bar
+    // hanging off the edge of the screen, and only the upper bound was checked.
+    const rightMargin = viewport.width - (toastBox.x + toastBox.width);
+    expect(toastBox.x, 'left margin').toBeGreaterThanOrEqual(0);
     expect(toastBox.x, 'left margin').toBeLessThanOrEqual(16);
-    expect(
-      viewport.width - (toastBox.x + toastBox.width),
-      'right margin'
-    ).toBeLessThanOrEqual(16);
+    expect(rightMargin, 'right margin').toBeGreaterThanOrEqual(0);
+    expect(rightMargin, 'right margin').toBeLessThanOrEqual(16);
 
     // It does not take the touch. A bar across the bottom of the map that
     // swallowed a drag would trade one problem for a worse one, so it is

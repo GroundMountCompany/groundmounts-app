@@ -22,8 +22,9 @@ export interface EmailTemplateProps {
   calendlyUrl: string;
   /** Who the quote is from, as the customer knows them. */
   brandName: string;
-  brandLogoUrl: string;
   brandColor: string;
+  /** The design they drew, as a publicly reachable image. */
+  mapScreenshotUrl?: string;
 }
 
 const money = (amount: number) =>
@@ -58,8 +59,8 @@ export default function EmailTemplate({
   date,
   calendlyUrl,
   brandName,
-  brandLogoUrl,
   brandColor,
+  mapScreenshotUrl,
 }: EmailTemplateProps) {
   const cell: React.CSSProperties = {
     padding: '10px 0',
@@ -76,19 +77,51 @@ export default function EmailTemplate({
         color: '#171717',
       }}
     >
-      {/* eslint-disable-next-line @next/next/no-img-element -- an email client
-          renders plain HTML; next/image would emit markup no inbox can use. */}
-      <img
-        src={brandLogoUrl}
-        alt={brandName}
-        style={{ maxHeight: '44px', marginBottom: '12px' }}
-      />
+      {/*
+        A wordmark, not an image.
+
+        The logo was pointed at /logos/groundmount-company.png, which does not
+        exist in the repository — so every quote email opened with a broken
+        image icon where the sender's name should be. A brand name in the brand
+        colour cannot 404, cannot be blocked by an inbox that refuses remote
+        images, and needs no asset pipeline to stay working.
+      */}
+      <p
+        style={{
+          margin: '0 0 12px',
+          fontSize: '18px',
+          fontWeight: 700,
+          letterSpacing: '0.01em',
+          color: brandColor,
+        }}
+      >
+        {brandName}
+      </p>
       <h1 style={{ fontSize: '22px', marginBottom: '4px', color: brandColor }}>
         Your ground mount estimate
       </h1>
       <p style={{ color: '#666', fontSize: '15px', marginTop: 0 }}>
         {address} &middot; {date}
       </p>
+
+      {/* The design they drew, above the number it produced. Nothing else in
+          the email says what this quote is *of*. */}
+      {mapScreenshotUrl ? (
+        /* eslint-disable-next-line @next/next/no-img-element -- an email client
+           renders plain HTML; next/image would emit markup no inbox can use. */
+        <img
+          src={mapScreenshotUrl}
+          alt="Your panel layout"
+          style={{
+            display: 'block',
+            width: '100%',
+            maxWidth: '600px',
+            borderRadius: '10px',
+            border: '1px solid #e5e5e5',
+            margin: '20px 0 0',
+          }}
+        />
+      ) : null}
 
       <div
         style={{

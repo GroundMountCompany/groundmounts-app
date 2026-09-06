@@ -13,16 +13,42 @@ import { PANELS, BATTERY, SITE } from '@/config/pricing';
  */
 
 const DESIGN = { panelCount: 16, tier: 'standard' as const, trenchFeet: 113 };
-const SITE_CONDITIONS = { slopePercent: 3, soilClass: 'clay loam' };
+const SITE_CONDITIONS = { slopeAnswer: 'flat' as const, rocky: false };
 
 describe('what ships enabled', () => {
-  it('is everything, now that the owner has confirmed the prices', () => {
-    // The record of what is on offer as of this commit. An option added later
-    // with a placeholder price should ship false until it is confirmed.
+  it('is land clearing only, by the owner decision in Phase 9', () => {
+    // The record of what is on offer as of this commit. The panel choice and
+    // the battery were both switched off deliberately: the options step now
+    // asks about the ground instead, and battery is a conversation rather than
+    // a checkbox on a ballpark.
     expect(PANELS.standard.enabled).toBe(true);
-    expect(PANELS.premium.enabled).toBe(true);
-    expect(BATTERY.enabled).toBe(true);
+    expect(PANELS.premium.enabled).toBe(false);
+    expect(BATTERY.enabled).toBe(false);
     expect(SITE.vegetationClearing.enabled).toBe(true);
+  });
+
+  it('cannot put a battery on a quote while it is off', () => {
+    // Not just the card being hidden: a payload asking for two batteries is
+    // priced as though it had not asked, so no quote carries a battery line
+    // and the trench never picks up the second-run multiplier.
+    const asked = priceQuote(
+      DESIGN,
+      { batteryUnits: 2, needsClearing: false },
+      SITE_CONDITIONS
+    );
+    const none = priceQuote(DESIGN, { batteryUnits: 0, needsClearing: false }, SITE_CONDITIONS);
+
+    expect(asked.lineItems.some((i) => i.key === 'battery')).toBe(false);
+    expect(asked.estimate).toBe(none.estimate);
+  });
+
+  it('cannot put premium panels on a quote while they are off', () => {
+    const asked = priceQuote(
+      { ...DESIGN, tier: 'premium' },
+      { batteryUnits: 0, needsClearing: false },
+      SITE_CONDITIONS
+    );
+    expect(asked.lineItems[0].detail).toContain(PANELS.standard.name);
   });
 });
 
@@ -72,9 +98,9 @@ describe('a design asking for something that is not on offer', () => {
     expect(options.needsClearing).toBe(true);
   });
 
-  it('reaches the lead as what will be built', () => {
-    // Everything is on offer today, so this is the pass-through case. The
-    // stripping itself is covered above, where availability is injected.
+  it('reaches the lead as what will be built, not as what was asked for', () => {
+    // Against the shipped config, so this is the live gating rather than an
+    // injected one: premium and battery are off, clearing is on.
     const inputs = buildableInputs(
       parseQuoteInputs({
         panelCount: 16,
@@ -87,8 +113,8 @@ describe('a design asking for something that is not on offer', () => {
       })
     );
 
-    expect(inputs.tier).toBe('premium');
-    expect(inputs.batteryUnits).toBe(2);
+    expect(inputs.tier).toBe('standard');
+    expect(inputs.batteryUnits).toBe(0);
     expect(inputs.needsClearing).toBe(true);
   });
 });

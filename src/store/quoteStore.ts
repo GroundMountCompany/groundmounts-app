@@ -4,7 +4,7 @@ import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import * as turf from '@turf/turf';
 import { v4 as uuid } from 'uuid';
-import { TRENCH } from '@/config/pricing';
+import { TRENCH, type SlopeAnswer } from '@/config/pricing';
 import type { PanelTier } from '@/config/pricing';
 import type { SlopeTier } from '@/lib/slope';
 import { TX_FALLBACK_CURVE, type ProductionCurve } from '@/lib/production';
@@ -23,6 +23,27 @@ export type BillPhase = 'none' | 'reading' | 'review' | 'confirmed';
  * number somebody chose by hand must not move on its own.
  */
 export type SizingMode = 'auto' | 'manual';
+
+/**
+ * The customer's own answers about the ground, from the options step.
+ *
+ * These price the site adders. The terrain and soil surveys pre-select them
+ * and are still recorded on the lead, but from Phase 9 they do not decide the
+ * number — the person standing on the land does.
+ */
+export type SiteAnswers = {
+  slopeAnswer: SlopeAnswer;
+  rocky: boolean;
+  /** Recorded only. Battery is a conversation, not a line on a ballpark. */
+  batteryInterest: boolean;
+  /**
+   * Set the first time the customer touches any of the three.
+   *
+   * Until then the survey may keep updating the pre-selection as it arrives.
+   * After it, nothing moves their answer but them.
+   */
+  answered: boolean;
+};
 
 /**
  * What the last automatic resize did, for the toast to report.
@@ -133,6 +154,10 @@ interface QuoteState {
   /** Manual panel adjustment on the design step, added to the sized count. */
   panelAdjust: number;
   sizingMode: SizingMode;
+  slopeAnswer: SlopeAnswer;
+  rocky: boolean;
+  batteryInterest: boolean;
+  siteAnswered: boolean;
   sizeNotice: SizeNotice | null;
   /**
    * The count sizing produced, before any manual adjustment. Kept so the ±
@@ -216,6 +241,11 @@ interface QuoteActions {
   setRateCentsPerKwh: (v: number) => void;
   setPanelAdjust: (v: number) => void;
   setSizingMode: (mode: SizingMode) => void;
+  setSlopeAnswer: (answer: SlopeAnswer) => void;
+  setRocky: (rocky: boolean) => void;
+  setBatteryInterest: (interested: boolean) => void;
+  /** Apply the survey's suggestion, only while the customer has not answered. */
+  suggestSiteAnswers: (suggestion: { slopeAnswer: SlopeAnswer; rocky: boolean }) => void;
   setSizeNotice: (notice: SizeNotice | null) => void;
   returnToAuto: () => void;
   setSized: (panels: number, azimuth: number) => void;
@@ -273,6 +303,10 @@ const initialState: QuoteState = {
   rateCentsPerKwh: DEFAULT_RATE_CENTS,
   panelAdjust: 0,
   sizingMode: 'auto',
+  slopeAnswer: 'flat',
+  rocky: false,
+  batteryInterest: false,
+  siteAnswered: false,
   sizeNotice: null,
   sizedPanels: 0,
   sizedAzimuth: 180,
@@ -409,6 +443,15 @@ export const useQuoteStore = create<QuoteStore>()(
       */
       setPanelAdjust: (panelAdjust) => set({ panelAdjust, sizingMode: 'manual' }),
       setSizingMode: (sizingMode) => set({ sizingMode }),
+      // Answering anything marks all three as theirs: a survey result arriving
+      // late must not move a button they have already pressed.
+      setSlopeAnswer: (slopeAnswer) => set({ slopeAnswer, siteAnswered: true }),
+      setRocky: (rocky) => set({ rocky, siteAnswered: true }),
+      setBatteryInterest: (batteryInterest) => set({ batteryInterest, siteAnswered: true }),
+      suggestSiteAnswers: ({ slopeAnswer, rocky }) => {
+        if (get().siteAnswered) return;
+        set({ slopeAnswer, rocky });
+      },
       setSizeNotice: (sizeNotice) => set({ sizeNotice }),
       /** Back to the sizing maths, with the hand adjustment dropped. */
       returnToAuto: () => set({ panelAdjust: 0, sizingMode: 'auto' }),
@@ -471,6 +514,10 @@ export const useQuoteStore = create<QuoteStore>()(
         rateCentsPerKwh: state.rateCentsPerKwh,
         panelAdjust: state.panelAdjust,
         sizingMode: state.sizingMode,
+        slopeAnswer: state.slopeAnswer,
+        rocky: state.rocky,
+        batteryInterest: state.batteryInterest,
+        siteAnswered: state.siteAnswered,
         sizedPanels: state.sizedPanels,
         sizedAzimuth: state.sizedAzimuth,
         leadFiled: state.leadFiled,

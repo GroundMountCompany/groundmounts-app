@@ -84,10 +84,10 @@ function costValues(): Map<number, string> {
   add(BATTERY.firstUnit, 'BATTERY.firstUnit');
   add(BATTERY.additionalUnit, 'BATTERY.additionalUnit');
 
-  SITE.slopeTiers.forEach((t) => add(t.adderPct, `SITE.slopeTiers.${t.name}.adderPct`));
-  for (const [soil, pct] of Object.entries(SITE.soilAdders)) {
-    add(pct, `SITE.soilAdders["${soil}"]`);
+  for (const [answer, pct] of Object.entries(SITE.slopeAnswers)) {
+    add(pct, `SITE.slopeAnswers.${answer}`);
   }
+  add(SITE.rockyAdderPct, 'SITE.rockyAdderPct');
   add(SITE.vegetationClearing.perAcre, 'SITE.vegetationClearing.perAcre');
   add(SITE.vegetationClearing.baseCharge, 'SITE.vegetationClearing.baseCharge');
 

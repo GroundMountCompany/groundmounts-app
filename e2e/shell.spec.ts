@@ -569,9 +569,10 @@ test('the design step and the quote report the same production', async ({ page }
   expect(Math.abs(kwh - kw * TX_FALLBACK_CURVE[180])).toBeGreaterThan(1_000);
 });
 
-test('options the owner has not switched on are not offered', async ({ page }) => {
-  // Premium panels and batteries ship disabled: their prices are placeholders,
-  // and a card quoting a number nobody stands behind is worse than no card.
+test('the options step asks four questions about the land', async ({ page }) => {
+  // Phase 9: the panel choice and the battery cards are gone. What replaced
+  // them is what the surveys used to decide silently — how steep the ground is
+  // and whether it is rocky, both worth thousands on a bad parcel.
   await page.addInitScript((payload) => {
     if (window.localStorage.getItem('gmq:v3')) return;
     window.localStorage.setItem('gmq:v3', JSON.stringify(payload));
@@ -580,40 +581,41 @@ test('options the owner has not switched on are not offered', async ({ page }) =
   await mockGeocoding(page);
   await gotoStep(page, 4);
 
-  await expect(page.getByTestId('option-panels')).toHaveCount(PANELS.premium.enabled ? 1 : 0);
-  await expect(page.getByTestId('option-battery')).toHaveCount(BATTERY.enabled ? 1 : 0);
+  // Gone entirely, not hidden behind a flag that could flip back on.
+  await expect(page.getByTestId('option-panels')).toHaveCount(0);
+  await expect(page.getByTestId('tier-premium')).toHaveCount(0);
+  await expect(page.getByTestId('battery-1')).toHaveCount(0);
+  expect(PANELS.premium.enabled, 'premium is meant to be off in pricing.ts').toBe(false);
+  expect(BATTERY.enabled, 'battery is meant to be off in pricing.ts').toBe(false);
+
+  // Four questions, in the owner's order.
+  const order = await page.evaluate(() =>
+    Array.from(document.querySelectorAll('[data-testid^="option-"]')).map(
+      (el) => (el as HTMLElement).dataset.testid
+    )
+  );
+  expect(order).toEqual(['option-siteprep', 'option-slope', 'option-soil', 'option-battery']);
+
   await expect(page.getByTestId('option-siteprep')).toHaveCount(
     SITE.vegetationClearing.enabled ? 1 : 0
   );
-
-  // Whatever is on offer, the step is not empty.
-  await expect(page.getByTestId('option-siteprep')).toBeVisible();
+  for (const id of ['slope-answer-flat', 'slope-answer-slight', 'slope-answer-big']) {
+    await expect(page.getByTestId(id)).toBeVisible();
+  }
+  await expect(page.getByTestId('rocky-no')).toBeVisible();
+  await expect(page.getByTestId('rocky-yes')).toBeVisible();
+  await expect(page.getByTestId('battery-interest-yes')).toBeVisible();
+  await expect(page.getByTestId('battery-interest-no')).toBeVisible();
 });
 
-test('the premium delta is the change the customer actually gets', async ({ page }) => {
-  test.skip(!PANELS.premium.enabled, 'premium panels are switched off in pricing.ts');
-
-  // Choosing premium re-sizes the array: fewer, stronger panels for the same
-  // bill. The card used to price the current count at the premium rate, which
-  // quoted an increase nobody was ever charged.
+test('the ground answers change the price, and the battery question does not', async ({
+  page,
+}) => {
   await page.addInitScript((payload) => {
     if (window.localStorage.getItem('gmq:v3')) return;
     window.localStorage.setItem('gmq:v3', JSON.stringify(payload));
   }, siteCurveSeed(4));
 
-  await page.route('**/api/site*', (route) =>
-    route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({
-        ok: true,
-        curve: MOCK_CURVE,
-        curveSource: 'pvwatts',
-        soilClass: 'clay loam',
-        soilSource: 'ssurgo',
-      }),
-    })
-  );
   await mockGeocoding(page);
 
   /** Midpoint of the range on the quote step, which is the estimate itself. */
@@ -625,28 +627,86 @@ test('the premium delta is the change the customer actually gets', async ({ page
   };
 
   await gotoStep(page, 4);
-  const quoted = (await page.getByTestId('tier-premium').textContent()) ?? '';
-  const delta = Number(quoted.replace(/[^\d]/g, '')) * (quoted.includes('−') ? -1 : 1);
-  expect(Math.abs(delta), 'premium was quoted as no change at all').toBeGreaterThan(0);
+  await expect(page.getByTestId('slope-answer-flat')).toHaveAttribute('aria-pressed', 'true');
+  const flat = await estimateOnQuote();
 
-  const before = await estimateOnQuote();
+  // A big slope costs more than a slight one, which costs more than flat.
+  await gotoStep(page, 4);
+  await page.getByTestId('slope-answer-slight').click();
+  const slight = await estimateOnQuote();
 
   await gotoStep(page, 4);
-  await page.getByTestId('tier-premium').click();
-  await expect(page.getByTestId('tier-premium')).toHaveAttribute('aria-pressed', 'true');
+  await page.getByTestId('slope-answer-big').click();
+  const big = await estimateOnQuote();
 
-  const after = await estimateOnQuote();
+  expect(slight).toBeGreaterThan(flat);
+  expect(big).toBeGreaterThan(slight);
 
-  // Within a dollar or two of rounding on each end of the range.
-  expect(Math.abs(after - before - delta), 'the quoted delta was not the change').toBeLessThan(3);
+  // Rocky ground costs more again, on top.
+  await gotoStep(page, 4);
+  await page.getByTestId('rocky-yes').click();
+  const rocky = await estimateOnQuote();
+  expect(rocky).toBeGreaterThan(big);
+
+  // The battery question is a conversation, not a line item.
+  await gotoStep(page, 4);
+  await page.getByTestId('battery-interest-yes').click();
+  await expect(page.getByTestId('battery-interest-yes')).toHaveAttribute('aria-pressed', 'true');
+  expect(await estimateOnQuote()).toBe(rocky);
+
+  // And the answers survive a reload, like every other decision in the funnel.
+  await gotoStep(page, 4);
+  await page.reload();
+  await waitForHydration(page);
+  await expect(page.getByTestId('slope-answer-big')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByTestId('rocky-yes')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByTestId('battery-interest-yes')).toHaveAttribute('aria-pressed', 'true');
 });
 
-test('asks for the slope when the ground cannot be read, and prices the answer', async ({
+test('the soil survey pre-selects rocky, and the customer can overrule it', async ({ page }) => {
+  await page.addInitScript((payload) => {
+    if (window.localStorage.getItem('gmq:v3')) return;
+    window.localStorage.setItem('gmq:v3', JSON.stringify(payload));
+  }, {
+    ...siteCurveSeed(4),
+    state: {
+      ...siteCurveSeed(4).state,
+      soilClass: 'Tarrant rock outcrop complex',
+      slopeTier: 'Steep',
+    },
+  });
+
+  await mockGeocoding(page);
+  await gotoStep(page, 4);
+
+  // Pre-selected from what the surveys found, with a line saying why.
+  await expect(page.getByTestId('rocky-yes')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByTestId('rocky-survey-note')).toBeVisible();
+  await expect(page.getByTestId('slope-answer-big')).toHaveAttribute('aria-pressed', 'true');
+
+  // And overruled by the person standing on the land, which is the whole point.
+  await page.getByTestId('rocky-no').click();
+  await expect(page.getByTestId('rocky-no')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByTestId('rocky-yes')).toHaveAttribute('aria-pressed', 'false');
+
+  // The note stays: it is what the survey said, not what they answered.
+  await expect(page.getByTestId('rocky-survey-note')).toBeVisible();
+
+  // A survey result arriving late must not move an answer already given.
+  await page.reload();
+  await waitForHydration(page);
+  await expect(page.getByTestId('rocky-no')).toHaveAttribute('aria-pressed', 'true');
+});
+
+test('a slope picked on the design step pre-selects the answer that prices', async ({
   page,
 }) => {
-  // Both terrain lookups can fail — no DEM tiles, no Tilequery. An unknown
-  // slope prices at no adder at all, so a steep hill-country parcel was quietly
-  // quoted as if it were flat.
+  // Both terrain lookups can fail — no DEM tiles, no Tilequery — and the
+  // design step asks. From Phase 9 that pick does not price directly: it sets
+  // the tier on the record for the owner, and it pre-selects the slope answer
+  // on the options step, which is what the number is built from. This walks
+  // the whole chain, because a break anywhere in it quietly under-quotes a
+  // steep parcel.
   await page.addInitScript((payload) => {
     if (window.localStorage.getItem('gmq:v3')) return;
     window.localStorage.setItem('gmq:v3', JSON.stringify(payload));
@@ -684,6 +744,9 @@ test('asks for the slope when the ground cannot be read, and prices the answer',
   await gotoStep(page, 3);
   await expect(page.getByTestId('slope-picker')).toBeAttached();
 
+  // Nobody has said anything about the ground yet, so it prices as flat.
+  await gotoStep(page, 4);
+  await expect(page.getByTestId('slope-answer-flat')).toHaveAttribute('aria-pressed', 'true');
   const unanswered = await estimateOnQuote();
 
   await gotoStep(page, 3);
@@ -693,6 +756,10 @@ test('asks for the slope when the ground cannot be read, and prices the answer',
   await openSheet(page);
   await page.getByTestId('slope-steep').click();
   await expect(page.getByTestId('slope-steep')).toHaveAttribute('aria-pressed', 'true');
+
+  // Which arrives on the options step as the answer already chosen for them.
+  await gotoStep(page, 4);
+  await expect(page.getByTestId('slope-answer-big')).toHaveAttribute('aria-pressed', 'true');
 
   const steep = await estimateOnQuote();
   expect(steep, 'answering steep changed nothing').toBeGreaterThan(unanswered);

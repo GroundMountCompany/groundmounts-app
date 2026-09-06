@@ -117,9 +117,14 @@ This is the step the whole tool exists for. Take your time.
 
 ## Step 5 — Options
 
-- [ ] Only the options the owner has switched on appear (today: site prep).
-- [ ] The cards show a price change, and choosing one changes the number by
-      exactly that.
+- [ ] Four questions, in this order: land clearing, slope, soil, battery.
+- [ ] No panel choice and no battery *pricing* card anywhere.
+- [ ] Each of the first three shows a price change, and choosing one changes
+      the number by exactly that.
+- [ ] The battery question shows **no** price on either button.
+- [ ] On a parcel the soil survey calls rocky, **Rocky** starts selected with
+      the line "We checked the soil survey — looks rocky here." Tapping **Not
+      rocky** sticks, including after a reload.
 
 ## Step 6 — Contact and submit
 
@@ -130,8 +135,12 @@ This is the step the whole tool exists for. Take your time.
       button are both visible.** Scroll if you have to; you should not have to.
 - [ ] Submit. The button disables while it works.
 - [ ] The price is revealed and it matches what the email says.
-- [ ] **Check the inbox on the phone.** The email arrives, the logo loads, the
-      numbers match the screen, and the Book a call link opens.
+- [ ] **Check the inbox on the phone.** The email arrives, the sender's name is
+      readable text at the top (no broken-image icon), the map of your own
+      design is above the price, the numbers match the screen, and the Book a
+      call link opens.
+- [ ] Exactly **one** disclaimer under the range, on the screen and in the
+      email. Not two saying the same thing.
 - [ ] Press back. It steps back through the funnel rather than leaving the page
       or reloading the whole thing.
 - [ ] **Edge-swipe back** on iOS (swipe from the left edge). Same thing: a step

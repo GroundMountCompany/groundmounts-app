@@ -16,17 +16,19 @@ export function useQuote(): Quote {
   const trenchFeet = useQuoteStore((s) => s.trenchFeet);
   const batteryUnits = useQuoteStore((s) => s.batteryUnits);
   const needsClearing = useQuoteStore((s) => s.needsClearing);
-  const slopePercent = useQuoteStore((s) => s.slopePercent);
-  const slopeTier = useQuoteStore((s) => s.slopeTier);
-  const soilClass = useQuoteStore((s) => s.soilClass);
+  // The customer's own answers, not the survey's. From Phase 9 the terrain and
+  // soil lookups pre-select these and are recorded on the lead, but the price
+  // follows what the person standing on the land said.
+  const slopeAnswer = useQuoteStore((s) => s.slopeAnswer);
+  const rocky = useQuoteStore((s) => s.rocky);
 
   return useMemo(
     () =>
       priceQuote(
         { panelCount, tier, trenchFeet },
         { batteryUnits, needsClearing },
-        { slopePercent, slopeTier, soilClass }
+        { slopeAnswer, rocky }
       ),
-    [panelCount, tier, trenchFeet, batteryUnits, needsClearing, slopePercent, slopeTier, soilClass]
+    [panelCount, tier, trenchFeet, batteryUnits, needsClearing, slopeAnswer, rocky]
   );
 }

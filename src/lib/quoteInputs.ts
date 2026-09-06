@@ -1,7 +1,9 @@
 import {
   BATTERY,
   PANELS,
+  SITE,
   type PanelTier,
+  type SlopeAnswer,
   type SlopeTierName,
 } from '@/config/pricing';
 import { availableOnly, priceQuote, subtotals, spread, type Quote } from './pricing';
@@ -25,6 +27,18 @@ export interface QuoteInputs {
   trenchFeet: number;
   batteryUnits: number;
   needsClearing: boolean;
+  /**
+   * The customer's own answers about the ground. These, and only these, price
+   * the site adders — see PricingSite.
+   */
+  slopeAnswer: SlopeAnswer;
+  rocky: boolean;
+  /** Recorded on the lead, priced nowhere. */
+  batteryInterest: boolean;
+  /**
+   * What the surveys found. Recorded for the owner, and used to pre-select the
+   * answers above on the options step. Never priced.
+   */
   slopePercent: number | null;
   slopeTier: SlopeTierName | null;
   soilClass: string | null;
@@ -54,6 +68,25 @@ const MAX_SLOPE_PERCENT = 200;
 const MAX_SOIL_CLASS_CHARS = 120;
 
 const SLOPE_TIER_NAMES: SlopeTierName[] = ['Flat', 'Rolling', 'Steep', 'Unknown'];
+
+/** The only three slope answers that price anything. */
+const SLOPE_ANSWERS = Object.keys(SITE.slopeAnswers) as SlopeAnswer[];
+
+/**
+ * The customer's slope answer, bounded.
+ *
+ * A value we do not recognise is a tampered or broken payload and is refused.
+ * An *absent* one is not: a browser running a cached bundle from before this
+ * shipped should still get a quote, on the answer that adds nothing, rather
+ * than a 400 it cannot explain.
+ */
+function parseSlopeAnswer(value: unknown): SlopeAnswer {
+  if (value === undefined || value === null) return 'flat';
+  if (typeof value !== 'string' || !SLOPE_ANSWERS.includes(value as SlopeAnswer)) {
+    throw new InvalidQuoteInputs('unknown slope answer');
+  }
+  return value as SlopeAnswer;
+}
 
 export class InvalidQuoteInputs extends Error {}
 
@@ -127,6 +160,9 @@ export function parseQuoteInputs(raw: unknown): QuoteInputs {
     trenchFeet: requireCount(obj.trenchFeet, 'trenchFeet', MAX_TRENCH_FEET),
     batteryUnits: requireCount(obj.batteryUnits, 'batteryUnits', BATTERY.maxUnits),
     needsClearing: obj.needsClearing === true,
+    slopeAnswer: parseSlopeAnswer(obj.slopeAnswer),
+    rocky: obj.rocky === true,
+    batteryInterest: obj.batteryInterest === true,
     slopePercent,
     slopeTier,
     soilClass,
@@ -154,15 +190,10 @@ export function priceFromInputs(
     { batteryUnits: inputs.batteryUnits, needsClearing: inputs.needsClearing }
   );
 
-  const quote = priceQuote(
-    buildable.design,
-    buildable.options,
-    {
-      slopePercent: inputs.slopePercent,
-      slopeTier: inputs.slopeTier,
-      soilClass: inputs.soilClass,
-    }
-  );
+  const quote = priceQuote(buildable.design, buildable.options, {
+    slopeAnswer: inputs.slopeAnswer,
+    rocky: inputs.rocky,
+  });
 
   const parts = subtotals(quote);
 

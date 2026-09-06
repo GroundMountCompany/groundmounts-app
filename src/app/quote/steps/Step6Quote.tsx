@@ -163,10 +163,13 @@ export default function Step6Quote() {
           <p data-testid="price-revealed" className="text-[26px] font-bold text-neutral-900">
             {money(filed?.low ?? quote.low)} – {money(filed?.high ?? quote.high)}
           </p>
+          {/* One disclaimer, not two. This screen carried both "Estimates —
+              final price after site visit" and "An estimate from your design.
+              The real number comes after a site visit.", stacked, saying the
+              same thing twice in slightly different words. */}
           <p data-testid="estimate-note-revealed" className="mt-1 text-[15px] text-neutral-500">
             {UI.estimateNote}
           </p>
-          <p className="mt-1 text-[15px] text-neutral-600">{UI.priceEstimateNote}</p>
         </div>
 
         <div>

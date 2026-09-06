@@ -1,9 +1,17 @@
+/*
+  No logo field.
+
+  It pointed at /logos/groundmount-company.png, which is not in the repository,
+  so every quote email opened with a broken image where the sender's name
+  should be. The email now leads with a wordmark in the brand colour: it cannot
+  404, and an inbox that blocks remote images still shows it. Adding an image
+  back means adding the asset first.
+*/
 export type BrandConfig = {
   // Identity
   name: string;
   tagline: string;
   domain: string;
-  logo: string;
 
   // Colors
   primaryColor: string;
@@ -43,7 +51,6 @@ export const brands: Record<string, BrandConfig> = {
     name: "The Ground Mount Company",
     tagline: "Your Ground Mount Guys",
     domain: "groundmounts.com",
-    logo: "/logos/groundmount-company.png",
     primaryColor: "#1e3a5f",
     accentColor: "#dc2626",
     phone: "(469) 809-7099",
@@ -73,7 +80,6 @@ export const brands: Record<string, BrandConfig> = {
     tagline: "Ground mount solar design",
     // The one verified sending domain, worn under a neutral display name.
     domain: "groundmounts.com",
-    logo: "/logos/groundmount-company.png",
     primaryColor: "#1e3a5f",
     accentColor: "#16a34a",
     phone: "(469) 809-7099",

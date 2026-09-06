@@ -16,6 +16,7 @@ import { siteFactsForArray, resolveSiteConditions } from "@/lib/server/siteLooku
 import EmailTemplate from "@/components/common/EmailTemplate";
 import type { ReactElement } from "react";
 import { brandFor } from "@/config/brands";
+import type { SlopeAnswer } from "@/config/pricing";
 import {
   storeGet,
   storeSet,
@@ -23,6 +24,13 @@ import {
   releaseLease,
   StoreUnavailable,
 } from "@/lib/server/redis";
+
+/** How the customer's slope answer reads in Airtable's single-select. */
+const SLOPE_ANSWER_LABEL: Record<SlopeAnswer, string> = {
+  flat: 'Flat',
+  slight: 'Slight',
+  big: 'Big',
+};
 
 /** Decoded screenshots above this are rejected rather than uploaded. */
 const MAX_SCREENSHOT_BYTES = 2 * 1024 * 1024;
@@ -91,6 +99,13 @@ interface SubmitRecord {
   trenchFeet: number;
   systemSizeKw: number;
   annualProductionKwh: number;
+  /**
+   * The Blob URL of the design the customer drew.
+   *
+   * Stored so a resend produces the same email as the original rather than one
+   * missing its picture — the upload happens once, before either send.
+   */
+  mapScreenshotUrl?: string;
   estimate: number;
 }
 
@@ -356,7 +371,8 @@ async function sendQuoteEmail(
     systemSizeKw: number;
     annualProductionKwh: number;
     quote: { lineItems: Array<{ key: string; label: string; detail?: string; amount: number }>; estimate: number; low: number; high: number };
-  }
+  },
+  mapScreenshotUrl?: string
 ): Promise<boolean> {
   try {
     const resend = getResendOrThrow();
@@ -382,10 +398,8 @@ async function sendQuoteEmail(
       }),
       calendlyUrl: brand.calendlyUrl,
       brandName: brand.name,
-      brandLogoUrl: brand.logo.startsWith('http')
-        ? brand.logo
-        : `https://${brand.domain}${brand.logo}`,
       brandColor: brand.primaryColor,
+      mapScreenshotUrl,
     }) as ReactElement;
 
     const { error } = await resend.emails.send(
@@ -535,7 +549,12 @@ async function partialFields(
     fields['Site Prep'] = inputs.needsClearing;
     fields.Azimuth = inputs.azimuth;
     fields['Slope %'] = conditions.slopePercent ?? undefined;
-    fields['Slope Tier'] = priced.quote.slopeTier;
+    // The survey's classification, not the customer's answer: this column is
+    // for the owner to see what the ground looked like from orbit.
+    fields['Slope Tier'] = conditions.slopeTier ?? undefined;
+    fields['Slope Answer'] = SLOPE_ANSWER_LABEL[inputs.slopeAnswer];
+    fields['Rocky'] = inputs.rocky;
+    fields['Battery Interest'] = inputs.batteryInterest;
     fields['Soil Class'] = conditions.soilClass ?? undefined;
     fields['Curve Source'] = facts.curveSource;
     fields['Est Annual Production kWh'] = priced.annualProductionKwh;
@@ -815,7 +834,8 @@ export async function POST(req: NextRequest) {
             low: stored.priceLow,
             high: stored.priceHigh,
           },
-        }
+        },
+        stored.mapScreenshotUrl
       );
       console.log('[LEAD_EMAIL_RESEND]', lead.id, emailSent ? 'sent' : 'failed');
 
@@ -1022,7 +1042,10 @@ export async function POST(req: NextRequest) {
       'Battery Units': inputs.batteryUnits,
       'Site Prep': inputs.needsClearing,
       'Slope %': conditions.slopePercent ?? undefined,
-      'Slope Tier': priced.quote.slopeTier,
+      'Slope Tier': conditions.slopeTier ?? undefined,
+      'Slope Answer': SLOPE_ANSWER_LABEL[inputs.slopeAnswer],
+      Rocky: inputs.rocky,
+      'Battery Interest': inputs.batteryInterest,
       'Soil Class': conditions.soilClass ?? undefined,
       'Est Annual Production kWh': priced.annualProductionKwh,
       // Whether that production figure came from the site's own PVWatts curve
@@ -1143,10 +1166,20 @@ export async function POST(req: NextRequest) {
     // failure here is reported in the response rather than failing the request:
     // the client retries the email alone, through `resend`.
     const emailSent = lead.email
-      ? await sendQuoteEmail(lead.id, lead.email, lead.address ?? '', lead.brand, inputs, priced)
+      ? await sendQuoteEmail(
+          lead.id,
+          lead.email,
+          lead.address ?? '',
+          lead.brand,
+          inputs,
+          priced,
+          mapScreenshotUrl
+        )
       : false;
 
     record.emailSent = emailSent;
+    // Kept on the record so a resend reproduces the same email, picture and all.
+    record.mapScreenshotUrl = mapScreenshotUrl;
 
     // The owner's notification. Built here and stored with the record, so a
     // retry sends the same message rather than rebuilding it from state that

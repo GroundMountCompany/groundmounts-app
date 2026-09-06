@@ -5,6 +5,7 @@ import { searchAddress } from '@/lib/mapbox';
 import { GeocodingFeature } from '@/types';
 import { useEffect, useRef, useState, useCallback, ChangeEvent, JSX } from 'react';
 import { createPortal } from 'react-dom';
+import { useSettledLayout } from '@/lib/useSettledLayout';
 import { useQuoteContext } from '@/contexts/quoteContext';
 import { useSearchParams } from 'next/navigation';
 import { fireDesignStartOnce } from '@/lib/fb';
@@ -13,13 +14,6 @@ import { UI } from '@/config/copy';
 /** Where the portalled list is drawn, in viewport coordinates. */
 type Anchor = { left: number; top: number; width: number; maxHeight: number };
 
-/**
- * How long the settle loop will keep re-measuring before giving up.
- *
- * Not a guess at how long the sheet takes — it stops as soon as the answer
- * stops changing. This is only the backstop for a page that never settles.
- */
-const SETTLE_TIMEOUT_MS = 2000;
 
 interface AddressInputProps {
   /**
@@ -43,7 +37,6 @@ export const AddressInput = ({ onFocusRequestPeek }: AddressInputProps = {}): JS
   const [anchor, setAnchor] = useState<Anchor | null>(null);
   /** What the last measurement produced, so a no-op frame writes nothing. */
   const lastAnchor = useRef<string>('');
-  const rafRef = useRef<number | null>(null);
 
   useEffect(() => setMounted(true), []);
 
@@ -99,63 +92,9 @@ export const AddressInput = ({ onFocusRequestPeek }: AddressInputProps = {}): JS
     return signature;
   }, []);
 
-  /**
-   * Re-measure every frame until the layout stops moving.
-   *
-   * Two things defeat a simpler approach. The sheet's drop to peek is a 220ms
-   * CSS height transition that emits no event. And when the keyboard opens, the
-   * sheet *moves* without resizing — it is lifted by `bottom: keyboardInset` —
-   * so a ResizeObserver on it never fires, and the visualViewport handler runs
-   * before React has committed the sheet's new position, measuring the old one.
-   * Both failure modes shipped a list sized against a sheet that was somewhere
-   * else, overlapping it by 184px.
-   *
-   * A ladder of timeouts covered the common case and lost under load. This
-   * watches for the answer to stop changing instead, which has no duration in
-   * it to be wrong about: three identical frames and it stops, with a hard cap
-   * so a permanently animating page cannot pin a rAF loop open.
-   */
-  const settle = useCallback(() => {
-    // Measure now, before waiting on a frame. The list does not render until it
-    // has an anchor, and requestAnimationFrame is throttled hard on a busy or
-    // occluded page — leaving the first paint of the suggestions dependent on a
-    // frame arriving meant that under load they simply never appeared.
-    measure();
-    if (rafRef.current !== null) return;
-    const deadline = performance.now() + SETTLE_TIMEOUT_MS;
-    let identical = 0;
-    let last = '';
-    const tick = () => {
-      const now = measure();
-      identical = now === last ? identical + 1 : 0;
-      last = now;
-      if (identical >= 3 || performance.now() > deadline) {
-        rafRef.current = null;
-        return;
-      }
-      rafRef.current = requestAnimationFrame(tick);
-    };
-    rafRef.current = requestAnimationFrame(tick);
-  }, [measure]);
-
-  useEffect(() => {
-    if (!showSuggestions) return;
-    settle();
-    const vv = window.visualViewport;
-
-    window.addEventListener('resize', settle);
-    window.addEventListener('scroll', settle, true);
-    vv?.addEventListener('resize', settle);
-    vv?.addEventListener('scroll', settle);
-    return () => {
-      if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
-      rafRef.current = null;
-      window.removeEventListener('resize', settle);
-      window.removeEventListener('scroll', settle, true);
-      vv?.removeEventListener('resize', settle);
-      vv?.removeEventListener('scroll', settle);
-    };
-  }, [showSuggestions, suggestions.length, settle]);
+  // One settle loop, shared with the resize toast, which is positioned
+  // against the same moving sheet for the same reasons.
+  useSettledLayout(measure, showSuggestions && suggestions.length > 0);
 
   useEffect(() => {
     const fetchSuggestions = async (): Promise<void> => {

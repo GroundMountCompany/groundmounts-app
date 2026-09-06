@@ -1889,6 +1889,56 @@ test('pressing the panel control takes the count, and the chip gives it back', a
   await expect(panels).toHaveText(String(auto));
 });
 
+test('the HUD says which way the array faces for as long as it is off south', async ({
+  page,
+}) => {
+  // The toast says what just changed and goes. Owner QA: on a phone it was
+  // missable, and once it had gone nothing on screen explained why the count
+  // was what it was. This line stays until the array is back at 180, and it is
+  // on the desktop layout too — the HUD lives on the map, which both have.
+  await page.addInitScript((payload) => {
+    if (window.localStorage.getItem('gmq:v3')) return;
+    window.localStorage.setItem('gmq:v3', JSON.stringify(payload));
+  }, {
+    ...siteCurveSeed(3),
+    // Sized for the heading it is on, which is what a finished rotation leaves
+    // behind. Seeding azimuth alone leaves the south count in place and the
+    // difference is honestly zero, which is a state the line handles but not
+    // the one this test is about.
+    state: { ...siteCurveSeed(3).state, azimuth: 120, sizedAzimuth: 120 },
+  });
+
+  await mockGeocoding(page);
+  await gotoStep(page, 3);
+  await waitForSheet(page);
+
+  const line = page.getByTestId('hud-facing');
+  await expect(line).toBeVisible();
+
+  // 120 degrees is inside the southeast sector, which runs 112.5 to 157.5.
+  await expect(page.getByTestId('hud-facing-point')).toHaveText('SE');
+
+  // The delta is the same number the sheet's own count implies against the
+  // south sizing, read from one frame rather than recomputed here.
+  const shown = await waitForStableText(page, 'hud-facing-delta');
+  expect(Number(shown), 'the line named no panel difference').toBeGreaterThan(0);
+  await expect(line).toContainText('more panels than south');
+});
+
+test('the facing line clears when the array is back at south', async ({ page }) => {
+  await page.addInitScript((payload) => {
+    if (window.localStorage.getItem('gmq:v3')) return;
+    window.localStorage.setItem('gmq:v3', JSON.stringify(payload));
+  }, siteCurveSeed(3));
+
+  await mockGeocoding(page);
+  await gotoStep(page, 3);
+  await waitForSheet(page);
+
+  await expect(page.getByTestId('design-hud')).toBeVisible();
+  await expect(page.getByTestId('hud-facing')).toHaveCount(0);
+});
+
 test('the desktop layout is one centred column on steps with no map', async ({
   page,
 }, testInfo) => {

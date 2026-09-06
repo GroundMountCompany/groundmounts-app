@@ -199,6 +199,29 @@ export const UI = {
   compassSouthwest: 'southwest',
   compassWest: 'west',
   compassNorthwest: 'northwest',
+
+  // Abbreviations for the HUD line, which shares a row with four figures and
+  // has no room for "southwest".
+  compassShortNorth: 'N',
+  compassShortNortheast: 'NE',
+  compassShortEast: 'E',
+  compassShortSoutheast: 'SE',
+  compassShortSouth: 'S',
+  compassShortSouthwest: 'SW',
+  compassShortWest: 'W',
+  compassShortNorthwest: 'NW',
+
+  /*
+    The standing line on the HUD, for as long as the array is off south.
+
+    The toast says what just changed and goes. This says what the array is
+    still doing, and stays until it is back at 180 — owner QA: a toast alone
+    was missable, and once it had gone there was nothing on screen explaining
+    why the count was what it was.
+  */
+  hudFacing: 'Facing',
+  hudMorePanels: 'more panels than south',
+  hudFewerPanels: 'fewer panels than south',
   /** The 48px button is too small for the phrase; the label carries it. */
   faceSouthShort: 'S',
   systemSize: 'System size',

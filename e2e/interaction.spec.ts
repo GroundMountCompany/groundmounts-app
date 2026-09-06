@@ -1377,6 +1377,50 @@ test.describe('design step gestures', () => {
     await expect(page.getByTestId('size-toast-count')).toHaveText(String(east - atSouth));
     await expect(toast).toContainText('added');
 
+    /*
+      Where the toast actually is. Owner QA on a phone: it was not noticeable,
+      because the map column runs the full height of the screen with the sheet
+      drawn over it — so a toast anchored to the bottom of the map was
+      underneath the sheet.
+    */
+    const viewport = page.viewportSize()!;
+    const toastBox = (await toast.boundingBox())!;
+    const sheetBox = (await page.getByTestId('bottom-sheet').boundingBox())!;
+
+    expect(toastBox.y, 'the toast starts above the screen').toBeGreaterThanOrEqual(0);
+    expect(
+      toastBox.y + toastBox.height,
+      `the toast runs ${Math.round(toastBox.y + toastBox.height - viewport.height)}px off the bottom`
+    ).toBeLessThanOrEqual(viewport.height);
+    expect(
+      toastBox.y + toastBox.height,
+      `the toast overlaps the sheet by ${Math.round(toastBox.y + toastBox.height - sheetBox.y)}px`
+    ).toBeLessThanOrEqual(sheetBox.y);
+
+    // Full width bar the eye cannot miss, not a chip in a corner: 8px margins.
+    expect(toastBox.x, 'left margin').toBeLessThanOrEqual(16);
+    expect(
+      viewport.width - (toastBox.x + toastBox.width),
+      'right margin'
+    ).toBeLessThanOrEqual(16);
+
+    // It does not take the touch. A bar across the bottom of the map that
+    // swallowed a drag would trade one problem for a worse one, so it is
+    // deliberately not the hit target at its own centre.
+    const swallows = await page.evaluate(([x, y]) => {
+      const el = document.elementFromPoint(x, y);
+      return !!el?.closest('[data-testid="size-toast"]');
+    }, [toastBox.x + toastBox.width / 2, toastBox.y + toastBox.height / 2] as const);
+    expect(swallows, 'the toast is eating touches meant for the map').toBe(false);
+
+    /*
+      The standing line, which outlives the toast. Once the toast had gone there
+      was nothing on screen saying why the count was what it was.
+    */
+    await expect(page.getByTestId('hud-facing')).toBeVisible();
+    await expect(page.getByTestId('hud-facing-delta')).toHaveText(String(east - atSouth));
+    await expect(page.getByTestId('hud-facing-point')).toHaveText('E');
+
     // Back to south, and the count comes back with it — a round trip, not a
     // ratchet that leaves the customer paying for panels they no longer need.
     await page.getByTestId('face-south').click();
@@ -1389,6 +1433,8 @@ test.describe('design step gestures', () => {
     await expect(page.getByTestId('size-toast')).toBeVisible();
     await expect(page.getByTestId('size-toast')).toContainText('removed');
     await expect(page.getByTestId('face-south')).toHaveCount(0);
+    // Back at south there is nothing to explain, so the line goes.
+    await expect(page.getByTestId('hud-facing')).toHaveCount(0);
 
     // Now take the count by hand. Rotation must not touch it again.
     await page.getByTestId('panel-plus').click();

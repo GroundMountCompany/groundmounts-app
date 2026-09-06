@@ -92,6 +92,11 @@ This is the step the whole tool exists for. Take your time.
       stays under your finger, and the panel count does *not* change.
 - [ ] **Let go** of the grip: the count re-sizes for the new heading and a
       toast says what changed and why. Nothing moves while your finger is down.
+- [ ] The toast is a full-width bar sitting **on top of the sheet's edge**, not
+      hidden behind it, and it is readable at arm's length.
+- [ ] After the toast has gone, the HUD still carries a line saying which way
+      the array faces and how many panels that costs. It stays until the array
+      is back at south.
 - [ ] Press **+** once, then turn the array. The count must not move, and an
       **Auto-size** chip appears. Tapping it hands the count back to the sizing
       maths for wherever the array is now pointing.

@@ -5,6 +5,22 @@ import { useQuoteStore } from '@/store/quoteStore';
 import { annualKwh } from '@/lib/production';
 import { PANELS } from '@/config/pricing';
 import { applyAutoSize } from '@/lib/applyAutoSize';
+import { compassPoint, panelsOverSouth, type CompassPoint } from '@/lib/autoSize';
+import { isFacingSouth } from '@/lib/easeAzimuth';
+import { targetAnnualKwh } from '@/lib/sizing';
+import { dollarsPerKwhFromCents } from '@/lib/rate';
+
+/** Abbreviated, because this line shares a row with four figures. */
+const SHORT: Record<CompassPoint, string> = {
+  north: UI.compassShortNorth,
+  northeast: UI.compassShortNortheast,
+  east: UI.compassShortEast,
+  southeast: UI.compassShortSoutheast,
+  south: UI.compassShortSouth,
+  southwest: UI.compassShortSouthwest,
+  west: UI.compassShortWest,
+  northwest: UI.compassShortNorthwest,
+};
 
 /**
  * The four numbers, on the map.
@@ -29,9 +45,35 @@ export default function DesignHud() {
   const curve = useQuoteStore((s) => s.productionCurve);
   const sizingMode = useQuoteStore((s) => s.sizingMode);
   const returnToAuto = useQuoteStore((s) => s.returnToAuto);
+  const billAnnualKwh = useQuoteStore((s) => s.billAnnualKwh);
+  const avgValue = useQuoteStore((s) => s.avgValue);
+  const rateCents = useQuoteStore((s) => s.rateCentsPerKwh);
+  const percentage = useQuoteStore((s) => s.percentage);
 
   const kw = (totalPanels * PANELS[panelTier].watts) / 1000;
   const production = annualKwh(curve, kw, azimuth);
+
+  /*
+    The standing line, for as long as the array is turned away from south.
+
+    The toast says what just changed and then goes. This says what the array is
+    still doing — owner QA: once the toast had gone there was nothing on screen
+    explaining why the count was what it was, and on a phone the toast was easy
+    to miss entirely.
+  */
+  const offSouth = !isFacingSouth(azimuth);
+  const overSouth = panelsOverSouth({
+    curve,
+    // The same target the sizing effect uses, from the same function.
+    targetAnnualKwh: targetAnnualKwh({
+      billAnnualKwh,
+      monthlyBillUsd: avgValue,
+      ratePerKwh: dollarsPerKwhFromCents(rateCents),
+      offsetPercent: percentage,
+    }),
+    tier: panelTier,
+    totalPanels,
+  });
 
   const items: Array<[string, string, string]> = [
     ['hud-panels', String(totalPanels), UI.hudPanels],
@@ -73,6 +115,28 @@ export default function DesignHud() {
           </span>
         ))}
       </div>
+
+      {offSouth && (
+        <p
+          data-testid="hud-facing"
+          className="mt-2 border-t border-neutral-200 pt-2 text-[14px] leading-snug text-neutral-700"
+        >
+          {UI.hudFacing}{' '}
+          <span data-testid="hud-facing-point" className="font-semibold text-neutral-900">
+            {SHORT[compassPoint(azimuth)]}
+          </span>
+          {overSouth !== 0 && (
+            <>
+              {' '}
+              <span aria-hidden className="text-neutral-300">
+                &middot;
+              </span>{' '}
+              <span data-testid="hud-facing-delta">{Math.abs(overSouth)}</span>{' '}
+              {overSouth > 0 ? UI.hudMorePanels : UI.hudFewerPanels}
+            </>
+          )}
+        </p>
+      )}
 
       {/*
         The count is theirs now.

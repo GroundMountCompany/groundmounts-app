@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { compassPoint, isBackToSouth, resizeForAzimuth } from './autoSize';
+import { compassPoint, isBackToSouth, panelsOverSouth, resizeForAzimuth } from './autoSize';
 import { panelsForTarget, targetAnnualKwh } from './sizing';
 import { annualKwh, TX_FALLBACK_CURVE } from './production';
 import { DEFAULTS, PANELS } from '@/config/pricing';
@@ -90,15 +90,74 @@ describe('auto-sizing on rotation', () => {
 });
 
 describe('naming the heading', () => {
-  it('reads the eight points off the compass', () => {
-    expect(compassPoint(0)).toBe('north');
-    expect(compassPoint(90)).toBe('east');
-    expect(compassPoint(180)).toBe('south');
-    expect(compassPoint(270)).toBe('west');
-    // 44 rather than the exact 45: the money-location guard reads a bare 45
-    // anywhere outside pricing.ts as the trench rate escaping it.
-    expect(compassPoint(44)).toBe('northeast');
-    expect(compassPoint(225)).toBe('southwest');
+  /**
+   * Every sector, spelled out.
+   *
+   * Each point owns an eighth of the compass centred on itself, so east runs
+   * 67.5 to 112.5 and southeast 112.5 to 157.5. The owner expected a diagonal
+   * and read
+   * "east", so these pin the boundaries explicitly rather than trusting the
+   * rounding to keep meaning what it means.
+   */
+  const SECTORS = [
+    { point: 'north', azimuth: 0, from: 337.5, to: 22.5 },
+    { point: 'northeast', azimuth: 45, from: 22.5, to: 67.5 },
+    { point: 'east', azimuth: 90, from: 67.5, to: 112.5 },
+    { point: 'southeast', azimuth: 135, from: 112.5, to: 157.5 },
+    { point: 'south', azimuth: 180, from: 157.5, to: 202.5 },
+    { point: 'southwest', azimuth: 225, from: 202.5, to: 247.5 },
+    { point: 'west', azimuth: 270, from: 247.5, to: 292.5 },
+    { point: 'northwest', azimuth: 315, from: 292.5, to: 337.5 },
+  ] as const;
+
+  it('names the centre of every sector after its own point', () => {
+    for (const { point, azimuth } of SECTORS) {
+      expect(compassPoint(azimuth), `${azimuth} degrees`).toBe(point);
+    }
+  });
+
+  it('holds each sector from just inside one edge to just inside the other', () => {
+    for (const { point, from, to } of SECTORS) {
+      // A tenth of a degree inside each boundary. Wrapped for north, whose
+      // sector straddles 0.
+      const lower = (from + 0.1) % 360;
+      const upper = (to - 0.1 + 360) % 360;
+      expect(compassPoint(lower), `${lower} should still be ${point}`).toBe(point);
+      expect(compassPoint(upper), `${upper} should still be ${point}`).toBe(point);
+    }
+  });
+
+  it('hands over at each boundary rather than overlapping or leaving a gap', () => {
+    for (const { point, from } of SECTORS) {
+      const justBelow = (from - 0.1 + 360) % 360;
+      const justAbove = (from + 0.1) % 360;
+      expect(compassPoint(justAbove), `${justAbove} degrees`).toBe(point);
+      expect(
+        compassPoint(justBelow),
+        `${justBelow} should belong to the sector before ${point}`
+      ).not.toBe(point);
+    }
+  });
+
+  it('names every whole degree, with no heading left unnamed', () => {
+    const seen = new Set<string>();
+    for (let a = 0; a < 360; a++) {
+      const named = compassPoint(a);
+      expect(named, `${a} degrees produced nothing`).toBeTruthy();
+      seen.add(named);
+    }
+    // All eight get used, so none of them is unreachable.
+    expect(seen.size).toBe(8);
+  });
+
+  it('reads 120 degrees as southeast, which is what the shipped code did', () => {
+    // Recorded because the owner reported seeing "east" where a diagonal was
+    // expected. It was not this: 120 sits inside the southeast sector and
+    // always has. A heading in 67.5-112.5 is east by this rule, and correctly
+    // so.
+    expect(compassPoint(120)).toBe('southeast');
+    expect(compassPoint(110)).toBe('east');
+    expect(compassPoint(113)).toBe('southeast');
   });
 
   it('wraps rather than falling off either end', () => {
@@ -108,16 +167,48 @@ describe('naming the heading', () => {
     expect(compassPoint(720 + 90)).toBe('east');
   });
 
-  it('rounds to the nearest point', () => {
-    expect(compassPoint(100)).toBe('east');
-    expect(compassPoint(160)).toBe('south');
-  });
-
   it('calls a near-south heading "back to south", matching the button', () => {
     // Same window the Face south button uses, so the toast cannot say "facing
     // south" while the button still offers to take you there.
     expect(isBackToSouth(180)).toBe(true);
     expect(isBackToSouth(181)).toBe(true);
     expect(isBackToSouth(190)).toBe(false);
+  });
+});
+
+describe('how far the array is over its south sizing', () => {
+  const atSouth = sizedAt(180);
+
+  it('counts the extra panels an easterly array carries', () => {
+    const east = sizedAt(90);
+    expect(
+      panelsOverSouth({ curve: CURVE, targetAnnualKwh: target, tier: TIER, totalPanels: east })
+    ).toBe(east - atSouth);
+  });
+
+  it('is zero when the array is sized for south', () => {
+    expect(
+      panelsOverSouth({ curve: CURVE, targetAnnualKwh: target, tier: TIER, totalPanels: atSouth })
+    ).toBe(0);
+  });
+
+  it('goes negative when the count is below the south sizing', () => {
+    expect(
+      panelsOverSouth({
+        curve: CURVE,
+        targetAnnualKwh: target,
+        tier: TIER,
+        totalPanels: atSouth - 3,
+      })
+    ).toBe(-3);
+  });
+
+  it('says nothing without a target or an array', () => {
+    expect(
+      panelsOverSouth({ curve: CURVE, targetAnnualKwh: 0, tier: TIER, totalPanels: atSouth })
+    ).toBe(0);
+    expect(
+      panelsOverSouth({ curve: CURVE, targetAnnualKwh: target, tier: TIER, totalPanels: 0 })
+    ).toBe(0);
   });
 });

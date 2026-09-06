@@ -64,10 +64,35 @@ const POINTS: CompassPoint[] = [
  *
  * Eight points rather than sixteen: "south-southeast" is not a direction anyone
  * pictures, and the toast has one line to make itself understood.
+ *
+ * Each point owns a 45-degree sector centred on it, so east is 67.5 to 112.5
+ * and southeast is 112.5 to 157.5 — a heading is named after the point it is
+ * closest to. Rounding the eighths does exactly that; the sector boundaries are
+ * spelled out one by one in the tests so the arithmetic cannot drift.
  */
 export function compassPoint(azimuth: number): CompassPoint {
   const normalised = ((azimuth % 360) + 360) % 360;
   return POINTS[Math.round(normalised / 45) % 8];
+}
+
+/**
+ * How many panels the array carries over what it would need facing south.
+ *
+ * The count follows the heading, so an array pointing east is bigger than the
+ * same customer's array pointing south. This is the difference, and it is what
+ * the standing HUD line reports for as long as the array is turned away.
+ */
+export function panelsOverSouth(input: {
+  curve: ProductionCurve;
+  targetAnnualKwh: number;
+  tier: PanelTier;
+  totalPanels: number;
+}): number {
+  const { curve, targetAnnualKwh, tier, totalPanels } = input;
+  if (targetAnnualKwh <= 0 || totalPanels <= 0) return 0;
+  const atSouth = panelsForTarget(curve, targetAnnualKwh, 180, tier);
+  if (atSouth <= 0) return 0;
+  return totalPanels - atSouth;
 }
 
 /** True when the toast should say "back to south" rather than name a heading. */

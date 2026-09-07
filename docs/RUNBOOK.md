@@ -236,6 +236,13 @@ Two consequences:
   NEXT_PUBLIC_E2E_HOOKS=1 NEXT_PUBLIC_DEMO_PARAMS=1 npx next start --port 3100 &
   ```
 
+A `warmup` project loads the map once before the WebGL projects run. The first
+map in a browser pays for DNS, the TLS handshake to api.mapbox.com, the lazily
+imported mapbox-gl chunk and the first SwiftShader context; without it that
+cost lands inside whichever real test happens to go first, and that test then
+looks flaky for reasons unrelated to what it asserts. It is assertion-free on
+purpose and can never fail a run.
+
 The `interaction` and `desktop-map` projects render real WebGL through
 SwiftShader, which is CPU rasterisation. They are configured to run alone
 (`dependencies`, `fullyParallel: false`) for that reason, and **two copies of

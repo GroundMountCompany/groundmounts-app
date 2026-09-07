@@ -48,12 +48,12 @@ export default defineConfig({
       // The funnel is mobile-first and customers are overwhelmingly on phones,
       // so the phone viewport is the default target, not an afterthought.
       name: 'mobile',
-      testIgnore: /(interaction|mouse|screenshots)\.spec\.ts/,
+      testIgnore: /(interaction|mouse|screenshots|warmup)\.spec\.ts/,
       use: { ...devices['iPhone 13'], viewport: { width: 390, height: 844 } },
     },
     {
       name: 'desktop',
-      testIgnore: /(interaction|mouse|screenshots)\.spec\.ts/,
+      testIgnore: /(interaction|mouse|screenshots|warmup)\.spec\.ts/,
       use: { ...devices['Desktop Chrome'] },
     },
     {
@@ -65,6 +65,31 @@ export default defineConfig({
         ...devices['Desktop Chrome'],
         viewport: { width: 390, height: 844 },
         hasTouch: true,
+      },
+    },
+    {
+      /**
+       * Loads the map once, before the WebGL projects run.
+       *
+       * The first map in a browser pays for DNS, the TLS handshake to
+       * api.mapbox.com, the lazily-imported mapbox-gl chunk and the first
+       * SwiftShader context — and whichever real test goes first pays all of
+       * it inside its own budget. Same launch flags as the projects that
+       * depend on it, or it would warm the wrong thing.
+       */
+      name: 'warmup',
+      testMatch: /warmup\.spec\.ts/,
+      use: {
+        ...devices['Desktop Chrome'],
+        viewport: { width: 390, height: 844 },
+        launchOptions: {
+          args: [
+            '--use-gl=angle',
+            '--use-angle=swiftshader',
+            '--enable-unsafe-swiftshader',
+            '--ignore-gpu-blocklist',
+          ],
+        },
       },
     },
     {
@@ -90,7 +115,7 @@ export default defineConfig({
        * a time within the project as well — two SwiftShader contexts on one
        * machine are still two software rasterisers competing.
        */
-      dependencies: ['mobile', 'desktop', 'mobile-chromium'],
+      dependencies: ['mobile', 'desktop', 'mobile-chromium', 'warmup'],
       fullyParallel: false,
       /**
        * Two 10s readiness attempts plus classification, on a software

@@ -283,30 +283,56 @@ describe('the rates the customer can tap', () => {
     expect(INFLATION_MARKS.map((m) => ({ pct: m.pct, label: m.label }))).toMatchInlineSnapshot(`
       [
         {
-          "label": "25y",
+          "label": "2000–24",
+          "pct": 2.7,
+        },
+        {
+          "label": "2015–24",
           "pct": 2.9,
         },
         {
-          "label": "10y",
-          "pct": 3.9,
-        },
-        {
-          "label": "since '21",
-          "pct": 4.6,
-        },
-        {
-          "label": "EIA",
+          "label": "EIA '26",
           "pct": 5,
+        },
+        {
+          "label": "2021–24",
+          "pct": 7.3,
         },
       ]
     `);
   });
 
-  it('defaults to the ten-year Texas average', () => {
+  it('defaults to the Texas 2015-2024 rate', () => {
     // Long enough to average out a bad year, short enough to describe the
     // present. Whatever it is, it has to be a mark the slider can land on.
-    expect(RESULTS.utilityInflationPct).toBe(3.9);
+    expect(RESULTS.utilityInflationPct).toBe(2.9);
     expect(INFLATION_MARKS.map((m) => m.pct)).toContain(RESULTS.utilityInflationPct);
+  });
+
+  it('is the compound rate its own endpoints imply', () => {
+    /*
+      The arithmetic, re-done from the figures printed in each label.
+
+      An earlier version mixed an annual price with a year-to-date one, and
+      nothing checked that the percentage and the two cents figures beside it
+      described the same calculation. This parses the endpoints back out of
+      the text the customer reads and recomputes the rate from them.
+    */
+    for (const mark of INFLATION_MARKS) {
+      const span = mark.detail.match(/(\d+) years?: ([\d.]+)¢ in (\d{4}) to ([\d.]+)¢ in (\d{4})/);
+      if (!span) continue; // the forecast carries no endpoints
+      const [, years, start, startYear, end, endYear] = span;
+      expect(Number(endYear) - Number(startYear), mark.label).toBe(Number(years));
+      const cagr = Math.pow(Number(end) / Number(start), 1 / Number(years)) - 1;
+      expect(Number((cagr * 100).toFixed(1)), `${mark.label} rate`).toBe(mark.pct);
+    }
+  });
+
+  it('checks all three Texas marks, not just whichever one parses', () => {
+    // The loop above skips anything without endpoints. If a rewording stopped
+    // the details matching, it would skip everything and pass silently.
+    const withEndpoints = INFLATION_MARKS.filter((m) => /¢ in \d{4}/.test(m.detail));
+    expect(withEndpoints).toHaveLength(3);
   });
 
   it('keeps every mark inside the slider, on a step it can reach', () => {

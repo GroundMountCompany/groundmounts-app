@@ -1623,11 +1623,11 @@ test('the results section answers the number it sits under', async ({ page }) =>
   /*
     Payback is the whole point of the section: $240 a month against a $32,390
     system, with the cheque written on day one rather than spread across the
-    horizon. Year 11 at the shipped default rate — the hand-checked year 10 in
-    the unit tests is at 3.5%, which is not what ships.
+    horizon. Year 10 at the shipped default of 3%, which is also where the
+    hand-checked example at 3.5% lands — close rates, same year.
   */
   const startYear = new Date().getFullYear();
-  await expect(page.getByTestId('result-breakeven')).toHaveText(`11 (${startYear + 10})`);
+  await expect(page.getByTestId('result-breakeven')).toHaveText(`10 (${startYear + 9})`);
 
   /*
     The spread figure, read exactly.
@@ -1670,15 +1670,15 @@ test('the inflation slider moves the whole comparison', async ({ page }) => {
 
   const slider = page.getByTestId('inflation-slider');
   await expect(slider).toBeVisible();
-  await expect(page.getByTestId('inflation-value')).toHaveText('2.9%');
+  await expect(page.getByTestId('inflation-value')).toHaveText('3%');
 
   const before = await page.getByTestId('result-utility-total').textContent();
 
   // Drive it from the keyboard: a Radix slider thumb responds to arrows, and
   // this is also the path somebody using a keyboard takes.
   await slider.getByRole('slider').focus();
-  // 0.1 a press, from the 2.9% default.
-  for (let i = 0; i < 36; i++) await page.keyboard.press('ArrowRight');
+  // 0.1 a press, from the 3% default.
+  for (let i = 0; i < 35; i++) await page.keyboard.press('ArrowRight');
 
   await expect(page.getByTestId('inflation-value')).toHaveText('6.5%');
   await expect(page.getByTestId('result-utility-total')).not.toHaveText(before ?? '');
@@ -1721,7 +1721,7 @@ test('the rate marks are somebody else\'s published figures, one tap away', asyn
       (el.textContent ?? '').trim()
     )
   );
-  expect(labels).toEqual(['2000–24', '2015–24', "EIA '26", '2021–24']);
+  expect(labels).toEqual(['2000–25', '2015–25', "EIA '26", '2021–25']);
 
   /*
     No two labels may overlap.
@@ -1754,8 +1754,8 @@ test('the rate marks are somebody else\'s published figures, one tap away', asyn
   }
 
   // The default is the ten-year average, and it reads as selected.
-  await expect(page.getByTestId('inflation-value')).toHaveText('2.9%');
-  await expect(page.getByTestId('inflation-mark-2.9')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByTestId('inflation-value')).toHaveText('3%');
+  await expect(page.getByTestId('inflation-mark-3')).toHaveAttribute('aria-pressed', 'true');
 
   const utilityTotal = () => page.getByTestId('result-utility-total').textContent();
   const before = await utilityTotal();
@@ -1764,19 +1764,19 @@ test('the rate marks are somebody else\'s published figures, one tap away', asyn
   await page.getByTestId('inflation-mark-5').click();
   await expect(page.getByTestId('inflation-value')).toHaveText('5%');
   await expect(page.getByTestId('inflation-mark-5')).toHaveAttribute('aria-pressed', 'true');
-  await expect(page.getByTestId('inflation-mark-2.9')).toHaveAttribute('aria-pressed', 'false');
+  await expect(page.getByTestId('inflation-mark-3')).toHaveAttribute('aria-pressed', 'false');
   expect(await utilityTotal(), 'the chart did not move').not.toBe(before);
 
   // And the awkward one: 2.9 is not a multiple of a half, so a coarser step
   // would have snapped this to 3.0 and disagreed with the label just pressed.
-  await page.getByTestId('inflation-mark-7.3').click();
-  await expect(page.getByTestId('inflation-value')).toHaveText('7.3%');
+  await page.getByTestId('inflation-mark-6.3').click();
+  await expect(page.getByTestId('inflation-value')).toHaveText('6.3%');
 
   // The panel says where all four came from.
   await page.getByTestId('results-assumptions-toggle').click();
   const list = page.getByTestId('results-assumptions');
   await expect(list).toContainText('Texas history and EIA forecast.');
-  for (const source of ['7.96¢', '11.56¢', '12.11¢', '14.94¢', 'Short-Term Energy Outlook']) {
+  for (const source of ['7.96¢', '11.56¢', '12.11¢', '15.47¢', 'Short-Term Energy Outlook']) {
     await expect(list, `no source for ${source}`).toContainText(source);
   }
 });

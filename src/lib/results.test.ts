@@ -283,29 +283,29 @@ describe('the rates the customer can tap', () => {
     expect(INFLATION_MARKS.map((m) => ({ pct: m.pct, label: m.label }))).toMatchInlineSnapshot(`
       [
         {
-          "label": "2000–24",
+          "label": "2000–25",
           "pct": 2.7,
         },
         {
-          "label": "2015–24",
-          "pct": 2.9,
+          "label": "2015–25",
+          "pct": 3,
         },
         {
           "label": "EIA '26",
           "pct": 5,
         },
         {
-          "label": "2021–24",
-          "pct": 7.3,
+          "label": "2021–25",
+          "pct": 6.3,
         },
       ]
     `);
   });
 
-  it('defaults to the Texas 2015-2024 rate', () => {
+  it('defaults to the Texas 2015-2025 rate', () => {
     // Long enough to average out a bad year, short enough to describe the
     // present. Whatever it is, it has to be a mark the slider can land on.
-    expect(RESULTS.utilityInflationPct).toBe(2.9);
+    expect(RESULTS.utilityInflationPct).toBe(3.0);
     expect(INFLATION_MARKS.map((m) => m.pct)).toContain(RESULTS.utilityInflationPct);
   });
 

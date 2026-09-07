@@ -35,34 +35,31 @@ export const INFLATION_MARKS: InflationMark[] = [
     annual figure with a year-to-date one and produced rates that could not be
     reconciled with either.
 
-    Values, and where each was read:
-      2000  7.96¢  "Average Price by State by Provider, 1990-2020",
-                   eia.gov/electricity/data/state/avgprice_annual.xlsx
-      2015 11.56¢  Sales, Revenue and Average Price, Table 4, 2015 edition
-      2021 12.11¢  Sales, Revenue and Average Price, Table 4, 2021 edition
-      2024 14.94¢  Sales, Revenue and Average Price, Table 4, 2024 edition
-                   (released 7 October 2025; matches Electric Power Annual
-                   Table 2.10, "2024 and 2023")
+    Series: EIA Open Data, electricity/retail-sales, frequency=annual,
+    data=price, facets stateid=TX and sectorid=RES. (v1 series id
+    ELEC.PRICE.TX-RES.A.) The same numbers appear in the Electric Power Annual
+    and in Sales, Revenue and Average Price Table 4 once those publications
+    catch up; the API carries the most recent year first.
 
-    2024 is the end year because it is the most recent year EIA has published
-    an annual state price for. The monthly table carries newer year-to-date
-    figures, but a part-year average is not the same measurement and mixing
-    the two is what went wrong before.
+      2000  7.96¢
+      2015 11.56¢
+      2021 12.11¢
+      2025 15.47¢
 
     Each rate is (end / start) ^ (1 / years) - 1, rounded to a tenth.
   */
   {
-    // (14.94 / 7.96) ^ (1/24) - 1 = 2.657%
+    // (15.47 / 7.96) ^ (1/25) - 1 = 2.6935%
     pct: 2.7,
-    label: '2000–24',
-    detail: 'Texas, 24 years: 7.96¢ in 2000 to 14.94¢ in 2024 (EIA annual)',
+    label: '2000–25',
+    detail: 'Texas, 25 years: 7.96¢ in 2000 to 15.47¢ in 2025 (EIA annual)',
   },
   {
-    // (14.94 / 11.56) ^ (1/9) - 1 = 2.887%. The default: long enough to
+    // (15.47 / 11.56) ^ (1/10) - 1 = 2.9564%. The default: long enough to
     // average out a bad year, short enough to still describe the present.
-    pct: 2.9,
-    label: '2015–24',
-    detail: 'Texas, 9 years: 11.56¢ in 2015 to 14.94¢ in 2024 (EIA annual)',
+    pct: 3.0,
+    label: '2015–25',
+    detail: 'Texas, 10 years: 11.56¢ in 2015 to 15.47¢ in 2025 (EIA annual)',
   },
   {
     // EIA Short-Term Energy Outlook 2026: residential prices up about 5% in
@@ -72,11 +69,11 @@ export const INFLATION_MARKS: InflationMark[] = [
     detail: 'EIA Short-Term Energy Outlook: US residential prices up 5% in 2026 (national)',
   },
   {
-    // (14.94 / 12.11) ^ (1/3) - 1 = 7.256%. Three years off the post-2021
+    // (15.47 / 12.11) ^ (1/4) - 1 = 6.3130%. Four years off the post-2021
     // base, so a short window and a steep one.
-    pct: 7.3,
-    label: '2021–24',
-    detail: 'Texas, 3 years: 12.11¢ in 2021 to 14.94¢ in 2024 (EIA annual)',
+    pct: 6.3,
+    label: '2021–25',
+    detail: 'Texas, 4 years: 12.11¢ in 2021 to 15.47¢ in 2025 (EIA annual)',
   },
 ];
 
@@ -97,10 +94,9 @@ export interface ResultsAssumptions {
 }
 
 export const RESULTS: ResultsAssumptions = {
-  // Texas 2015-2024, the nine-year compound rate. Long enough to average out
-  // a bad year, short enough to still describe the present. See
-  // INFLATION_MARKS.
-  utilityInflationPct: 2.9,
+  // Texas 2015-2025, the ten-year compound rate. Long enough to average out a
+  // bad year, short enough to still describe the present. See INFLATION_MARKS.
+  utilityInflationPct: 3.0,
   inflationMinPct: 0,
   inflationMaxPct: 8,
   /*

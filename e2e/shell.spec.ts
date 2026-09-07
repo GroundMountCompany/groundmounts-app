@@ -1864,7 +1864,7 @@ test('the history chart shows the record, above the forecast', async ({ page }) 
 
   // The caption describes the two series it sits under.
   await expect(page.getByTestId('history-caption')).toHaveText(
-    'Texas uses more power every year, and the price per kWh has climbed with it.'
+    'Texas has used more electricity and paid more per kWh over the long run.'
   );
 
   // Attribution is a separate line and names its source. The year-pinned
@@ -1872,7 +1872,7 @@ test('the history chart shows the record, above the forecast', async ({ page }) 
   // the series show, and anything beyond that has to be somebody's claim with
   // a name on it.
   await expect(page.getByTestId('history-source')).toHaveText(
-    "EIA points to data centers as what's driving the growth in Texas electricity demand."
+    'EIA links rising electricity demand to data centers and adjusts its Texas forecast for changes in data-center development.'
   );
   await expect(page.getByTestId('history-demand-callouts')).toHaveCount(0);
 

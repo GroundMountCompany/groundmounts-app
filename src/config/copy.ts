@@ -373,7 +373,7 @@ export const UI = {
   historyPriceAxis: '¢/kWh',
   historyDemandAxis: 'TWh',
   historyCaption:
-    'Texas uses more power every year, and the price per kWh has climbed with it.',
+    'Texas has used more electricity and paid more per kWh over the long run.',
   /*
     What EIA says is behind it, kept separate from what the chart shows.
 
@@ -393,7 +393,7 @@ export const UI = {
     connection with Texas demand, so neither does this line.
   */
   historySource:
-    "EIA points to data centers as what's driving the growth in Texas electricity demand.",
+    'EIA links rising electricity demand to data centers and adjusts its Texas forecast for changes in data-center development.',
   historyRateSuffix: 'a year',
   historySince: 'since',
   historyAbout: 'About',

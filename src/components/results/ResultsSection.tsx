@@ -16,6 +16,7 @@ import { INFLATION_MARKS, RESULTS } from '@/config/results';
 import { projectResults } from '@/lib/results';
 import { useQuoteStore } from '@/store/quoteStore';
 import WhyPeopleDoThis from './WhyPeopleDoThis';
+import HistoryChart from './HistoryChart';
 
 const money = (amount: number) =>
   amount.toLocaleString('en-US', {
@@ -96,6 +97,8 @@ export default function ResultsSection({
 
   // Every fifth year, so a 390px axis carries six labels rather than
   // twenty-five overlapping ones.
+  const selectedMark = INFLATION_MARKS.find((m) => m.pct === inflationPct);
+
   const step = Math.ceil(model.rows.length / MAX_TICKS);
   const ticks = model.rows
     .filter((_, i) => i % step === 0 || i === model.rows.length - 1)
@@ -107,6 +110,10 @@ export default function ResultsSection({
         <h4 className="text-[19px] font-semibold text-neutral-900">{UI.resultsTitle}</h4>
         <p className="mt-1 text-[17px] leading-snug text-neutral-700">{UI.resultsIntro}</p>
       </div>
+
+      {/* What has already happened, before the forecast. The payback chart is
+          a projection and reads like one; this is the record it rests on. */}
+      <HistoryChart />
 
       {/* The chart. Two lines and a marker where they cross; no tooltip, no
           hover state — this has to work under a thumb. */}
@@ -229,6 +236,18 @@ export default function ResultsSection({
             );
           })}
         </div>
+
+        {/*
+          What the selected rate is, in words.
+
+          The chip is four characters and the sources are behind a tap, so
+          without this the number on screen has no explanation at the moment
+          the customer is looking at it. A value they dragged to is theirs, and
+          says so rather than borrowing somebody else's provenance.
+        */}
+        <p data-testid="inflation-explain" className="mt-2 text-[17px] leading-snug text-neutral-600">
+          {selectedMark ? UI[selectedMark.explainKey] : UI.rateExplainYourNumber}
+        </p>
 
         <div data-testid="inflation-marks" className="mt-2 flex gap-2">
           {INFLATION_MARKS.map((mark) => (

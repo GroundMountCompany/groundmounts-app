@@ -83,6 +83,20 @@ if (takeLock()) {
   } finally {
     rmSync(LOCK, { recursive: true, force: true });
   }
+  /*
+    Check again before binding the port.
+
+    The lock only covers the build. A run that arrives while the winner is
+    building waits, takes the freed lock, rebuilds — harmlessly, the output is
+    the same — and would then try to start a second server on a port the
+    winner is already serving from. That fails with EADDRINUSE and takes the
+    whole suite down with it.
+  */
+  if (await serverAnswers()) {
+    console.log(`[e2e-server] ${URL} came up while building; reusing it.`);
+    await new Promise(() => {});
+  }
+
   console.log(`[e2e-server] starting on ${PORT}`);
   await run(process.execPath, [NEXT, 'start', '--port', PORT]);
 } else {

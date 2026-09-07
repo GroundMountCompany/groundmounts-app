@@ -37,7 +37,7 @@ async function openResults(page: Page) {
   await expect(page.getByTestId('result-breakeven')).toBeVisible();
   // The sun image is lazy; scroll it in so the capture is not of an empty box.
   await page.getByTestId('why-section').scrollIntoViewIfNeeded();
-  await expect(page.getByTestId('why-facts')).toBeVisible();
+  await expect(page.getByTestId('history-chart')).toBeVisible();
   await page.waitForTimeout(800);
 }
 

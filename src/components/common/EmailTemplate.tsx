@@ -266,12 +266,6 @@ export default function EmailTemplate({
       <p style={{ margin: '0 0 8px', fontSize: '15px', color: '#444' }}>
         Payback is one reason. Reliability is the other.
       </p>
-      <ul style={{ margin: 0, paddingLeft: '20px', fontSize: '15px', color: '#444' }}>
-        <li style={{ marginBottom: '4px' }}>109 Earths wide</li>
-        <li style={{ marginBottom: '4px' }}>1.3 million Earths fit inside</li>
-        <li>An hour of sunlight = a year of the world&rsquo;s power.</li>
-      </ul>
-
       <div style={{ marginTop: '24px' }}>
         <a
           href={calendlyUrl}

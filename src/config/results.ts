@@ -25,6 +25,13 @@ export interface InflationMark {
   label: string;
   /** In the assumptions panel, where there is room to say where it came from. */
   detail: string;
+  /**
+   * Which line to show under the slider while this mark is selected.
+   *
+   * A key rather than the sentence: the words live in copy.ts with the rest of
+   * the copy, where the banned-words test can see them.
+   */
+  explainKey: 'rateExplain2000' | 'rateExplain2015' | 'rateExplain2021' | 'rateExplainEia';
 }
 
 export const INFLATION_MARKS: InflationMark[] = [
@@ -53,6 +60,7 @@ export const INFLATION_MARKS: InflationMark[] = [
     pct: 2.7,
     label: '2000–25',
     detail: 'Texas, 25 years: 7.96¢ in 2000 to 15.47¢ in 2025 (EIA annual)',
+    explainKey: 'rateExplain2000',
   },
   {
     // (15.47 / 11.56) ^ (1/10) - 1 = 2.9564%. The default: long enough to
@@ -60,6 +68,7 @@ export const INFLATION_MARKS: InflationMark[] = [
     pct: 3.0,
     label: '2015–25',
     detail: 'Texas, 10 years: 11.56¢ in 2015 to 15.47¢ in 2025 (EIA annual)',
+    explainKey: 'rateExplain2015',
   },
   {
     // EIA Short-Term Energy Outlook 2026: residential prices up about 5% in
@@ -67,6 +76,7 @@ export const INFLATION_MARKS: InflationMark[] = [
     pct: 5.0,
     label: "EIA '26",
     detail: 'EIA Short-Term Energy Outlook: US residential prices up 5% in 2026 (national)',
+    explainKey: 'rateExplainEia',
   },
   {
     // (15.47 / 12.11) ^ (1/4) - 1 = 6.3130%. Four years off the post-2021
@@ -74,6 +84,7 @@ export const INFLATION_MARKS: InflationMark[] = [
     pct: 6.3,
     label: '2021–25',
     detail: 'Texas, 4 years: 12.11¢ in 2021 to 15.47¢ in 2025 (EIA annual)',
+    explainKey: 'rateExplain2021',
   },
 ];
 

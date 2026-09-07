@@ -326,6 +326,22 @@ export const UI = {
   resultsAssumptionFinancing: 'Financing',
   resultsAssumptionNoFinancing: 'None. This is arithmetic, not a loan.',
   resultsAssumptionCash: 'Assumes you pay cash. Financing changes the picture.',
+  /*
+    One line under the slider saying what the selected rate is.
+
+    The chip is four characters and the assumptions panel is behind a tap, so
+    without this the number on screen has no explanation at the moment the
+    customer is looking at it.
+  */
+  rateExplainYourNumber: 'Your number.',
+  rateExplain2000:
+    '2000–2025: Texas home electricity went from 8.0¢ to 15.5¢ per kWh — 2.7% a year.',
+  rateExplain2015:
+    '2015–2025: Texas home electricity went from 11.6¢ to 15.5¢ per kWh — 3.0% a year.',
+  rateExplain2021:
+    '2021–2025: Texas home electricity went from 12.1¢ to 15.5¢ per kWh — 6.3% a year.',
+  rateExplainEia:
+    "EIA's forecast for 2026: US home electricity up 5% in a year. National, not Texas.",
   resultsAssumptionRates: 'Rates you can pick from',
   resultsAssumptionRatesSource: 'Texas history and EIA forecast.',
 
@@ -343,9 +359,28 @@ export const UI = {
     'The grid has a hundred ways to go down: storms, demand, equipment, a tree a mile away. Texas saw it in February 2021. Your panels rely on one thing, and it has come up every morning for 4.6 billion years. Cloudy days are already in the production number.',
   whyImageAlt: 'The sun beside the Earth, drawn to scale.',
   whyEarthLabel: 'Earth',
-  whyFactWidth: '109 Earths wide',
-  whyFactVolume: '1.3 million Earths fit inside',
-  whyFactHour: "An hour of sunlight = a year of the world's power.",
+
+  /*
+    Step 6, above the payback chart. What has already happened.
+
+    The payback chart is a forecast and reads like one. This is the record,
+    and it is the part nobody argues with.
+  */
+  historyTitle: "Electricity isn't getting cheaper",
+  historyPriceLabel: 'What Texas homes pay',
+  historyDemandLabel: 'Electricity Texas uses',
+  historyForecastLabel: "ERCOT's forecast",
+  historyPriceAxis: '¢/kWh',
+  historyDemandAxis: 'TWh',
+  historyCaption:
+    'Demand is rising faster than the grid was built for. Prices follow.',
+  historyRateSuffix: 'a year',
+  historySince: 'since',
+  historyAbout: 'About',
+  historyOver: 'Over',
+  historyDemandElectrification: 'Home electrification',
+  historyDemandEvs: 'EVs',
+  historyDemandDataCentres: 'Data centers',
   trenchNote: 'We route the trench around anything in the way once we are on site.',
   slopeChecking: 'checking',
   soilLabel: 'Soil',

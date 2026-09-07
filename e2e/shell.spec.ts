@@ -1781,6 +1781,105 @@ test('the rate marks are somebody else\'s published figures, one tap away', asyn
   }
 });
 
+test('each rate mark explains itself in plain words', async ({ page }) => {
+  // The chip is four characters and the sources are behind a tap, so without
+  // this the number on screen has no explanation where the customer is looking.
+  await page.addInitScript(
+    (payload) => window.localStorage.setItem('gmq:v3', JSON.stringify(payload)),
+    contactStepSeed('b8c9d0e1-2f3a-4b4c-9d5e-6f7a8b9cadb4')
+  );
+
+  await submitWithServerPrice(page, 29_799, 34_981);
+
+  const explain = page.getByTestId('inflation-explain');
+
+  // The default mark, before anything is tapped.
+  await expect(explain).toContainText('2015–2025');
+  await expect(explain).toContainText('3.0% a year');
+
+  const expected: Array<[string, string[]]> = [
+    ['inflation-mark-2.7', ['2000–2025', '8.0¢', '15.5¢', '2.7% a year']],
+    ['inflation-mark-3', ['2015–2025', '11.6¢', '15.5¢', '3.0% a year']],
+    ['inflation-mark-6.3', ['2021–2025', '12.1¢', '15.5¢', '6.3% a year']],
+    ['inflation-mark-5', ["EIA's forecast for 2026", 'National, not Texas']],
+  ];
+
+  for (const [testId, phrases] of expected) {
+    await page.getByTestId(testId).click();
+    for (const phrase of phrases) {
+      await expect(explain, `${testId} is missing "${phrase}"`).toContainText(phrase);
+    }
+  }
+
+  // A value they dragged to is theirs, and says so rather than borrowing
+  // somebody else's provenance.
+  await page.getByTestId('inflation-slider').getByRole('slider').focus();
+  await page.keyboard.press('ArrowRight');
+  await expect(page.getByTestId('inflation-value')).not.toHaveText('5%');
+  await expect(explain).toHaveText('Your number.');
+});
+
+test('the history chart shows the record, above the forecast', async ({ page }) => {
+  await page.addInitScript(
+    (payload) => window.localStorage.setItem('gmq:v3', JSON.stringify(payload)),
+    contactStepSeed('c9d0e1f2-3a4b-4c5d-8e6f-7a8b9cadbec5')
+  );
+
+  await submitWithServerPrice(page, 29_799, 34_981);
+
+  const history = page.getByTestId('history-chart');
+  await expect(history).toBeVisible();
+  await expect(history).toContainText("Electricity isn't getting cheaper");
+
+  // Above the payback chart: the record comes before the projection that
+  // rests on it.
+  const order = await page.evaluate(() => {
+    const hist = document.querySelector('[data-testid="history-chart"]')!;
+    const payback = document.querySelector('[data-testid="results-chart"]')!;
+    return (hist.compareDocumentPosition(payback) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+  });
+  expect(order, 'the history chart is below the payback chart').toBe(true);
+
+  // Both annotations, at the rates the series implies.
+  await expect(page.getByTestId('history-rate-2000')).toContainText('2.5%');
+  await expect(page.getByTestId('history-rate-2021')).toContainText('6.3%');
+  await expect(page.getByTestId('history-callouts')).toContainText('2000–2015');
+  await expect(page.getByTestId('history-callouts')).toContainText('2021–2025');
+
+  // The three demand labels, and the caption.
+  const demand = page.getByTestId('history-demand-callouts');
+  await expect(demand).toContainText('Home electrification');
+  await expect(demand).toContainText('EVs');
+  await expect(demand).toContainText('Data centers');
+  await expect(page.getByTestId('history-caption')).toHaveText(
+    'Demand is rising faster than the grid was built for. Prices follow.'
+  );
+
+  // Both series and the forecast are named in words, not field names.
+  await expect(history).toContainText('What Texas homes pay');
+  await expect(history).toContainText('Electricity Texas uses');
+  await expect(history).toContainText("ERCOT's forecast");
+
+  // Mobile-legible: at most six x labels, all at 17px, first and last shown.
+  const axis = await page.evaluate(() => {
+    const chart = document.querySelector('[data-testid="history-chart"]')!;
+    const ticks = Array.from(
+      chart.querySelectorAll('.recharts-xAxis .recharts-cartesian-axis-tick')
+    );
+    return {
+      labels: ticks.map((t) => (t.textContent ?? '').trim()),
+      sizes: ticks.map((t) => {
+        const text = t.querySelector('text');
+        return text ? getComputedStyle(text).fontSize : '';
+      }),
+    };
+  });
+  expect(axis.labels.length, `${axis.labels.length} x labels`).toBeLessThanOrEqual(6);
+  expect(axis.labels[0]).toBe('2000');
+  expect(axis.labels[axis.labels.length - 1]).toBe('2030');
+  for (const size of axis.sizes) expect(size).toBe('17px');
+});
+
 test('the sun section makes its case, with or without the photograph', async ({ page }) => {
   await page.addInitScript(
     (payload) => window.localStorage.setItem('gmq:v3', JSON.stringify(payload)),
@@ -1808,10 +1907,8 @@ test('the sun section makes its case, with or without the photograph', async ({ 
   });
   expect(order).toEqual({ afterFigures: true, beforePanel: true });
 
-  const facts = page.getByTestId('why-facts');
-  await expect(facts).toContainText('109 Earths wide');
-  await expect(facts).toContainText('1.3 million Earths fit inside');
-  await expect(facts).toContainText("An hour of sunlight = a year of the world's power.");
+  // The fact chips are gone: the paragraph and the picture carry it.
+  await expect(page.getByTestId('why-facts')).toHaveCount(0);
 
   // The photograph, loaded lazily so it does not compete with the price.
   await why.scrollIntoViewIfNeeded();
@@ -1846,7 +1943,6 @@ test('the sun section falls back to a drawing when the file is missing', async (
   await expect(page.getByTestId('why-image')).toHaveCount(0);
   // The words and the facts are still there, which is most of the point.
   await expect(page.getByTestId('why-section')).toContainText('February 2021');
-  await expect(page.getByTestId('why-facts')).toContainText('109 Earths wide');
 });
 
 test('the assumptions are on the page, not just in our heads', async ({ page }) => {

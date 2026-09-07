@@ -5,9 +5,7 @@ import Image from 'next/image';
 import { UI } from '@/config/copy';
 
 /** The supplied artwork, and its real dimensions. */
-const IMAGE = { src: '/images/sun-scale.png', width: 1672, height: 941 };
-
-const FACTS = [UI.whyFactWidth, UI.whyFactVolume, UI.whyFactHour];
+const IMAGE = { src: '/images/sun-scale.png', width: 1766, height: 994 };
 
 /**
  * The sun beside the Earth, drawn to scale.
@@ -82,16 +80,6 @@ export default function WhyPeopleDoThis() {
         />
       )}
 
-      <ul data-testid="why-facts" className="grid gap-2 sm:grid-cols-3">
-        {FACTS.map((fact) => (
-          <li
-            key={fact}
-            className="rounded-xl border border-neutral-200 px-3 py-2 text-[16px] leading-snug text-neutral-700"
-          >
-            {fact}
-          </li>
-        ))}
-      </ul>
     </section>
   );
 }

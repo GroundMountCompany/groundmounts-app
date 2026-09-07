@@ -2,29 +2,43 @@ const AIRTABLE_API_KEY = process.env.AIRTABLE_API_KEY;
 const AIRTABLE_BASE_ID = process.env.AIRTABLE_BASE_ID;
 const AIRTABLE_TABLE_NAME = 'Leads';
 
-export interface LeadFields {
-  Name?: string;
-  Email?: string;
-  Phone?: string;
-  Address?: string;
-  City?: string;
-  State?: string;
-  Zip?: string;
-  Panels?: number;
-  'System Size kW'?: number;
-  'Monthly Bill Avg'?: number;
-  'Monthly Bill High'?: number;
-  'Offset Percentage'?: number;
-  'Trenching Distance ft'?: number;
-  'Trenching Cost'?: number;
-  'Equipment Cost'?: number;
-  'Total Investment'?: number;
-  Source?: string;
-  Status?: string;
-  'Map Screenshot'?: Array<{ url: string }>;
+import type { LeadFields } from './airtableSchema';
+
+export type { LeadFields };
+
+/**
+ * Extract Airtable's machine-readable error reason without echoing the request.
+ * Airtable error bodies describe the schema problem (e.g. UNKNOWN_FIELD_NAME),
+ * not the submitted values, so this is safe to surface; the raw body is not.
+ */
+function airtableErrorReason(body: string): string {
+  try {
+    const parsed = JSON.parse(body);
+    const type = parsed?.error?.type;
+    const message = parsed?.error?.message;
+    if (type || message) return [type, message].filter(Boolean).join(': ').slice(0, 200);
+  } catch {
+    // fall through
+  }
+  return 'unparseable_error_body';
 }
 
-export async function createLead(fields: LeadFields) {
+/**
+ * Create or update the one record for this funnel.
+ *
+ * Airtable's upsert merges on a field value rather than a record id, which is
+ * what lets a partial save at step 1 and the final submit twenty minutes later
+ * be the same row. Without it the owner would get four rows per customer and
+ * would have to work out which was the real one.
+ *
+ * `typecast` lets Airtable widen a single-select to a value it has not seen
+ * before — the alternative is a 422 that loses the lead over a missing option.
+ *
+ * @param leadId Client-generated funnel id, used only for log correlation.
+ *               Never log `fields` — a final submit carries name, email, phone
+ *               and address.
+ */
+export async function upsertLeadByLeadId(fields: LeadFields, leadId: string) {
   if (!AIRTABLE_API_KEY || !AIRTABLE_BASE_ID) {
     console.error('[AIRTABLE_CONFIG_ERROR] Missing:', {
       hasApiKey: !!AIRTABLE_API_KEY,
@@ -34,32 +48,38 @@ export async function createLead(fields: LeadFields) {
   }
 
   const url = `https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${encodeURIComponent(AIRTABLE_TABLE_NAME)}`;
-  const payload = { fields };
 
-  console.log('[AIRTABLE_REQUEST] URL:', url);
-  console.log('[AIRTABLE_REQUEST] Payload:', JSON.stringify(payload, null, 2));
+  console.log('[AIRTABLE_REQUEST] upsertLead', leadId, 'step:', fields['Step Reached'] ?? 'final');
 
   const response = await fetch(url, {
-    method: 'POST',
+    method: 'PATCH',
     headers: {
-      'Authorization': `Bearer ${AIRTABLE_API_KEY}`,
+      Authorization: `Bearer ${AIRTABLE_API_KEY}`,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify(payload),
+    body: JSON.stringify({
+      performUpsert: { fieldsToMergeOn: ['Lead ID'] },
+      typecast: true,
+      records: [{ fields: { ...fields, 'Lead ID': leadId } }],
+    }),
   });
 
   if (!response.ok) {
-    const errorText = await response.text();
-    console.error('[AIRTABLE_ERROR] Status:', response.status);
-    console.error('[AIRTABLE_ERROR] StatusText:', response.statusText);
-    console.error('[AIRTABLE_ERROR] Response:', errorText);
-    console.error('[AIRTABLE_ERROR] Payload sent:', JSON.stringify(payload, null, 2));
-    throw new Error(`Airtable error: ${response.status} - ${errorText}`);
+    const reason = airtableErrorReason(await response.text());
+    console.error(
+      '[AIRTABLE_ERROR] upsertLead',
+      leadId,
+      'status:', response.status,
+      'reason:', reason
+    );
+    throw new Error(`Airtable error: ${response.status} - ${reason}`);
   }
 
   const result = await response.json();
-  console.log('[AIRTABLE_SUCCESS] Record created:', result.id);
-  return result;
+  const record = result.records?.[0];
+  const created = (result.createdRecords ?? []).length > 0;
+  console.log('[AIRTABLE_SUCCESS] upsertLead', leadId, created ? 'created' : 'updated', record?.id);
+  return { id: record?.id as string | undefined, created };
 }
 
 // State name to abbreviation mapping

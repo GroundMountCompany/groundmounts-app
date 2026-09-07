@@ -1,20 +1,3 @@
 {
-    "headers": [
-      {
-        "source": "/(.*)",
-        "headers": [
-          {
-            "key": "Content-Security-Policy",
-            "value": "frame-ancestors *"
-          }
-        ]
-      }
-    ],
-    "crons": [
-      {
-        "path": "/api/followups/scheduled",
-        "schedule": "*/5 * * * *"
-      }
-    ]
-  }
-  
+  "$schema": "https://openapi.vercel.sh/vercel.json"
+}

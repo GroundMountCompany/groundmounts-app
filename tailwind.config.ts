@@ -1,5 +1,6 @@
 import type { Config } from "tailwindcss";
 import type { PluginAPI } from "tailwindcss/types/config";
+import tailwindcssAnimate from "tailwindcss-animate";
 
 const config: Config = {
     darkMode: ["class"],
@@ -77,7 +78,7 @@ const config: Config = {
         { values: theme('textShadow') }
       )
     },
-      require("tailwindcss-animate")
+      tailwindcssAnimate,
 ],
 };
 

@@ -3,7 +3,16 @@ export type BrandConfig = {
   name: string;
   tagline: string;
   domain: string;
-  logo: string;
+  /**
+   * The header image on the emails, as an absolute URL.
+   *
+   * Absolute because an inbox has no origin to resolve a path against. It
+   * previously pointed at /logos/groundmount-company.png — a path with no file
+   * behind it — so every quote opened with a broken image icon. The brand name
+   * is the alt text, so an inbox that blocks remote images still shows who the
+   * mail is from.
+   */
+  logoUrl: string;
 
   // Colors
   primaryColor: string;
@@ -13,6 +22,17 @@ export type BrandConfig = {
   phone: string;
   email: string;
   calendlyUrl: string;
+
+  /**
+   * The From address on the customer's quote email.
+   *
+   * Its domain has to be verified in Resend or the send fails outright, which
+   * is why every brand here points at a domain the owner controls rather than
+   * at whatever the funnel was embedded on.
+   */
+  fromEmail: string;
+  /** Where a reply lands. A customer hitting reply is a customer talking. */
+  replyTo: string;
 
   // Copy
   headline: string;
@@ -32,11 +52,13 @@ export const brands: Record<string, BrandConfig> = {
     name: "The Ground Mount Company",
     tagline: "Your Ground Mount Guys",
     domain: "groundmounts.com",
-    logo: "/logos/groundmount-company.png",
+    logoUrl: "https://www.groundmounts.com/images/logo-email.png",
     primaryColor: "#1e3a5f",
     accentColor: "#dc2626",
     phone: "(469) 809-7099",
     email: "info@groundmounts.com",
+    fromEmail: "The Ground Mount Company <quotes@groundmounts.com>",
+    replyTo: "info@groundmounts.com",
     calendlyUrl: "https://calendly.com/groundmounts/consultation",
     headline: "Design Your Ground Mount System",
     subheadline: "Skip the roof. Own your power.",
@@ -46,61 +68,59 @@ export const brands: Record<string, BrandConfig> = {
     metaDescription: "Design your custom ground mount solar system in minutes. Get an instant quote for professional installation in Texas.",
   },
 
-  texasgroundmountsolar: {
-    name: "Texas Ground Mount Solar",
-    tagline: "Ground Mount Solar for Texas Properties",
-    domain: "texasgroundmountsolar.com",
-    logo: "/logos/texas-ground-mount.png",
-    primaryColor: "#14532d",
-    accentColor: "#ca8a04",
-    phone: "(469) 809-7099",
-    email: "info@texasgroundmountsolar.com",
-    calendlyUrl: "https://calendly.com/groundmounts/consultation",
-    headline: "Texas Ground Mount Solar Installers",
-    subheadline: "Professional ground mount installation across DFW and Houston",
-    trustBadges: ["Texas-Based", "25-Year Warranty", "500+ Projects", "Free Site Visit"],
-    socialProofText: "Texas's trusted ground mount specialists",
-    metaTitle: "Texas Ground Mount Solar | Professional Installation",
-    metaDescription: "Professional ground mount solar installation across Texas. Design your system and get an instant quote.",
-  },
 
-  backyardsolartexas: {
-    name: "Backyard Solar Texas",
-    tagline: "Solar for Texas Land Owners",
-    domain: "backyardsolartexas.com",
-    logo: "/logos/backyard-solar.png",
-    primaryColor: "#166534",
-    accentColor: "#eab308",
-    phone: "(469) 809-7099",
-    email: "info@backyardsolartexas.com",
-    calendlyUrl: "https://calendly.com/groundmounts/consultation",
-    headline: "Got Land? Skip the Roof.",
-    subheadline: "Ground mount solar for Texas properties with space",
-    trustBadges: ["No Roof Damage", "Optimal Sun Angle", "25-Year Warranty", "Texas Local"],
-    socialProofText: "Helping Texas landowners go solar",
-    metaTitle: "Backyard Solar Texas | Ground Mount Solar for Land Owners",
-    metaDescription: "Have land? Skip the roof and install ground mount solar. Design your system for your Texas property.",
-  },
 
-  groundmountsolarguide: {
-    name: "Ground Mount Solar Guide",
-    tagline: "Your Complete Ground Mount Resource",
-    domain: "groundmountsolar.guide",
-    logo: "/logos/solar-guide.png",
-    primaryColor: "#0369a1",
+  /**
+   * No branding at all, for partner funnels embedded on somebody else's site.
+   *
+   * The customer there has never heard of any of the four names above, so the
+   * email says what it is and comes from the address that can actually answer
+   * a reply.
+   */
+  neutral: {
+    name: "Ground Mount Solar",
+    tagline: "Ground mount solar design",
+    // The one verified sending domain, worn under a neutral display name.
+    domain: "groundmounts.com",
+    logoUrl: "https://www.groundmounts.com/images/logo-email.png",
+    primaryColor: "#1e3a5f",
     accentColor: "#16a34a",
     phone: "(469) 809-7099",
-    email: "info@groundmountsolar.guide",
+    email: "info@groundmounts.com",
+    fromEmail: "Ground Mount Solar <quotes@groundmounts.com>",
+    replyTo: "info@groundmounts.com",
     calendlyUrl: "https://calendly.com/groundmounts/consultation",
-    headline: "Design Your Ground Mount System",
-    subheadline: "Free tool to plan your ground mount solar installation",
-    trustBadges: ["Free Design Tool", "Instant Quote", "No Obligation", "Expert Support"],
-    socialProofText: "Trusted by thousands of homeowners",
-    metaTitle: "Ground Mount Solar Guide | Free Design Tool",
-    metaDescription: "Free ground mount solar design tool. Plan your installation and get expert guidance.",
+    headline: "Design your ground mount system",
+    subheadline: "Plan your installation and get a ballpark price",
+    trustBadges: ["No Roof Damage", "Optimal Sun Angle", "25-Year Warranty", "Texas Local"],
+    socialProofText: "Ground mount solar for Texas landowners",
+    metaTitle: "Ground Mount Solar | Design Tool",
+    metaDescription: "Design your ground mount solar system and get a ballpark price.",
   },
 };
 
 export type BrandKey = keyof typeof brands;
 
 export const DEFAULT_BRAND: BrandKey = "groundmounts";
+
+/**
+ * The brand a funnel wears.
+ *
+ * Deliberately not derived from `?source=`. That parameter is attribution —
+ * which partner site sent this visitor — and letting it pick a brand meant any
+ * URL could choose what a customer's email claimed to be from. Attribution is
+ * recorded in Airtable and changes nothing else.
+ *
+ * So: an explicit `?brand=`, or the build's NEXT_PUBLIC_BRAND, or the default.
+ * Anything unrecognised is the default rather than an error, because a bad
+ * query string is not a reason to stop somebody getting a quote.
+ */
+export function brandFor(requested?: string | null): BrandConfig {
+  const wanted = requested?.trim().toLowerCase();
+  if (wanted && wanted in brands) return brands[wanted];
+
+  const configured = process.env.NEXT_PUBLIC_BRAND?.trim().toLowerCase();
+  if (configured && configured in brands) return brands[configured];
+
+  return brands[DEFAULT_BRAND];
+}

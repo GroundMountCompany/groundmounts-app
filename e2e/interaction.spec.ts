@@ -1,0 +1,1606 @@
+import { test, expect, type Page, type CDPSession } from '@playwright/test';
+import { minTimeOk } from '../src/lib/guard';
+
+/**
+ * Real gesture proof, on a real WebGL map.
+ *
+ * The smoke suite runs on headless WebKit, which has no WebGL and no touch
+ * digitiser, so drag, pinch and canvas capture were entirely unverified. This
+ * runs on headless Chromium with SwiftShader and drives genuine touch events
+ * through CDP, because that is the only way to prove the pointer arbitration
+ * works rather than merely looks right.
+ *
+ * Requires a real Mapbox token: satellite tiles must load for the array to be
+ * hit-testable. Skipped with an explicit message when none is available.
+ */
+
+// Run one at a time. These render a real WebGL scene through SwiftShader and
+// drive it with synthetic touch; several at once starve each other's frames and
+// the gesture timings stop meaning anything.
+test.describe.configure({ mode: 'serial' });
+
+test.skip(
+  process.env.E2E_REAL_MAPBOX !== '1',
+  'No real NEXT_PUBLIC_MAPBOX_TOKEN found (checked env and .env.local). ' +
+    'Interaction tests need real satellite tiles and WebGL; run with a token to execute them.'
+);
+
+/** Open country south-west of Fort Worth — a rural parcel with no buildings. */
+const RURAL: [number, number] = [-97.9425, 32.1183];
+const METER: [number, number] = [-97.9425, 32.1186];
+
+import type { Pt } from './gmTest';
+import './gmTest';
+
+/** Seed the funnel straight into the design step on a rural parcel. */
+async function openDesignStep(page: Page): Promise<void> {
+  await page.addInitScript(
+    ([rural, meter]) => {
+      // Seed once only: addInitScript runs on every navigation, and re-seeding
+      // on reload would wipe exactly the persisted state a reload test checks.
+      if (window.localStorage.getItem('gmq:v3')) return;
+      window.localStorage.setItem(
+        'gmq:v3',
+        JSON.stringify({
+          state: {
+            currentStepIndex: 3,
+            address: 'County Road 1004, Rural, TX',
+            coordinates: { latitude: rural[1], longitude: rural[0] },
+            electricalMeterPosition: meter,
+            avgValue: 240,
+            percentage: 100,
+            totalPanels: 40,
+            panelTier: 'standard',
+            azimuth: 180,
+            leadId: 'interaction-test-lead',
+            // Ten minutes ago, so a ttc_ms measured from the funnel start is
+            // impossible to confuse with one measured from the reload.
+            startedAt: Date.now() - 600_000,
+          },
+          version: 1,
+        })
+      );
+    },
+    [RURAL, METER] as const
+  );
+
+  // mapbox-gl is imported lazily now, so the map instance appears a beat after
+  // first paint. `loadMapPage` waits for the hook and for the first tiles, and
+  // retries once before giving up on the environment.
+  await loadMapPage(page);
+}
+
+/** Wait until the array polygon is actually rendered on the map. */
+async function waitForArray(page: Page, timeout: number) {
+  await page.waitForFunction(
+    () => window.__gmTest.state().arrayCenter !== null && window.__gmTest.renderedHulls() > 0,
+    null,
+    { timeout }
+  );
+}
+
+async function bringMapIntoView(page: Page) {
+  // Phase 4 made the map full-bleed and the page unscrollable, so there is
+  // nothing to scroll to any more. But the design step now eases the camera to
+  // frame the array on entry, and a drag started mid-animation would see the
+  // map moving on its own — so wait for the camera as well as the canvas.
+  await page.waitForFunction(() => !window.__gmTest.isMoving(), null, { timeout: 15_000 });
+  let stable = 0;
+  let last = Number.NaN;
+  for (let i = 0; i < 30 && stable < 4; i++) {
+    const top = await page.evaluate(() => window.__gmTest.canvasRect().top);
+    stable = top === last ? stable + 1 : 0;
+    last = top;
+    await page.waitForTimeout(150);
+  }
+}
+
+/** Low-level touch primitives so a second finger can join mid-gesture. */
+async function touchStart(client: CDPSession, points: Array<{ x: number; y: number; id: number }>) {
+  await client.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: points });
+}
+async function touchMove(client: CDPSession, points: Array<{ x: number; y: number; id: number }>) {
+  await client.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: points });
+}
+async function touchEnd(client: CDPSession) {
+  await client.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+}
+
+/**
+ * A viewport point that hits only the array, with the canvas rect measured in
+ * the same evaluate so the two cannot drift apart.
+ *
+ * An IronRidge table is ~13.6 ft deep — roughly 8px on screen at zoom 18 — and
+ * content above the map settles late enough to shift it a few pixels, so this
+ * is re-derived on every attempt rather than cached.
+ */
+async function findArrayGrab(page: Page): Promise<Pt | null> {
+  return page.evaluate(() => {
+    const t = window.__gmTest;
+    const r = t.canvasRect();
+    const ac = t.state().arrayCenter;
+    if (!ac) return null;
+    const [cx, cy] = t.project(ac);
+    for (const dy of [0, -2, 2, -4, 4, -6, 6]) {
+      for (const dx of [0, -8, 8, -14, 14]) {
+        const hit = t.hitAt([cx + dx, cy + dy]);
+        // Array-only: the handler tests the compass first, so a point where
+        // both overlap would rotate instead of translate.
+        if (hit.hull > 0 && hit.handle === 0) {
+          return [r.left + cx + dx, r.top + cy + dy] as Pt;
+        }
+      }
+    }
+    return null;
+  });
+}
+
+/**
+ * Drag the grip around the array to a target bearing, keeping the finger on
+ * the circle the handle actually rides so "is the icon under the finger?"
+ * is a fair question.
+ */
+/**
+ * Turn the compass grip to a bearing.
+ *
+ * Returns the panel counts sampled between touchMoves, with the finger still
+ * down. Nothing may re-size mid-gesture — the count settles when the turn ends,
+ * not while it is happening — and that is only checkable from inside the
+ * gesture.
+ */
+async function swingCompassTo(page: Page, client: CDPSession, targetBearing: number) {
+  const geom = await page.evaluate((target) => {
+    const t = window.__gmTest;
+    const r = t.canvasRect();
+    const centre = t.state().arrayCenter!;
+    const handle = t.handleLngLat()!;
+    const c = t.project(centre);
+    const h = t.project(handle);
+    const radius = Math.hypot(h[0] - c[0], h[1] - c[1]);
+    // Screen y grows downward, so bearing 180 (south) is +y.
+    const rad = (target * Math.PI) / 180;
+    const to: [number, number] = [
+      c[0] + radius * Math.sin(rad),
+      c[1] - radius * Math.cos(rad),
+    ];
+    return {
+      from: [r.left + h[0], r.top + h[1]] as Pt,
+      to: [r.left + to[0], r.top + to[1]] as Pt,
+      // Both ends must be inside the canvas or the touch never reaches the
+      // grip and Mapbox pans the map instead.
+      onScreen:
+        h[0] > 0 && h[0] < r.width && h[1] > 0 && h[1] < r.height &&
+        to[0] > 0 && to[0] < r.width && to[1] > 0 && to[1] < r.height,
+      radius,
+      // Canvas-space target, so the bearing check never depends on the
+      // canvas rect and cannot be skewed by late layout shifts.
+      toCanvas: to as Pt,
+    };
+  }, targetBearing);
+
+  expect(
+    geom.onScreen,
+    `grip or target off-screen (radius ${Math.round(geom.radius)}px)`
+  ).toBe(true);
+
+  await touchStart(client, [{ x: geom.from[0], y: geom.from[1], id: 1 }]);
+  const steps = 12;
+  const duringGesture: number[] = [];
+  for (let i = 1; i <= steps; i++) {
+    const t = i / steps;
+    await touchMove(client, [
+      {
+        x: geom.from[0] + (geom.to[0] - geom.from[0]) * t,
+        y: geom.from[1] + (geom.to[1] - geom.from[1]) * t,
+        id: 1,
+      },
+    ]);
+    duringGesture.push(await page.evaluate(() => window.__gmTest.state().totalPanels));
+  }
+  await touchEnd(client);
+  // The last pointermove can still be queued when touchEnd returns; read
+  // azimuth only once it has stopped changing.
+  let stable = 0;
+  let last = Number.NaN;
+  for (let i = 0; i < 25 && stable < 3; i++) {
+    const az = await page.evaluate(() => window.__gmTest.state().azimuth);
+    stable = az === last ? stable + 1 : 0;
+    last = az;
+    await page.waitForTimeout(80);
+  }
+  return { ...geom, duringGesture };
+}
+
+/**
+ * Wait until the grip's projected position stops moving.
+ *
+ * Camera animations and late layout both shift it, and under parallel load a
+ * fixed sleep is not enough — the drag then starts before the zoom has settled
+ * and grabs empty map.
+ */
+/**
+ * Load the funnel with a working map, or say why not.
+ *
+ * `mapReady` waits on Mapbox's style and its first satellite tiles, which is a
+ * network fetch to somebody else's CDN. On a loaded machine that occasionally
+ * misses the budget — it failed two runs in three while the same suite passed
+ * in isolation, with 108 other assertions green.
+ *
+ * So: one clean retry, because a stalled first load is a transient. If the map
+ * cannot load twice, the environment cannot host these tests and the suite
+ * says so rather than reporting a gesture regression that is not there.
+ */
+/**
+ * Wait until the camera has genuinely stopped.
+ *
+ * `isMoving()` goes false while an ease is still settling by fractions of a
+ * pixel, and the setup here always ends with a fitDesign ease. Sampling a
+ * "before" position during that tail made the map look as though it jumped
+ * 3-21px when the gesture started — the jump was measured entirely before the
+ * first touchmove, and tracked frame time rather than anything the app did.
+ */
+async function waitForCameraStill(page: Page): Promise<void> {
+  let last = '';
+  let identical = 0;
+
+  for (let i = 0; i < 60; i++) {
+    const now = await page.evaluate(() => {
+      const c = window.__gmTest.mapCenter();
+      return `${c[0].toFixed(9)},${c[1].toFixed(9)},${window.__gmTest.isMoving() ? 1 : 0}`;
+    });
+
+    // Three in a row, not two: under load an ease can stall long enough
+    // between frames to give two matching reads and then carry on moving,
+    // which is how a settled-looking camera produced a 6px "jump" in the
+    // full suite while reading 0.0px when this file ran alone.
+    identical = now === last ? identical + 1 : 0;
+    last = now;
+    if (identical >= 2 && now.endsWith(',0')) return;
+    await page.waitForTimeout(50);
+  }
+}
+
+async function loadMapPage(page: Page): Promise<void> {
+  /**
+   * Watch what Mapbox actually answered.
+   *
+   * The only honest reason to skip is that the tiles or the style could not be
+   * fetched — somebody else's CDN, or no network. Every other cause of a map
+   * that never becomes ready is ours: an exception during construction, a
+   * broken token, a map that is simply never built. Those must fail, or the
+   * suite quietly stops testing the thing it exists for.
+   */
+  /**
+   * Whose fault is a map that never appeared?
+   *
+   * A 4xx from Mapbox is ours: a bad token, a style that does not exist, a
+   * URL we got wrong. Those are exactly the failures this suite exists to
+   * catch, and skipping on them would mean the map could break completely
+   * and the gate would stay green. Only a 5xx or a connection that never
+   * completed is somebody else's outage.
+   */
+  const ourFailures: string[] = [];
+  const theirFailures: string[] = [];
+
+  page.on('response', (r) => {
+    const url = r.url();
+    if (!url.includes('api.mapbox.com')) return;
+    const status = r.status();
+    const short = `${status} ${url.split('?')[0]}`;
+    if (status >= 500) theirFailures.push(short);
+    else if (status >= 400) ourFailures.push(short);
+  });
+  page.on('requestfailed', (r) => {
+    if (r.url().includes('api.mapbox.com')) {
+      theirFailures.push(`failed ${r.url().split('?')[0]}`);
+    }
+  });
+
+  let lastError: unknown;
+  // Ten seconds a wait, so two attempts plus this classification finish well
+  // inside the 45s the interaction project allows a test.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      await page.goto('/quote');
+      await page.waitForFunction(() => typeof window.__gmTest !== 'undefined', null, {
+        timeout: 10_000,
+      });
+      await page.waitForFunction(() => window.__gmTest.state().mapReady === true, null, {
+        timeout: 10_000,
+      });
+      await page.waitForFunction(() => !window.__gmTest.isMoving(), null, { timeout: 10_000 });
+      await page.waitForTimeout(600);
+      return;
+    } catch (error) {
+      lastError = error;
+      console.warn(`[e2e] map did not become ready (attempt ${attempt + 1})`);
+    }
+  }
+
+  // Ours first: a rejected token or a missing style is the thing to shout
+  // about, and it must never be mistaken for somebody else's bad afternoon.
+  if (ourFailures.length) {
+    throw new Error(
+      `Mapbox rejected our requests — bad token, wrong style, or a URL we got ` +
+        `wrong. This is an app failure: ${ourFailures.slice(0, 3).join('; ')}`
+    );
+  }
+
+  // Only a 5xx or a connection that never completed is external.
+  test.skip(
+    theirFailures.length > 0,
+    `Mapbox did not serve the map: ${theirFailures.slice(0, 3).join('; ')}`
+  );
+
+  throw new Error(
+    `The map never became ready and Mapbox answered every request. ` +
+      `This is an app failure, not an environment one. Last error: ${String(lastError)}`
+  );
+}
+
+async function waitForStableHandle(page: Page) {
+  await page.waitForFunction(() => !window.__gmTest.isMoving(), null, { timeout: 10_000 });
+  let stable = 0;
+  let last = '';
+  for (let i = 0; i < 40 && stable < 4; i++) {
+    const key = await page.evaluate(() => {
+      const h = window.__gmTest.handleLngLat();
+      if (!h) return 'none';
+      const p = window.__gmTest.project(h);
+      return `${Math.round(p[0])},${Math.round(p[1])}`;
+    });
+    stable = key === last && key !== 'none' ? stable + 1 : 0;
+    last = key;
+    await page.waitForTimeout(150);
+  }
+}
+
+/**
+ * Wait for the gap the test is about to measure to stop changing.
+ *
+ * waitForStableHandle settles the *computed* handle position. The gap is read
+ * from renderedGeom() — what Mapbox has actually drawn — and the two are a
+ * frame or two apart: the grip's ground offset is recomputed on zoomend and
+ * pushed into the source, and the layer catches up after that. Under load the
+ * test read the old frame and measured a gap from a stale grip.
+ *
+ * Three identical readings, rounded to the pixel, the same way the drift test
+ * settles the camera before trusting it.
+ */
+async function waitForStableGap(page: Page): Promise<number | null> {
+  let stable = 0;
+  let last = Number.NaN;
+  for (let i = 0; i < 40; i++) {
+    const geom = await page.evaluate(() => window.__gmTest.renderedGeom());
+    const gap = geom ? Math.round(distanceToPolygonEdge(geom.handlePx, geom.hullPx)) : Number.NaN;
+    stable = gap === last && Number.isFinite(gap) ? stable + 1 : 0;
+    if (stable >= 2) return gap;
+    last = gap;
+    await page.waitForTimeout(120);
+  }
+  return Number.isFinite(last) ? last : null;
+}
+
+const distance = (a: Pt, b: Pt) => Math.hypot(a[0] - b[0], a[1] - b[1]);
+
+/** Shortest distance from a point to a polygon's edges, in screen pixels. */
+function distanceToPolygonEdge(point: Pt, ring: Pt[]): number {
+  let best = Number.POSITIVE_INFINITY;
+  for (let i = 0; i < ring.length - 1; i++) {
+    const [ax, ay] = ring[i];
+    const [bx, by] = ring[i + 1];
+    const dx = bx - ax;
+    const dy = by - ay;
+    const lenSq = dx * dx + dy * dy;
+    const t =
+      lenSq === 0 ? 0 : Math.max(0, Math.min(1, ((point[0] - ax) * dx + (point[1] - ay) * dy) / lenSq));
+    best = Math.min(best, Math.hypot(point[0] - (ax + t * dx), point[1] - (ay + t * dy)));
+  }
+  return best;
+}
+
+test('a rejected Mapbox token is reported as our failure, not an outage', async ({ page }) => {
+  // The classifier's whole job. With a bad token Mapbox answers 401, the map
+  // never becomes ready, and the suite has to say "this is ours" rather than
+  // skipping as though somebody else were down — a skip here would mean the
+  // map could break completely and the gate would stay green.
+  await page.route('**/api.mapbox.com/**', (route) =>
+    route.fulfill({
+      status: 401,
+      contentType: 'application/json',
+      body: JSON.stringify({ message: 'Not Authorized - Invalid Token' }),
+    })
+  );
+
+  let thrown: unknown;
+  try {
+    await loadMapPage(page);
+  } catch (error) {
+    thrown = error;
+  }
+
+  expect(thrown, 'a rejected token did not fail the suite').toBeTruthy();
+  const message = String(thrown);
+  expect(message, 'the failure did not name the cause').toContain('Mapbox rejected our requests');
+  expect(message).toContain('401');
+  // Not the bare timeout it used to be.
+  expect(message).not.toContain('exceeded');
+});
+
+test.describe('map pins', () => {
+  /** Drag whatever is at `from` to `to` and report what moved. */
+  async function dragAndMeasure(page: Page, from: Pt, to: Pt) {
+    const client = await page.context().newCDPSession(page);
+    const before = await page.evaluate(() => ({
+      coords: window.__gmTest.state().coordinates,
+      meter: window.__gmTest.state().electricalMeterPosition,
+      map: window.__gmTest.mapCenter(),
+    }));
+
+    await touchStart(client, [{ x: from[0], y: from[1], id: 1 }]);
+    for (let i = 1; i <= 10; i++) {
+      const t = i / 10;
+      await touchMove(client, [
+        { x: from[0] + (to[0] - from[0]) * t, y: from[1] + (to[1] - from[1]) * t, id: 1 },
+      ]);
+    }
+    const during = await page.evaluate(() => ({
+      coords: window.__gmTest.state().coordinates,
+      meter: window.__gmTest.state().electricalMeterPosition,
+      map: window.__gmTest.mapCenter(),
+    }));
+    await touchEnd(client);
+
+    return { before, during };
+  }
+
+  test('the address pin is draggable and does not pan the map', async ({ page }) => {
+    // Step 1: no seeded step index, so the funnel opens on the address step.
+    await page.addInitScript(() => {
+      if (window.localStorage.getItem('gmq:v3')) return;
+      window.localStorage.setItem(
+        'gmq:v3',
+        JSON.stringify({
+          state: {
+            currentStepIndex: 0,
+            address: 'County Road 1004, Rural, TX',
+            coordinates: { latitude: 32.1183, longitude: -97.9425 },
+            leadId: 'pin-test',
+          },
+          version: 1,
+        })
+      );
+    });
+    await page.goto('/quote');
+    await page.waitForFunction(() => typeof window.__gmTest !== 'undefined', null, {
+      timeout: 30_000,
+    });
+    await page.waitForFunction(() => window.__gmTest.state().mapReady === true, null, {
+      timeout: 30_000,
+    });
+    await page.waitForFunction(() => !window.__gmTest.isMoving(), null, { timeout: 15_000 });
+    await page.waitForTimeout(600);
+
+    // The pin sits on the stored coordinates.
+    const pinPx = await page.evaluate(() => {
+      const t = window.__gmTest;
+      const r = t.canvasRect();
+      const c = t.state().coordinates;
+      const p = t.project([c.longitude, c.latitude]);
+      return [r.left + p[0], r.top + p[1]] as [number, number];
+    });
+
+    const { before, during } = await dragAndMeasure(page, pinPx, [pinPx[0] + 60, pinPx[1] - 50]);
+
+    const coordMoved = Math.hypot(
+      during.coords.longitude - before.coords.longitude,
+      during.coords.latitude - before.coords.latitude
+    );
+    const mapMoved = Math.hypot(
+      during.map[0] - before.map[0],
+      during.map[1] - before.map[1]
+    );
+
+    expect(coordMoved, 'address pin did not move').toBeGreaterThan(0);
+    expect(coordMoved / Math.max(mapMoved, 1e-12), 'map panned with the pin').toBeGreaterThan(5);
+  });
+
+  /**
+   * Drag from `point` and report how far the marker and the camera each moved,
+   * in screen pixels.
+   *
+   * Pixels, not degrees: a degree means different distances at different zooms,
+   * and the question is whether a person would see the thing move.
+   */
+  async function probeDrag(
+    page: Page,
+    point: Pt,
+    marker: 'pin' | 'meter'
+  ): Promise<{ markerPx: number; mapPx: number }> {
+    const client = await page.context().newCDPSession(page);
+
+    const read = () =>
+      page.evaluate((which) => {
+        const t = window.__gmTest;
+        const s = t.state();
+        const m =
+          which === 'pin'
+            ? ([s.coordinates.longitude, s.coordinates.latitude] as [number, number])
+            : s.electricalMeterPosition;
+        return { marker: m, map: t.mapCenter() };
+      }, marker);
+
+    const before = await read();
+
+    await touchStart(client, [{ x: point[0], y: point[1], id: 1 }]);
+    for (let i = 1; i <= 10; i++) {
+      await touchMove(client, [{ x: point[0] + i * 7, y: point[1] + i * 5, id: 1 }]);
+    }
+    const during = await read();
+    await touchEnd(client);
+    await page.waitForTimeout(150);
+
+    const degreesPerPixel = await page.evaluate(() => {
+      const a = window.__gmTest.unproject([0, 0]);
+      const b = window.__gmTest.unproject([1, 0]);
+      return Math.hypot(a[0] - b[0], a[1] - b[1]);
+    });
+
+    const dist = (a: [number, number] | null, b: [number, number] | null) =>
+      a && b ? Math.hypot(a[0] - b[0], a[1] - b[1]) : 0;
+
+    return {
+      markerPx: dist(during.marker, before.marker) / degreesPerPixel,
+      mapPx: dist(during.map, before.map) / degreesPerPixel,
+    };
+  }
+
+  /** Screen position of the marker being probed. */
+  async function markerScreenPoint(page: Page, marker: 'pin' | 'meter'): Promise<Pt> {
+    return page.evaluate((which) => {
+      const t = window.__gmTest;
+      const r = t.canvasRect();
+      const s = t.state();
+      const ll =
+        which === 'pin'
+          ? ([s.coordinates.longitude, s.coordinates.latitude] as [number, number])
+          : s.electricalMeterPosition!;
+      const p = t.project(ll);
+      return [r.left + p[0], r.top + p[1]] as [number, number];
+    }, marker);
+  }
+
+  /** Open the funnel at a step with the map settled. */
+  async function openWithMap(page: Page, seed: object) {
+    await page.addInitScript((payload) => {
+      if (window.localStorage.getItem('gmq:v3')) return;
+      window.localStorage.setItem('gmq:v3', JSON.stringify(payload));
+    }, seed);
+    await loadMapPage(page);
+  }
+
+  /**
+   * The padded hit circle is 26px in radius, so 24px from the centre is inside
+   * it and 28px is outside. Probing either side of that edge is what proves the
+   * padding is real rather than reading a constant back out of the app.
+   */
+  const INSIDE_PX = 24;
+  const OUTSIDE_PX = 28;
+  /** A drag of ~86px should move a grabbed marker most of that distance. */
+  const MIN_MARKER_MOVE_PX = 40;
+
+  for (const marker of ['pin', 'meter'] as const) {
+    const step = marker === 'pin' ? 0 : 2;
+    const seedFor = (leadId: string) => ({
+      state: {
+        currentStepIndex: step,
+        address: 'County Road 1004, Rural, TX',
+        coordinates: { latitude: 32.1183, longitude: -97.9425 },
+        electricalMeterPosition: [-97.9425, 32.1183],
+        leadId,
+      },
+      version: 1,
+    });
+
+    test(`${marker}: a touch inside the padded edge drags the marker`, async ({ page }) => {
+      await openWithMap(page, seedFor(`${marker}-inside`));
+
+      const centre = await markerScreenPoint(page, marker);
+      const { markerPx, mapPx } = await probeDrag(
+        page,
+        [centre[0] + INSIDE_PX, centre[1]],
+        marker
+      );
+
+      expect(markerPx, `${marker} did not move when grabbed inside its hit area`).toBeGreaterThan(
+        MIN_MARKER_MOVE_PX
+      );
+      expect(mapPx, `map panned while the ${marker} was being dragged`).toBeLessThan(3);
+    });
+
+    test(`${marker}: a touch outside the padded edge pans the map instead`, async ({ page }) => {
+      await openWithMap(page, seedFor(`${marker}-outside`));
+
+      const centre = await markerScreenPoint(page, marker);
+      const { markerPx, mapPx } = await probeDrag(
+        page,
+        [centre[0] + OUTSIDE_PX, centre[1]],
+        marker
+      );
+
+      expect(markerPx, `${marker} moved from a touch outside its hit area`).toBeLessThan(1);
+      expect(mapPx, 'the map should have panned instead').toBeGreaterThan(
+        MIN_MARKER_MOVE_PX
+      );
+    });
+  }
+
+  test('the meter is draggable on its own step', async ({ page }) => {
+    await page.addInitScript(() => {
+      if (window.localStorage.getItem('gmq:v3')) return;
+      window.localStorage.setItem(
+        'gmq:v3',
+        JSON.stringify({
+          state: {
+            currentStepIndex: 2,
+            address: 'County Road 1004, Rural, TX',
+            coordinates: { latitude: 32.1183, longitude: -97.9425 },
+            electricalMeterPosition: [-97.9425, 32.1183],
+            leadId: 'meter-test',
+          },
+          version: 1,
+        })
+      );
+    });
+    await loadMapPage(page);
+
+    const meterPx = await page.evaluate(() => {
+      const t = window.__gmTest;
+      const r = t.canvasRect();
+      const m = t.state().electricalMeterPosition!;
+      const p = t.project(m);
+      return [r.left + p[0], r.top + p[1]] as [number, number];
+    });
+
+    const { before, during } = await dragAndMeasure(page, meterPx, [
+      meterPx[0] - 70,
+      meterPx[1] + 40,
+    ]);
+
+    const meterMoved = Math.hypot(
+      during.meter![0] - before.meter![0],
+      during.meter![1] - before.meter![1]
+    );
+    const mapMoved = Math.hypot(during.map[0] - before.map[0], during.map[1] - before.map[1]);
+
+    // v1 drew the meter but never let you move it; the drag panned the map.
+    expect(meterMoved, 'meter did not move').toBeGreaterThan(0);
+    expect(meterMoved / Math.max(mapMoved, 1e-12), 'map panned with the meter').toBeGreaterThan(5);
+  });
+});
+
+test.describe('design step gestures', () => {
+  test('array appears within 3s on a rural parcel', async ({ page }) => {
+    await openDesignStep(page);
+
+    // The rural hang: no buildings ever load, so a placement that waits for
+    // them never resolves. The bounded wait must still put panels on the map.
+    await waitForArray(page, 3000);
+
+    const state = await page.evaluate(() => window.__gmTest.state());
+    expect(state.arrayCenter).not.toBeNull();
+    expect(state.trenchFeet).toBeGreaterThan(0);
+  });
+
+  test('single-finger drag moves the array and not the map', async ({ page }) => {
+    await openDesignStep(page);
+    await waitForArray(page, 15_000);
+    await bringMapIntoView(page);
+
+    const client = await page.context().newCDPSession(page);
+    let moved = 0;
+    /** Every map-centre reading taken during the gesture, one per touchMove. */
+    let samples: Array<[number, number]> = [];
+    let frameGaps: number[] = [];
+    let before: { array: [number, number]; map: [number, number] } | null = null;
+
+    // Re-derive the grab point each attempt: if late layout shifted the canvas
+    // between measuring and dispatching, the touch misses and we try again.
+    for (let attempt = 0; attempt < 4 && moved === 0; attempt++) {
+      const grab = await findArrayGrab(page);
+      if (!grab) {
+        await page.waitForTimeout(300);
+        continue;
+      }
+      await waitForCameraStill(page);
+      before = await page.evaluate(() => ({
+        array: window.__gmTest.state().arrayCenter!,
+        map: window.__gmTest.mapCenter(),
+      }));
+
+      // Start recording frame intervals for the duration of the gesture, so a
+      // renderer that stalls mid-drag is visible as a stall rather than as a
+      // map that appears to have moved.
+      await page.evaluate(() => {
+        const w = window as unknown as { __gmFrames: number[]; __gmRecording: boolean };
+        w.__gmFrames = [];
+        w.__gmRecording = true;
+        let last = performance.now();
+        const tick = (now: number) => {
+          w.__gmFrames.push(now - last);
+          last = now;
+          if (w.__gmRecording) requestAnimationFrame(tick);
+        };
+        requestAnimationFrame(tick);
+      });
+
+      // Driven step by step, and sampled after every step: the camera pin is a
+      // correction, so the map can swing out and come back between two
+      // readings. Taking one reading at the end would miss exactly the
+      // excursion a person would see.
+      await touchStart(client, [{ x: grab[0], y: grab[1], id: 1 }]);
+      samples = [];
+      for (let i = 1; i <= 20; i++) {
+        await touchMove(client, [{ x: grab[0] + i * 9, y: grab[1] + i * 6, id: 1 }]);
+        samples.push(await page.evaluate(() => window.__gmTest.mapCenter()));
+      }
+
+      const during = await page.evaluate(() => ({
+        array: window.__gmTest.state().arrayCenter!,
+        map: window.__gmTest.mapCenter(),
+      }));
+      await touchEnd(client);
+
+      frameGaps = await page.evaluate(() => {
+        const w = window as unknown as { __gmFrames: number[]; __gmRecording: boolean };
+        w.__gmRecording = false;
+        return w.__gmFrames;
+      });
+
+      moved = distance(during.array, before.array);
+    }
+
+    expect(moved, 'array did not move under a single-finger drag').toBeGreaterThan(0);
+    expect(samples.length, 'no map samples were taken during the drag').toBe(20);
+
+    // Reported in the failure message, never used to skip: a slow renderer is
+    // context for a number, not a reason to stop checking it.
+    const worstFrame = Math.max(...frameGaps, 0);
+
+    // The map must not visibly pan underneath the finger, and "visibly" has to
+    // be measured against how far the finger actually went — not against a
+    // fixed pixel budget that means different things at different zooms and
+    // different drag lengths.
+    const degreesPerPixel = await page.evaluate(() => {
+      const a = window.__gmTest.unproject([0, 0]);
+      const b = window.__gmTest.unproject([1, 0]);
+      return Math.hypot(a[0] - b[0], a[1] - b[1]);
+    });
+
+    const fingerTravelPx = Math.hypot(20 * 9, 20 * 6);
+    const driftsPx = samples.map((m) => distance(m, before!.map) / degreesPerPixel);
+    const peakDriftPx = Math.max(...driftsPx);
+
+    /**
+     * The measurement that matters: does the map follow the finger?
+     *
+     * Sampled after every touchMove. With the camera settled before the
+     * "before" reading is taken, every sample reads 0.00px — the map does not
+     * move at all during an array drag.
+     *
+     * The spread is what is worth asserting proportionally: how much the map
+     * moves across the gesture while the finger travels 216px. A map being
+     * panned by the finger climbs steadily; a
+     * pinned one is flat. The control test below drags empty ground and must
+     * exceed 50%, which is what shows this measurement can tell the two apart.
+     */
+    const spreadPx = Math.max(...driftsPx) - Math.min(...driftsPx);
+    expect(
+      spreadPx / fingerTravelPx,
+      `map moved ${spreadPx.toFixed(1)}px across the gesture (profile: ${driftsPx
+        .map((d) => d.toFixed(1))
+        .join(' ')})`
+    ).toBeLessThan(0.05);
+
+    /**
+     * And the offset at the start of the gesture, as an absolute figure
+     * because that is what it is: a one-off, not something that grows with the
+     * drag.
+     *
+     * It reads 0.00px once the camera is genuinely still before the "before"
+     * sample is taken. The 3-21px this used to report was the setup's
+     * fitDesign ease still settling, measured entirely before the first
+     * touchmove — a fault in the test, not in the map. 3px is the bound: far
+     * above the zero it actually measures, far below the artefact it replaced.
+     */
+    expect(
+      peakDriftPx,
+      `map jumped ${peakDriftPx.toFixed(1)}px as the gesture started (worst frame ${worstFrame.toFixed(0)}ms)`
+    ).toBeLessThan(3);
+  });
+
+  test('the control: a drag on empty ground does move the map', async ({ page }) => {
+    // The assertion above is only worth anything if a map that IS tracking the
+    // finger fails it. This is that map: the same gesture, started away from
+    // the array, where Mapbox handles it and the camera follows.
+    await openDesignStep(page);
+    await waitForArray(page, 15_000);
+    await bringMapIntoView(page);
+
+    const client = await page.context().newCDPSession(page);
+
+    const empty = await page.evaluate(() => {
+      const t = window.__gmTest;
+      const r = t.canvasRect();
+      const centre = t.state().arrayCenter!;
+      const [cx, cy] = t.project(centre);
+      // Well clear of the array and its hit padding, and still on canvas.
+      const candidates = [
+        [cx, cy + 220],
+        [cx, cy - 220],
+        [cx + 220, cy],
+      ];
+      for (const [x, y] of candidates) {
+        if (x > 10 && y > 10 && x < r.width - 10 && y < r.height - 10) {
+          const hit = t.hitAt([x, y]);
+          if (hit.hull === 0 && hit.handle === 0) {
+            return { point: [r.left + x, r.top + y] as Pt, ok: true };
+          }
+        }
+      }
+      return { point: [0, 0] as Pt, ok: false };
+    });
+    expect(empty.ok, 'no empty ground on screen to drag').toBe(true);
+
+    await page.evaluate(() => {
+      const w = window as unknown as { __gmFrames: number[]; __gmRecording: boolean };
+      w.__gmFrames = [];
+      w.__gmRecording = true;
+      let last = performance.now();
+      const tick = (now: number) => {
+        w.__gmFrames.push(now - last);
+        last = now;
+        if (w.__gmRecording) requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    });
+
+    await waitForCameraStill(page);
+    const before = await page.evaluate(() => window.__gmTest.mapCenter());
+    await touchStart(client, [{ x: empty.point[0], y: empty.point[1], id: 1 }]);
+    const samples: Array<[number, number]> = [];
+    for (let i = 1; i <= 20; i++) {
+      await touchMove(client, [
+        { x: empty.point[0] + i * 9, y: empty.point[1] + i * 6, id: 1 },
+      ]);
+      samples.push(await page.evaluate(() => window.__gmTest.mapCenter()));
+    }
+    await touchEnd(client);
+
+    const frameGaps = await page.evaluate(() => {
+      const w = window as unknown as { __gmFrames: number[]; __gmRecording: boolean };
+      w.__gmRecording = false;
+      return w.__gmFrames;
+    });
+    const worstFrame = Math.max(...frameGaps, 0);
+
+    const degreesPerPixel = await page.evaluate(() => {
+      const a = window.__gmTest.unproject([0, 0]);
+      const b = window.__gmTest.unproject([1, 0]);
+      return Math.hypot(a[0] - b[0], a[1] - b[1]);
+    });
+
+    const fingerTravelPx = Math.hypot(20 * 9, 20 * 6);
+    // Peak, measured the same way as the assertion it is the control for.
+    const movedPx = Math.max(...samples.map((m) => distance(m, before))) / degreesPerPixel;
+
+    // A map that follows the finger moves most of the way with it. This is the
+    // number the array-drag assertion has to be nowhere near.
+    expect(
+      movedPx / fingerTravelPx,
+      `map only moved ${movedPx.toFixed(1)}px over ${fingerTravelPx.toFixed(0)}px of finger travel ` +
+        `(worst frame ${worstFrame.toFixed(0)}ms)`
+    ).toBeGreaterThan(0.5);
+  });
+
+  test('a second finger hands the gesture to the map mid-drag', async ({ page }) => {
+    await openDesignStep(page);
+    await waitForArray(page, 15_000);
+    await bringMapIntoView(page);
+
+    const client = await page.context().newCDPSession(page);
+
+    // Finger one, alone, on a point confirmed to hit the array layer.
+    const grab = await findArrayGrab(page);
+    expect(grab, 'no point on the array reported a hit').not.toBeNull();
+    const [gx, gy] = grab!;
+
+    const start = await page.evaluate(() => ({
+      array: window.__gmTest.state().arrayCenter!,
+      zoom: window.__gmTest.mapZoom(),
+    }));
+
+    await touchStart(client, [{ x: gx, y: gy, id: 1 }]);
+    for (let i = 1; i <= 6; i++) {
+      await touchMove(client, [{ x: gx + i * 8, y: gy + i * 5, id: 1 }]);
+    }
+
+    // Let any queued pointermove flush before sampling, so the freeze assertion
+    // measures the handler's behaviour and not event-loop timing.
+    await page.waitForTimeout(150);
+    const afterOneFinger = await page.evaluate(() => window.__gmTest.state().arrayCenter!);
+    expect(
+      distance(afterOneFinger, start.array),
+      'array did not follow a single finger'
+    ).toBeGreaterThan(0);
+
+    // Finger two joins. From here the gesture belongs to the map: the array
+    // must freeze and the zoom must change.
+    const cx = gx + 48;
+    const cy = gy + 30;
+    await touchStart(client, [
+      { x: cx, y: cy, id: 1 },
+      { x: cx + 40, y: cy, id: 2 },
+    ]);
+    for (let i = 1; i <= 10; i++) {
+      const spread = 40 + i * 11;
+      await touchMove(client, [
+        { x: cx - spread / 2, y: cy, id: 1 },
+        { x: cx + spread / 2, y: cy, id: 2 },
+      ]);
+    }
+    await touchEnd(client);
+
+    const end = await page.evaluate(() => ({
+      array: window.__gmTest.state().arrayCenter!,
+      zoom: window.__gmTest.mapZoom(),
+    }));
+
+    expect(
+      distance(end.array, afterOneFinger),
+      'array kept moving after the second finger landed'
+    ).toBeLessThan(1e-9);
+    expect(
+      Math.abs(end.zoom - start.zoom),
+      'pinch did not reach the map'
+    ).toBeGreaterThan(0.05);
+  });
+
+  test('compass tracks the finger and sets azimuth from its bearing', async ({ page }) => {
+    await openDesignStep(page);
+    await waitForArray(page, 15_000);
+    await bringMapIntoView(page);
+    await page.waitForFunction(() => window.__gmTest.renderedHandles() > 0, null, {
+      timeout: 10_000,
+    });
+
+    // Zoom in so the grip's radius on screen is large enough for the angular
+    // assertion to be meaningful: at the default zoom the handle is ~40px from
+    // the array centre, where 2 degrees is barely one pixel of touch precision.
+    await page.evaluate(() => window.__gmTest.setZoom(18.8));
+    await waitForStableHandle(page);
+
+    const client = await page.context().newCDPSession(page);
+
+
+    // First swing: south to roughly due east.
+    await swingCompassTo(page, client, 90);
+    await expect
+      .poll(async () => {
+        const az = await page.evaluate(() => window.__gmTest.state().azimuth);
+        const n = ((az % 360) + 360) % 360;
+        return Math.min(Math.abs(n - 90), 360 - Math.abs(n - 90));
+      })
+      .toBeLessThan(10);
+    await waitForStableHandle(page);
+
+    // Re-grab at the new position and swing again. This is where a fixed
+    // screen-space icon offset shows up: the grip drifts off the finger once
+    // the azimuth leaves 180.
+    const swing = await swingCompassTo(page, client, 135);
+    await waitForStableHandle(page);
+
+    const result = await page.evaluate((f) => {
+      const t = window.__gmTest;
+      const handle = t.handleLngLat()!;
+      const hp = t.project(handle);
+      // Drift compares the rendered icon against the point we dispatched.
+      //
+      // The bearing check uses the pointer position the handler ACTUALLY saw,
+      // not the one we aimed at: CDP dispatch coordinates and the page's own
+      // getBoundingClientRect differ by a fixed ~6px in this harness, which at
+      // the grip's radius is ~2.5 degrees — larger than the tolerance, and
+      // nothing to do with the app's maths. This asserts the property that
+      // matters: azimuth equals the bearing to wherever the finger really was.
+      const observed = t.lastPointer();
+      return {
+        drift: Math.hypot(hp[0] - f[0], hp[1] - f[1]),
+        azimuth: t.state().azimuth,
+        pointerBearing: observed ? t.bearingFromCenter(observed)! : Number.NaN,
+      };
+    }, swing.toCanvas);
+    expect(result.drift, 'compass drifted away from the finger').toBeLessThan(8);
+
+    const norm = (a: number) => ((a % 360) + 360) % 360;
+    const delta = Math.abs(norm(result.azimuth) - norm(result.pointerBearing));
+    expect(Math.min(delta, 360 - delta), 'azimuth does not match pointer bearing').toBeLessThan(2);
+  });
+
+  test('the panel count never moves while the grip is under the finger', async ({ page }) => {
+    // Watching the count tick up and down while you turn the array is how a
+    // customer stops trusting the number, so nothing re-sizes mid-gesture.
+    //
+    // It does settle when the turn *ends* — an array pointing east makes less
+    // power than the count was chosen for — and that is a separate test. This
+    // one is about the boundary between the two.
+    await openDesignStep(page);
+    await waitForArray(page, 15_000);
+    await bringMapIntoView(page);
+    await page.waitForFunction(() => window.__gmTest.renderedHandles() > 0, null, {
+      timeout: 10_000,
+    });
+    await page.evaluate(() => window.__gmTest.setZoom(18.8));
+    await waitForStableHandle(page);
+
+    const before = await page.evaluate(() => ({
+      panels: window.__gmTest.state().totalPanels,
+      azimuth: window.__gmTest.state().azimuth,
+    }));
+    expect(before.panels, 'nothing was sized to begin with').toBeGreaterThan(0);
+
+    const client = await page.context().newCDPSession(page);
+    const swing = await swingCompassTo(page, client, 90);
+    await waitForStableHandle(page);
+
+    const after = await page.evaluate(() => ({
+      panels: window.__gmTest.state().totalPanels,
+      azimuth: window.__gmTest.state().azimuth,
+    }));
+
+    const norm = (a: number) => ((a % 360) + 360) % 360;
+    const turned = Math.abs(norm(after.azimuth) - norm(before.azimuth));
+    expect(
+      Math.min(turned, 360 - turned),
+      'the array did not actually rotate, so the count proves nothing'
+    ).toBeGreaterThan(80);
+
+    // Every sample taken between touchMoves, with the finger still down.
+    expect(swing.duringGesture.length, 'no samples were taken mid-gesture').toBeGreaterThan(6);
+    expect(
+      [...new Set(swing.duringGesture)],
+      `the count moved mid-gesture: ${swing.duringGesture.join(', ')}`
+    ).toEqual([before.panels]);
+  });
+
+  test('dragging the array re-asks about the ground under it', async ({ page }) => {
+    // The lookup is keyed on the array, not the meter: the panels can end up
+    // hundreds of feet from the house, on different soil and a different slope.
+    const asked: Array<{ lat: number; lng: number }> = [];
+    await page.route('**/api/site*', (route) => {
+      const url = new URL(route.request().url());
+      asked.push({
+        lat: Number(url.searchParams.get('lat')),
+        lng: Number(url.searchParams.get('lng')),
+      });
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          ok: true,
+          curve: { 90: 900, 135: 1000, 180: 1100, 225: 1000, 270: 900 },
+          curveSource: 'pvwatts',
+          soilClass: 'rock outcrop',
+          soilSource: 'ssurgo',
+        }),
+      });
+    });
+
+    await openDesignStep(page);
+    await waitForArray(page, 15_000);
+    await bringMapIntoView(page);
+
+    await expect.poll(() => asked.length, { timeout: 10_000 }).toBeGreaterThan(0);
+    const firstAsk = asked.length;
+    const client = await page.context().newCDPSession(page);
+
+    // One drag at the design zoom covers a few tens of metres, and the lookup
+    // is deliberately keyed to ~100 m so nudging the array costs no requests.
+    // So drag repeatedly in one direction until the array has genuinely left
+    // its cell — which is the behaviour worth asserting anyway.
+    const before = await page.evaluate(() => window.__gmTest.state().arrayCenter!);
+    for (let attempt = 0; attempt < 10 && asked.length === firstAsk; attempt++) {
+      const grab = await findArrayGrab(page);
+      if (!grab) {
+        await page.waitForTimeout(300);
+        continue;
+      }
+
+      await touchStart(client, [{ x: grab[0], y: grab[1], id: 1 }]);
+      for (let i = 1; i <= 10; i++) {
+        await touchMove(client, [{ x: grab[0] + i * 10, y: grab[1] + i * 6, id: 1 }]);
+      }
+      await touchEnd(client);
+
+      // The refresh is debounced behind the slope lookup's timer.
+      await page.waitForTimeout(900);
+      await page.waitForFunction(() => !window.__gmTest.isMoving(), null, { timeout: 10_000 });
+    }
+
+    const after = await page.evaluate(() => window.__gmTest.state().arrayCenter!);
+    expect(
+      Math.hypot(after[0] - before[0], after[1] - before[1]),
+      'the array never moved, so nothing should have been re-asked'
+    ).toBeGreaterThan(0);
+
+    expect(asked.length, 'the drag did not trigger a second lookup').toBeGreaterThan(firstAsk);
+
+    // And it asked about where the array ended up, not where the meter is.
+    // Compared as distances rather than exact equality: the ask is dispatched
+    // on the debounce, and the array can settle a few metres further before
+    // this assertion reads it.
+    const last = asked[asked.length - 1];
+    const toArray = Math.hypot(last.lng - after[0], last.lat - after[1]);
+    const meter = await page.evaluate(() => window.__gmTest.state().electricalMeterPosition!);
+    const toMeter = Math.hypot(last.lng - meter[0], last.lat - meter[1]);
+
+    expect(toArray, 'the lookup was nowhere near the array').toBeLessThan(1e-4);
+    expect(toMeter / toArray, 'it asked about the meter, not the array').toBeGreaterThan(5);
+  });
+
+  test('screenshot survives a reload on the contact form and reaches the lead', async ({
+    page,
+  }) => {
+    // Mock the endpoint so the flow completes without touching Airtable or
+    // Resend, and so the outgoing lead payload can be inspected. One request
+    // now does the whole submit.
+    let leadBody: { mapScreenshot?: string; ttc_ms?: number } | null = null;
+
+    // Intercepted, not blindly succeeded: the request itself is the evidence.
+    await page.route('**/api/leads', (route) => {
+      leadBody = JSON.parse(route.request().postData() ?? '{}');
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: '{"ok":true,"leadFiled":true,"emailSent":true,"airtableId":"recTest"}',
+      });
+    });
+
+    await openDesignStep(page);
+    await waitForArray(page, 15_000);
+    await bringMapIntoView(page);
+    await page.waitForTimeout(2500);
+
+    const cta = page.getByTestId('primary-cta');
+    await expect(cta).toBeEnabled();
+    await cta.click();
+
+    await expect
+      .poll(async () => page.evaluate(() => window.__gmTest.state().currentStepIndex), {
+        timeout: 15_000,
+      })
+      .toBe(4);
+
+    const captured = await page.evaluate(() => window.__gmTest.state().mapScreenshot);
+    expect(captured).toBeTruthy();
+
+    // Options (4) sits between the design step and the contact form (5).
+    await page.getByTestId('primary-cta').click();
+    await expect
+      .poll(async () => page.evaluate(() => window.__gmTest.state().currentStepIndex), {
+        timeout: 10_000,
+      })
+      .toBe(5);
+
+    // The regression: a full-size PNG could not go in localStorage, so a refresh
+    // on the contact form dropped the screenshot without saying anything.
+    await page.reload();
+    await page.waitForFunction(() => typeof window.__gmTest !== 'undefined', null, {
+      timeout: 20_000,
+    });
+
+    await expect
+      .poll(async () => page.evaluate(() => window.__gmTest.state().mapScreenshot?.length ?? 0), {
+        timeout: 15_000,
+      })
+      .toBeGreaterThan(1000);
+
+    const nameField = page.locator('#name');
+    await expect(nameField).toBeVisible({ timeout: 20_000 });
+
+    await nameField.fill('Bert Ortiz');
+    await page.locator('#email').fill('bert@example.com');
+    await page.locator('#phone').fill('(469) 555-0100');
+    await page.getByTestId('submit-lead').click();
+
+    // Lead first, then the customer email — so both have to be awaited, and in
+    // that order. Polling only the lead used to pass by accident when the email
+    // went first.
+    await expect.poll(() => (leadBody ? 'sent' : 'pending'), { timeout: 20_000 }).toBe('sent');
+
+    const shot = leadBody!.mapScreenshot;
+    expect(shot, 'lead payload has no screenshot after reload').toBeTruthy();
+    expect(shot!.startsWith('data:image/jpeg;base64,')).toBe(true);
+    expect(shot!.length).toBeGreaterThan(1000);
+
+    // The funnel timer must survive the reload. If startedAt were not persisted,
+    // ttc_ms would measure the seconds since the refresh and a prompt submit
+    // would be rejected by the min-time guard on /api/leads.
+    expect(
+      leadBody!.ttc_ms,
+      'ttc_ms restarted at the reload instead of the funnel start'
+    ).toBeGreaterThan(300_000);
+
+    // And it must still pass the guard the server actually applies.
+    expect(minTimeOk(leadBody!.ttc_ms)).toBe(true);
+  });
+
+  test('grip keeps a usable screen distance from the array at any zoom', async ({
+    page,
+  }) => {
+    await openDesignStep(page);
+    await waitForArray(page, 15_000);
+    await bringMapIntoView(page);
+
+    // A fixed ground offset cannot work at both ends: 60 ft is ~5px at zoom 15
+    // and ~290px at zoom 21. The offset is derived from a constant screen
+    // radius instead, so the gap must hold across a 16x scale change.
+    //
+    // Measured from what Mapbox actually has rendered, not from a recomputed
+    // expected position — otherwise this would still pass with the zoomend
+    // wiring removed, because the recomputation would silently agree with
+    // itself while the map showed something stale.
+    for (const zoom of [16, 20]) {
+      // Centre on the array as well: at zoom 20 it otherwise sits outside the
+      // viewport and there is nothing rendered to read back.
+      await page.evaluate((z) => window.__gmTest.viewArrayAt(z), zoom);
+      await waitForStableHandle(page);
+
+      // Settle on the rendered gap itself, not on the computed handle: the
+      // layer redraws a frame or two after the offset is recomputed, and under
+      // load this read the stale frame and measured 102px against a 96 bound.
+      const gapPx = await waitForStableGap(page);
+      expect(gapPx, `no rendered array or grip at zoom ${zoom}`).not.toBeNull();
+
+      expect(gapPx!, `grip gap at zoom ${zoom}`).toBeGreaterThan(48);
+      expect(gapPx!, `grip gap at zoom ${zoom}`).toBeLessThan(96);
+    }
+  });
+
+  test('the HUD keeps the numbers on screen while the array is dragged', async ({ page }) => {
+    // Owner QA on a real iPhone: "while placing panels you can't see the
+    // numbers". They were in the sheet's stats grid, below the fold at the
+    // peek snap point, so the whole design was being done blind.
+    await openDesignStep(page);
+    await waitForArray(page, 15_000);
+    await bringMapIntoView(page);
+
+    const viewport = page.viewportSize()!;
+    const sheet = page.getByTestId('bottom-sheet');
+    await expect(sheet).toHaveAttribute('data-snap', 'peek');
+
+    // The four figures, the panel control and the button, all on screen at
+    // once, with the sheet exactly where the customer finds it.
+    for (const id of ['design-hud', 'panel-minus', 'panel-plus', 'primary-cta']) {
+      await expect(page.getByTestId(id)).toBeVisible();
+      const box = (await page.getByTestId(id).boundingBox())!;
+      expect(box.y, `${id} is above the viewport`).toBeGreaterThanOrEqual(0);
+      expect(
+        box.y + box.height,
+        `${id} runs ${Math.round(box.y + box.height - viewport.height)}px below the fold`
+      ).toBeLessThanOrEqual(viewport.height);
+    }
+
+    // The HUD must not be sitting on the array it is describing. It is
+    // anchored top-left, opposite "Find my panels", and the array is framed in
+    // the middle of the map by fitDesignView.
+    const hud = (await page.getByTestId('design-hud').boundingBox())!;
+    const find = (await page.getByTestId('find-panels').boundingBox())!;
+    expect(hud.x + hud.width, 'the HUD reaches under Find my panels').toBeLessThanOrEqual(find.x);
+    const hullPx = await page.evaluate(() => window.__gmTest.renderedGeom()?.hullPx ?? null);
+    expect(hullPx, 'no rendered array to check the HUD against').not.toBeNull();
+    const rect = await page.evaluate(() => window.__gmTest.canvasRect());
+    const overlaps = hullPx!.some(
+      ([x, y]) =>
+        rect.left + x >= hud.x &&
+        rect.left + x <= hud.x + hud.width &&
+        rect.top + y >= hud.y &&
+        rect.top + y <= hud.y + hud.height
+    );
+    expect(overlaps, 'the HUD is sitting on top of the array at the fitted zoom').toBe(false);
+
+    // And it is live *during* the gesture, which is the whole point: a customer
+    // dragging the array has to see the trench grow while their finger is still
+    // down, not learn about it after they let go. So the reading is taken with
+    // the touch held.
+    const trenchOf = async () => Number(await page.getByTestId('hud-trench').textContent());
+    const trenchBefore = await trenchOf();
+    expect(trenchBefore, 'no trench to begin with').toBeGreaterThan(0);
+
+    const client = await page.context().newCDPSession(page);
+    let held = false;
+    let trenchWhileHeld = trenchBefore;
+
+    try {
+      for (let attempt = 0; attempt < 4 && trenchWhileHeld === trenchBefore; attempt++) {
+        const grab = await findArrayGrab(page);
+        if (!grab) {
+          await page.waitForTimeout(300);
+          continue;
+        }
+        await waitForCameraStill(page);
+
+        await touchStart(client, [{ x: grab[0], y: grab[1], id: 1 }]);
+        held = true;
+        for (let i = 1; i <= 12 && trenchWhileHeld === trenchBefore; i++) {
+          await touchMove(client, [{ x: grab[0], y: grab[1] - i * 6, id: 1 }]);
+          // Read between moves, with the finger still down.
+          trenchWhileHeld = await trenchOf();
+        }
+
+        if (trenchWhileHeld === trenchBefore) {
+          // This attempt missed the array. Let go before trying again, so the
+          // next touchStart is not a second finger.
+          await touchEnd(client);
+          held = false;
+        }
+      }
+
+      expect(
+        trenchWhileHeld,
+        `the HUD trench still read ${trenchBefore} ft with the finger down; ` +
+          'it only updates after the gesture ends'
+      ).not.toBe(trenchBefore);
+      expect(held, 'the drag was not still in progress when the HUD was read').toBe(true);
+
+      // The sheet never moved to show it.
+      await expect(sheet).toHaveAttribute('data-snap', 'peek');
+    } finally {
+      // Release whatever this test left held, whether it passed or not — a
+      // stuck touch point outlives the test and poisons the next one.
+      if (held) await touchEnd(client);
+    }
+  });
+
+  test('a finished turn re-sizes the array, and a hand-set count is left alone', async ({
+    page,
+  }) => {
+    // Nothing re-sizes while the grip is under the finger — that is unchanged,
+    // and covered by "rotating the array never changes the panel count" above.
+    // What is new is that letting go settles the count for the heading, because
+    // an array pointing east makes less power than the count was chosen for.
+    await openDesignStep(page);
+    await waitForArray(page, 15_000);
+    await bringMapIntoView(page);
+    await page.waitForFunction(() => window.__gmTest.renderedHandles() > 0, null, {
+      timeout: 10_000,
+    });
+    await page.evaluate(() => window.__gmTest.setZoom(18.8));
+    await waitForStableHandle(page);
+
+    // Facing south, sized for south: nothing to undo and nothing to explain.
+    await expect(page.getByTestId('face-south')).toHaveCount(0);
+    await expect(page.getByTestId('hud-auto-size')).toHaveCount(0);
+
+    const atSouth = await page.evaluate(() => window.__gmTest.state().totalPanels);
+    expect(atSouth, 'nothing was sized to begin with').toBeGreaterThan(0);
+
+    const client = await page.context().newCDPSession(page);
+    await swingCompassTo(page, client, 90);
+    await waitForStableHandle(page);
+
+    const turned = await page.evaluate(() => window.__gmTest.state().azimuth);
+    const norm = (a: number) => ((a % 360) + 360) % 360;
+    expect(
+      Math.abs(norm(turned) - 90),
+      'the array did not actually turn, so the rest proves nothing'
+    ).toBeLessThan(25);
+
+    // Panels added, and the toast says how many and why.
+    const east = await page.evaluate(() => window.__gmTest.state().totalPanels);
+    expect(east, 'the finished turn did not re-size the array').toBeGreaterThan(atSouth);
+
+    const toast = page.getByTestId('size-toast');
+    await expect(toast).toBeVisible();
+    await expect(page.getByTestId('size-toast-count')).toHaveText(String(east - atSouth));
+    await expect(toast).toContainText('added');
+
+    /*
+      Where the toast actually is. Owner QA on a phone: it was not noticeable,
+      because the map column runs the full height of the screen with the sheet
+      drawn over it — so a toast anchored to the bottom of the map was
+      underneath the sheet.
+    */
+    const viewport = page.viewportSize()!;
+    const toastBox = (await toast.boundingBox())!;
+    const sheetBox = (await page.getByTestId('bottom-sheet').boundingBox())!;
+
+    expect(toastBox.y, 'the toast starts above the screen').toBeGreaterThanOrEqual(0);
+    expect(
+      toastBox.y + toastBox.height,
+      `the toast runs ${Math.round(toastBox.y + toastBox.height - viewport.height)}px off the bottom`
+    ).toBeLessThanOrEqual(viewport.height);
+    expect(
+      toastBox.y + toastBox.height,
+      `the toast overlaps the sheet by ${Math.round(toastBox.y + toastBox.height - sheetBox.y)}px`
+    ).toBeLessThanOrEqual(sheetBox.y);
+
+    // Full width bar the eye cannot miss, not a chip in a corner: 8px margins.
+    // Bounded below as well as above — Codex, 8.11: a negative margin is a bar
+    // hanging off the edge of the screen, and only the upper bound was checked.
+    const rightMargin = viewport.width - (toastBox.x + toastBox.width);
+    expect(toastBox.x, 'left margin').toBeGreaterThanOrEqual(0);
+    expect(toastBox.x, 'left margin').toBeLessThanOrEqual(16);
+    expect(rightMargin, 'right margin').toBeGreaterThanOrEqual(0);
+    expect(rightMargin, 'right margin').toBeLessThanOrEqual(16);
+
+    // It does not take the touch. A bar across the bottom of the map that
+    // swallowed a drag would trade one problem for a worse one, so it is
+    // deliberately not the hit target at its own centre.
+    const swallows = await page.evaluate(([x, y]) => {
+      const el = document.elementFromPoint(x, y);
+      return !!el?.closest('[data-testid="size-toast"]');
+    }, [toastBox.x + toastBox.width / 2, toastBox.y + toastBox.height / 2] as const);
+    expect(swallows, 'the toast is eating touches meant for the map').toBe(false);
+
+    /*
+      The standing line, which outlives the toast. Once the toast had gone there
+      was nothing on screen saying why the count was what it was.
+    */
+    await expect(page.getByTestId('hud-facing')).toBeVisible();
+    await expect(page.getByTestId('hud-facing-delta')).toHaveText(String(east - atSouth));
+    await expect(page.getByTestId('hud-facing-point')).toHaveText('E');
+
+    // Back to south, and the count comes back with it — a round trip, not a
+    // ratchet that leaves the customer paying for panels they no longer need.
+    await page.getByTestId('face-south').click();
+    await expect
+      .poll(() => page.evaluate(() => Math.round(window.__gmTest.state().azimuth)))
+      .toBe(180);
+    await expect
+      .poll(() => page.evaluate(() => window.__gmTest.state().totalPanels))
+      .toBe(atSouth);
+    await expect(page.getByTestId('size-toast')).toBeVisible();
+    await expect(page.getByTestId('size-toast')).toContainText('removed');
+    await expect(page.getByTestId('face-south')).toHaveCount(0);
+    // Back at south there is nothing to explain, so the line goes.
+    await expect(page.getByTestId('hud-facing')).toHaveCount(0);
+
+    // Now take the count by hand. Rotation must not touch it again.
+    await page.getByTestId('panel-plus').click();
+    const manual = await page.evaluate(() => window.__gmTest.state().totalPanels);
+    expect(manual).toBe(atSouth + 1);
+    await expect(page.getByTestId('hud-auto-size')).toBeVisible();
+
+    await swingCompassTo(page, client, 90);
+    await waitForStableHandle(page);
+    expect(
+      await page.evaluate(() => window.__gmTest.state().totalPanels),
+      'a count the customer set by hand moved on rotation'
+    ).toBe(manual);
+
+    // The chip gives it back, for the heading the array is on now.
+    await page.getByTestId('auto-size').click();
+    await expect
+      .poll(() => page.evaluate(() => window.__gmTest.state().totalPanels))
+      .toBe(east);
+    await expect(page.getByTestId('hud-auto-size')).toHaveCount(0);
+  });
+
+  test('the real Continue button stores a screenshot containing the design', async ({
+    page,
+  }) => {
+    await openDesignStep(page);
+    await waitForArray(page, 15_000);
+    await bringMapIntoView(page);
+    // Let satellite tiles finish so the buffer holds imagery, not just layers.
+    await page.waitForTimeout(2500);
+
+    // Go through the button a customer actually taps, not the dev capture hook.
+    const cta = page.getByTestId('primary-cta');
+    await expect(cta).toBeEnabled();
+    await cta.click();
+
+    await expect
+      .poll(async () => page.evaluate(() => window.__gmTest.state().currentStepIndex), {
+        timeout: 15_000,
+      })
+      .toBe(4);
+
+    const shot = await page.evaluate(() => window.__gmTest.state().mapScreenshot);
+    expect(shot, 'Continue did not store a screenshot').toBeTruthy();
+    // Stored as a downscaled JPEG so it fits in persisted state.
+    expect(shot!.startsWith('data:image/jpeg;base64,')).toBe(true);
+
+    const counts = await countDesignPixels(page, shot!);
+
+    // Satellite imagery of open Texas farmland does not contain saturated
+    // royal blue or this exact amber; these can only come from our own layers.
+    expect(counts.arrayFill, 'no array-fill pixels in the screenshot').toBeGreaterThan(2000);
+    expect(counts.trench, 'no trench-line pixels in the screenshot').toBeGreaterThan(150);
+    expect(
+      counts.labelHalo,
+      'no trench distance label in the screenshot'
+    ).toBeGreaterThan(80);
+    expect(counts.total).toBeGreaterThan(100_000);
+
+    // Control: same scene with the design cleared. If imagery alone could hit
+    // those thresholds, this would too.
+    // Step back to the meter step first: on the design step, Step2Form's sizing
+    // effect immediately recomputes the panel count from the bill and re-places
+    // the array, which would quietly defeat the control.
+    await page.evaluate(() => window.__gmTest.state().setCurrentStepIndex(2));
+    await page.waitForTimeout(300);
+    // Clear the meter too: its marker is the same amber as the trench line, so
+    // leaving it would let the control score trench pixels for the wrong reason.
+    await page.evaluate(() => {
+      window.__gmTest.state().setArrayCenter(null);
+      window.__gmTest.state().setElectricalMeterPosition(null);
+    });
+    await page.waitForTimeout(1500);
+    const blank = await page.evaluate(() => window.__gmTest.capture());
+    const control = await countDesignPixels(page, blank.dataUrl!);
+
+    expect(control.arrayFill, 'array pixels found with no array present').toBeLessThan(
+      counts.arrayFill / 10
+    );
+    expect(control.trench, 'trench pixels found with no trench present').toBeLessThan(
+      counts.trench / 10
+    );
+    expect(control.labelHalo, 'label pixels found with no label present').toBeLessThan(
+      counts.labelHalo / 10
+    );
+  });
+});
+
+/**
+ * Decode a PNG data URL and count pixels belonging to the design layers.
+ *
+ * Done in the page because a canvas is already available there; adding an image
+ * decoding dependency to the repo for one assertion is not worth it.
+ */
+async function countDesignPixels(page: Page, dataUrl: string) {
+  return page.evaluate(async (url) => {
+    const img = new Image();
+    await new Promise<void>((resolve, reject) => {
+      img.onload = () => resolve();
+      img.onerror = () => reject(new Error('screenshot failed to decode'));
+      img.src = url;
+    });
+
+    const canvas = document.createElement('canvas');
+    canvas.width = img.naturalWidth;
+    canvas.height = img.naturalHeight;
+    const ctx = canvas.getContext('2d')!;
+    ctx.drawImage(img, 0, 0);
+    const { data } = ctx.getImageData(0, 0, canvas.width, canvas.height);
+
+    let arrayFill = 0;
+    let trench = 0;
+    let labelHalo = 0;
+    const total = data.length / 4;
+
+    for (let i = 0; i < data.length; i += 4) {
+      const r = data[i];
+      const g = data[i + 1];
+      const b = data[i + 2];
+
+      // Trench distance label halo is #7e22ce, saturated violet: blue high,
+      // green low, and red clearly above green. Checked first because it is
+      // also blue-dominant and would otherwise be scored as array fill.
+      if (r > 85 && r < 175 && g < 80 && b > 155 && b - g > 95 && r - g > 40) {
+        labelHalo++;
+        continue;
+      }
+
+      // Array fill is #1d4ed8 at 35% over imagery, plus a #bfdbfe outline: both
+      // leave blue clearly dominant, which farmland never is.
+      const blueOverRedChannel = b - r;
+      if (b > 90 && blueOverRedChannel > 45 && b - g > 30) arrayFill++;
+
+      // Trench line is #f59e0b, opaque: strong red, mid green, almost no blue.
+      if (r > 190 && g > 110 && g < 200 && b < 90 && r - b > 120) trench++;
+    }
+
+    return { arrayFill, trench, labelHalo, total };
+  }, dataUrl);
+}

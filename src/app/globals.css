@@ -33,3 +33,34 @@ body {
 html {
   touch-action: manipulation;
 }
+
+/*
+  Indeterminate progress for the bill upload card.
+
+  There is no percentage to show — the model takes as long as it takes — so the
+  bar says "still working" rather than lying about how far along it is. A
+  customer who sees nothing move assumes the tap did not register, which is the
+  whole finding this exists for.
+*/
+@keyframes gm-indeterminate {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(300%);
+  }
+}
+
+.gm-indeterminate-bar {
+  animation: gm-indeterminate 1.2s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* Still visibly working, without the travel. */
+  .gm-indeterminate-bar {
+    animation: none;
+    transform: none;
+    width: 100%;
+    opacity: 0.6;
+  }
+}

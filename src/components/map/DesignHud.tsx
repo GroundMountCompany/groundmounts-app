@@ -1,7 +1,9 @@
 'use client';
 
 import { UI } from '@/config/copy';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useQuoteStore } from '@/store/quoteStore';
+import { useSettledLayout } from '@/lib/useSettledLayout';
 import { annualKwh } from '@/lib/production';
 import { PANELS } from '@/config/pricing';
 import { applyAutoSize } from '@/lib/applyAutoSize';
@@ -38,6 +40,52 @@ const SHORT: Record<CompassPoint, string> = {
  * the two places a chip cannot end up covering the thing it describes.
  */
 export default function DesignHud() {
+  const boxRef = useRef<HTMLDivElement>(null);
+  const [maxWidth, setMaxWidth] = useState<number | null>(null);
+
+  /**
+   * Keep the chips clear of the button in the opposite corner.
+   *
+   * Both are absolutely positioned in the map column, so the gap between them
+   * is the difference of two rects — no constant, and nothing to be wrong
+   * about when a font renders wider than it did on the machine this was
+   * written on.
+   */
+  const measure = useCallback((): string => {
+    const box = boxRef.current;
+    const find = document.querySelector<HTMLElement>('[data-testid="find-panels"]');
+    if (!box || !find) return 'none';
+
+    const boxRect = box.getBoundingClientRect();
+    const findRect = find.getBoundingClientRect();
+    // A floor, so a narrow screen shows a cramped HUD rather than none at all
+    // — low enough that only an absurdly wide button could push the two into
+    // each other, which is the failure this measurement exists to prevent.
+    const next = Math.max(96, Math.round(findRect.left - boxRect.left - 8));
+    setMaxWidth((current) => (current === next ? current : next));
+    return String(next);
+  }, []);
+
+  useSettledLayout(measure);
+
+  /*
+    Re-measure if either box changes size after that.
+
+    The settle loop covers mount and the couple of seconds after it, which is
+    where a late-loading font lands. This covers everything else: the button's
+    label is text, and text can reflow whenever the thing rendering it decides
+    to. Without it the cap is only ever right for the first paint.
+  */
+  useEffect(() => {
+    const find = document.querySelector<HTMLElement>('[data-testid="find-panels"]');
+    const box = boxRef.current;
+    if (!find && !box) return;
+    const observer = new ResizeObserver(() => measure());
+    if (find) observer.observe(find);
+    if (box) observer.observe(box);
+    return () => observer.disconnect();
+  }, [measure]);
+
   const totalPanels = useQuoteStore((s) => s.totalPanels);
   const panelTier = useQuoteStore((s) => s.panelTier);
   const azimuth = useQuoteStore((s) => s.azimuth);
@@ -87,12 +135,15 @@ export default function DesignHud() {
       data-testid="design-hud"
       aria-label={UI.hudLabel}
       aria-live="polite"
+      ref={boxRef}
       // Not interactive — a chip that swallowed a touch would be a chip that
       // stopped the array being dragged underneath it.
-      // The width cap is what keeps it clear of "Find my panels" in the
-      // opposite corner: that button is ~150px plus its own 12px inset, so the
-      // chips get everything left of it and no more.
-      className="pointer-events-none absolute left-3 top-3 z-20 max-w-[calc(100%-180px)] rounded-xl bg-white/95 px-3 py-2 shadow-md"
+      className="pointer-events-none absolute left-3 top-3 z-20 rounded-xl bg-white/95 px-3 py-2 shadow-md"
+      // Width capped by where "Find my panels" actually is, measured. It used
+      // to be capped at a constant guessed from that button's width on one
+      // machine — and the button is a text label, so it is wider under the
+      // fonts CI renders with, and the HUD ran 13px under it there.
+      style={maxWidth === null ? undefined : { maxWidth }}
     >
       {/* One line where there is room for one, a 2x2 grid of chips where there
           is not. Both are the same four figures. */}

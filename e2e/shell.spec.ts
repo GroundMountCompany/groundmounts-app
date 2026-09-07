@@ -2809,9 +2809,18 @@ test('the design step can be finished without opening the sheet', async ({ page 
   const find = (await page.getByTestId('find-panels').boundingBox())!;
   expect(hud.x + hud.width, 'the HUD reaches under Find my panels').toBeLessThanOrEqual(find.x);
 
-  // And the count actually changes from the peek row, without the sheet moving.
+  /*
+    And the count actually changes from the peek row, without the sheet moving.
+
+    Read immediately before the tap and asserted as a delta. This was a
+    hard-coded "32", which held only because the seed happened to size to 31 on
+    the machine it was written on; CI settled to 32 and the tap made it 33. The
+    count this design sizes to is not the thing under test — the button is.
+  */
+  const beforeTap = Number(await waitForStableText(page, 'hud-panels'));
+  expect(beforeTap, 'no panel count to increment').toBeGreaterThan(0);
   await page.getByTestId('panel-plus').click();
-  await expect(page.getByTestId('hud-panels')).toHaveText('32');
+  await expect(page.getByTestId('hud-panels')).toHaveText(String(beforeTap + 1));
   await expect(page.getByTestId('bottom-sheet')).toHaveAttribute('data-snap', 'peek');
   expect(cta.y, 'the button moved when the count changed').toBeGreaterThan(0);
 });

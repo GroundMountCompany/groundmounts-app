@@ -120,8 +120,12 @@ passes in both directions is worse than none. What guards it instead:
 and asserts almost nothing:
 
 ```bash
-npx playwright test --project=mobile --project=desktop e2e/screenshots.spec.ts
+E2E_SCREENSHOTS=1 npx playwright test --project=screenshots
 ```
+
+The project only exists when `E2E_SCREENSHOTS=1`: it writes files and asserts
+almost nothing, so a plain `npx playwright test` must not rewrite the committed
+images. One run captures both viewports.
 
 Writes to `docs/screenshots/`. It stubs `/api/leads` to fail loudly, so a
 capture that somehow submitted would be obvious rather than quietly landing in
@@ -220,6 +224,17 @@ Two consequences:
   times the usual wall-clock. It happened four times and cost one wrong
   diagnosis, blamed on a phase that had nothing to do with it. A note here did
   not stop it; the lock does.
+
+- **The lock does not fix server ownership.** Whichever run's Playwright starts
+  the server also stops it when that run ends — so if the shorter run finishes
+  first, the longer one loses its server mid-suite and reports
+  `net::ERR_CONNECTION_REFUSED`. For deliberate concurrent runs, still start the
+  server yourself first and let both reuse it:
+
+  ```bash
+  NEXT_PUBLIC_E2E_HOOKS=1 NEXT_PUBLIC_DEMO_PARAMS=1 npx next build
+  NEXT_PUBLIC_E2E_HOOKS=1 NEXT_PUBLIC_DEMO_PARAMS=1 npx next start --port 3100 &
+  ```
 
 The `interaction` and `desktop-map` projects render real WebGL through
 SwiftShader, which is CPU rasterisation. They are configured to run alone

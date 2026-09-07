@@ -115,6 +115,25 @@ export default defineConfig({
         },
       },
     },
+    /*
+      Captures for docs/screenshots, opt-in.
+
+      Not in the default run at all: it writes files and asserts almost
+      nothing, so a plain `npx playwright test` must not rewrite the committed
+      images. Playwright has no way to mark a project opt-out, so the project
+      only exists when asked for:
+
+        E2E_SCREENSHOTS=1 npx playwright test --project=screenshots
+    */
+    ...(process.env.E2E_SCREENSHOTS === '1'
+      ? [
+          {
+            name: 'screenshots',
+            testMatch: /screenshots\.spec\.ts/,
+            use: { ...devices['Desktop Chrome'], viewport: { width: 390, height: 844 } },
+          },
+        ]
+      : []),
     {
       /**
        * The same real map, driven with a mouse.

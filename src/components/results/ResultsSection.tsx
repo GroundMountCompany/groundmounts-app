@@ -12,9 +12,10 @@ import {
   YAxis,
 } from 'recharts';
 import { UI } from '@/config/copy';
-import { RESULTS } from '@/config/results';
+import { INFLATION_MARKS, RESULTS } from '@/config/results';
 import { projectResults } from '@/lib/results';
 import { useQuoteStore } from '@/store/quoteStore';
+import WhyPeopleDoThis from './WhyPeopleDoThis';
 
 const money = (amount: number) =>
   amount.toLocaleString('en-US', {
@@ -195,13 +196,58 @@ export default function ResultsSection({
           min={RESULTS.inflationMinPct}
           max={RESULTS.inflationMaxPct}
           step={RESULTS.inflationStepPct}
-          onValueChange={([v]) => setInflationPct(v)}
+          onValueChange={([v]) => setInflationPct(Number(v.toFixed(1)))}
         >
           <Slider.Track className="SliderTrack">
             <Slider.Range className="SliderRange" />
           </Slider.Track>
           <Slider.Thumb className="SliderThumb" aria-label={UI.resultsInflationLabel} />
         </Slider.Root>
+
+        {/*
+          Four rates somebody else published.
+
+          Split in two on purpose. The ticks sit at the rate they describe,
+          because where 5% falls against 8% is part of the argument — but they
+          are not the tap target: three of the four rates crowd the middle of
+          the scale, and any 44px target placed there overlaps its neighbour on
+          a 390px screen. So the ticks are decoration and the chips below are
+          the control, evenly spaced and unambiguous.
+        */}
+        <div data-testid="inflation-ticks" aria-hidden className="relative mt-1 h-3">
+          {INFLATION_MARKS.map((mark) => {
+            const span = RESULTS.inflationMaxPct - RESULTS.inflationMinPct;
+            const at = ((mark.pct - RESULTS.inflationMinPct) / span) * 100;
+            return (
+              <span
+                key={mark.label}
+                style={{ left: `${at}%` }}
+                className={`absolute top-0 h-3 w-px -translate-x-1/2 ${
+                  inflationPct === mark.pct ? 'bg-neutral-900' : 'bg-neutral-300'
+                }`}
+              />
+            );
+          })}
+        </div>
+
+        <div data-testid="inflation-marks" className="mt-2 flex gap-2">
+          {INFLATION_MARKS.map((mark) => (
+            <button
+              key={mark.label}
+              type="button"
+              data-testid={`inflation-mark-${mark.pct}`}
+              aria-pressed={inflationPct === mark.pct}
+              onClick={() => setInflationPct(mark.pct)}
+              className={`min-h-[44px] flex-1 rounded-xl border px-1 text-[15px] leading-tight ${
+                inflationPct === mark.pct
+                  ? 'border-neutral-900 bg-neutral-900 font-semibold text-white'
+                  : 'border-neutral-300 bg-white text-neutral-700'
+              }`}
+            >
+              {mark.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       <div className="flex flex-col gap-2 sm:flex-row">
@@ -250,6 +296,8 @@ export default function ResultsSection({
         {UI.resultsPerMonth}.
       </p>
 
+      <WhyPeopleDoThis />
+
       <div className="rounded-xl border border-neutral-200 p-3">
         <button
           type="button"
@@ -268,6 +316,18 @@ export default function ResultsSection({
               value={`${Math.round(Math.min(1, Math.max(0, offsetFraction)) * 100)}%`}
             />
             <Assumption label={UI.resultsAssumptionInflation} value={`${inflationPct}%`} />
+            <div className="py-1">
+              <dt className="text-neutral-600">{UI.resultsAssumptionRates}</dt>
+              <dd className="mt-1 space-y-0.5">
+                {INFLATION_MARKS.map((mark) => (
+                  <p key={mark.label} className="text-[16px] leading-snug text-neutral-700">
+                    <span className="font-medium text-neutral-900">{mark.pct}%</span>{' '}
+                    &mdash; {mark.detail}
+                  </p>
+                ))}
+                <p className="text-[15px] text-neutral-500">{UI.resultsAssumptionRatesSource}</p>
+              </dd>
+            </div>
             <Assumption
               label={UI.resultsAssumptionDegradation}
               value={`${model.assumptions.degradationPctPerYear}%`}

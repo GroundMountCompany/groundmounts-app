@@ -5,6 +5,7 @@ import { PANELS, BATTERY, SITE } from '../src/config/pricing';
 import { parseQuoteInputs, priceFromInputs } from '../src/lib/quoteInputs';
 import { RETAIL, COOP, MUNICIPAL, BLURRY_PHOTO } from './fixtures/bills/observed';
 import { DEFAULT_RATE_CENTS } from '../src/store/quoteStore';
+import { RESULTS } from '../src/config/results';
 
 /**
  * The Phase 4 shell: a full-bleed map that the page never scrolls under, a
@@ -1668,14 +1669,14 @@ test('the inflation slider moves the whole comparison', async ({ page }) => {
 
   const slider = page.getByTestId('inflation-slider');
   await expect(slider).toBeVisible();
-  await expect(page.getByTestId('inflation-value')).toHaveText('3.5%');
+  await expect(page.getByTestId('inflation-value')).toHaveText('3.9%');
 
   const before = await page.getByTestId('result-utility-total').textContent();
 
   // Drive it from the keyboard: a Radix slider thumb responds to arrows, and
   // this is also the path somebody using a keyboard takes.
   await slider.getByRole('slider').focus();
-  for (let i = 0; i < 6; i++) await page.keyboard.press('ArrowRight');
+  for (let i = 0; i < 26; i++) await page.keyboard.press('ArrowRight');
 
   await expect(page.getByTestId('inflation-value')).toHaveText('6.5%');
   await expect(page.getByTestId('result-utility-total')).not.toHaveText(before ?? '');
@@ -1697,6 +1698,155 @@ test('the inflation slider moves the whole comparison', async ({ page }) => {
   expect(stored, 'the chosen rate was not kept').toBe(6.5);
 });
 
+test('the rate marks are somebody else\'s published figures, one tap away', async ({ page }) => {
+  // Dragging to a number invites the customer to pick whichever one they like
+  // the look of. These are what the Texas utilities have actually done and
+  // what the EIA says they are about to do.
+  await page.addInitScript(
+    (payload) => window.localStorage.setItem('gmq:v3', JSON.stringify(payload)),
+    contactStepSeed('e5f6a7b8-9c0d-4e1f-8a2b-3c4d5e6f7a81')
+  );
+
+  await submitWithServerPrice(page, 29_799, 34_981);
+
+  // The section is lazily loaded, so wait for it before reading the DOM
+  // directly — page.evaluate does not retry the way a locator does.
+  await expect(page.getByTestId('inflation-marks')).toBeVisible();
+
+  // Every mark on screen, in order, with its label.
+  const labels = await page.evaluate(() =>
+    Array.from(document.querySelectorAll('[data-testid^="inflation-mark-"]')).map((el) =>
+      (el.textContent ?? '').trim()
+    )
+  );
+  expect(labels).toEqual(['25y', '10y', "since '21", 'EIA']);
+
+  /*
+    No two labels may overlap.
+
+    Three of the four rates crowd the middle of the scale, so laid out along
+    the track their labels ran into each other and read as "Since 20E1A", and
+    their 44px tap targets overlapped besides. The ticks still mark the rate;
+    the chips are the control. Checked as rectangles rather than by eye,
+    because the next rate somebody adds will be the one that collides.
+  */
+  const boxes = await page.evaluate(() =>
+    Array.from(document.querySelectorAll('[data-testid^="inflation-mark-"]')).map((el) => {
+      const r = el.getBoundingClientRect();
+      return { left: r.left, right: r.right, top: r.top, bottom: r.bottom, text: el.textContent };
+    })
+  );
+  for (let i = 0; i < boxes.length; i++) {
+    for (let j = i + 1; j < boxes.length; j++) {
+      const a = boxes[i];
+      const b = boxes[j];
+      const overlaps =
+        a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+      expect(overlaps, `"${a.text}" overlaps "${b.text}"`).toBe(false);
+    }
+  }
+
+  // And each one is a target a thumb can hit.
+  for (const box of boxes) {
+    expect(box.bottom - box.top, `"${box.text}" is under 44px tall`).toBeGreaterThanOrEqual(44);
+  }
+
+  // The default is the ten-year average, and it reads as selected.
+  await expect(page.getByTestId('inflation-value')).toHaveText('3.9%');
+  await expect(page.getByTestId('inflation-mark-3.9')).toHaveAttribute('aria-pressed', 'true');
+
+  const utilityTotal = () => page.getByTestId('result-utility-total').textContent();
+  const before = await utilityTotal();
+
+  // Tapping the EIA forecast lands on exactly 5%, not a step either side of it.
+  await page.getByTestId('inflation-mark-5').click();
+  await expect(page.getByTestId('inflation-value')).toHaveText('5%');
+  await expect(page.getByTestId('inflation-mark-5')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByTestId('inflation-mark-3.9')).toHaveAttribute('aria-pressed', 'false');
+  expect(await utilityTotal(), 'the chart did not move').not.toBe(before);
+
+  // And the awkward one: 2.9 is not a multiple of a half, so a coarser step
+  // would have snapped this to 3.0 and disagreed with the label just pressed.
+  await page.getByTestId('inflation-mark-2.9').click();
+  await expect(page.getByTestId('inflation-value')).toHaveText('2.9%');
+
+  // The panel says where all four came from.
+  await page.getByTestId('results-assumptions-toggle').click();
+  const list = page.getByTestId('results-assumptions');
+  await expect(list).toContainText('Texas history and EIA forecast.');
+  for (const source of ['7.58¢', '10.99¢', '12.85¢', 'Short-Term Energy Outlook']) {
+    await expect(list, `no source for ${source}`).toContainText(source);
+  }
+});
+
+test('the sun section makes its case, with or without the photograph', async ({ page }) => {
+  await page.addInitScript(
+    (payload) => window.localStorage.setItem('gmq:v3', JSON.stringify(payload)),
+    contactStepSeed('f6a7b8c9-0d1e-4f2a-9b3c-4d5e6f7a8b92')
+  );
+
+  await submitWithServerPrice(page, 29_799, 34_981);
+
+  const why = page.getByTestId('why-section');
+  await expect(why).toBeVisible();
+  await expect(why).toContainText('Payback is one reason. Reliability is the other.');
+  // Present before reading positions out of the DOM directly.
+  await expect(page.getByTestId('results-assumptions-toggle')).toBeVisible();
+  await expect(why).toContainText('February 2021');
+  await expect(why).toContainText('4.6 billion years');
+
+  // Between the figures and the assumptions panel.
+  const order = await page.evaluate(() => {
+    const figures = document.querySelector('[data-testid="result-year-25"]')!;
+    const section = document.querySelector('[data-testid="why-section"]')!;
+    const panel = document.querySelector('[data-testid="results-assumptions-toggle"]')!;
+    const after = (a: Element, b: Element) =>
+      (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+    return { afterFigures: after(figures, section), beforePanel: after(section, panel) };
+  });
+  expect(order).toEqual({ afterFigures: true, beforePanel: true });
+
+  const facts = page.getByTestId('why-facts');
+  await expect(facts).toContainText('109 Earths wide');
+  await expect(facts).toContainText('1.3 million Earths fit inside');
+  await expect(facts).toContainText("An hour of sunlight = a year of the world's power.");
+
+  // The photograph, loaded lazily so it does not compete with the price.
+  await why.scrollIntoViewIfNeeded();
+  const image = page.getByTestId('why-image');
+  await expect(image).toBeVisible();
+  await expect(image).toHaveAttribute('loading', 'lazy');
+  await expect(image).toHaveAttribute('alt', /drawn to scale/);
+  await expect(page.getByTestId('why-image-fallback')).toHaveCount(0);
+});
+
+test('the sun section falls back to a drawing when the file is missing', async ({ page }) => {
+  // A missing file is not a reason to lose the point of the section. The
+  // fallback is to scale rather than a grey box: the ratio is the argument.
+  // Aborted rather than 404'd: a refused request fires the element's error
+  // event on every engine, where an empty 404 body does not on WebKit.
+  await page.route('**/sun-scale.png**', (route) => route.abort());
+  await page.route('**/_next/image**', (route) => route.abort());
+
+  await page.addInitScript(
+    (payload) => window.localStorage.setItem('gmq:v3', JSON.stringify(payload)),
+    contactStepSeed('a7b8c9d0-1e2f-4a3b-8c4d-5e6f7a8b9ca3')
+  );
+
+  await submitWithServerPrice(page, 29_799, 34_981);
+
+  // The image is lazy, so nothing is requested — and nothing can fail —
+  // until it is scrolled to. WebKit is strict about this where Chromium
+  // fetches early; a customer scrolls either way.
+  await page.getByTestId('why-section').scrollIntoViewIfNeeded();
+
+  await expect(page.getByTestId('why-image-fallback')).toBeVisible();
+  await expect(page.getByTestId('why-image')).toHaveCount(0);
+  // The words and the facts are still there, which is most of the point.
+  await expect(page.getByTestId('why-section')).toContainText('February 2021');
+  await expect(page.getByTestId('why-facts')).toContainText('109 Earths wide');
+});
+
 test('the assumptions are on the page, not just in our heads', async ({ page }) => {
   await page.addInitScript(
     (payload) => window.localStorage.setItem('gmq:v3', JSON.stringify(payload)),
@@ -1715,7 +1865,7 @@ test('the assumptions are on the page, not just in our heads', async ({ page }) 
   // Every input the model was given, printed.
   await expect(list).toContainText('$240/mo');
   await expect(list).toContainText('100%');
-  await expect(list).toContainText('3.5%');
+  await expect(list).toContainText(`${RESULTS.utilityInflationPct}%`);
   await expect(list).toContainText('0.4%');
   await expect(list).toContainText('25');
   await expect(list).toContainText('$32,390');

@@ -1,4 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
+import { RESULTS } from '../src/config/results';
 
 /**
  * Capture the results screen for review, without filing a lead.
@@ -34,22 +35,36 @@ async function openResults(page: Page) {
   // The chart animates its axis in; wait for the figures to settle instead of
   // guessing a duration.
   await expect(page.getByTestId('result-breakeven')).toBeVisible();
-  await page.waitForTimeout(600);
+  // The sun image is lazy; scroll it in so the capture is not of an empty box.
+  await page.getByTestId('why-section').scrollIntoViewIfNeeded();
+  await expect(page.getByTestId('why-facts')).toBeVisible();
+  await page.waitForTimeout(800);
 }
 
 /** Move the inflation slider to a value, from the keyboard. */
 async function setInflation(page: Page, target: number) {
   const thumb = page.getByTestId('inflation-slider').getByRole('slider');
   await thumb.focus();
-  for (let i = 0; i < 40; i++) await page.keyboard.press('ArrowLeft');
-  const steps = Math.round(target / 0.5);
+  for (let i = 0; i < 90; i++) await page.keyboard.press('ArrowLeft');
+  const steps = Math.round(target / RESULTS.inflationStepPct);
   for (let i = 0; i < steps; i++) await page.keyboard.press('ArrowRight');
   await expect(page.getByTestId('inflation-value')).toHaveText(`${target}%`);
   await page.waitForTimeout(400);
 }
 
-test('captures the results screen', async ({ page }, testInfo) => {
-  const size = testInfo.project.name === 'desktop' ? 'desktop' : 'mobile';
+const SIZES = [
+  { name: 'mobile', width: 390, height: 844 },
+  { name: 'desktop', width: 1280, height: 900 },
+] as const;
+
+for (const size of SIZES) {
+  test(`captures the results screen at ${size.name}`, async ({ page }) => {
+    await page.setViewportSize({ width: size.width, height: size.height });
+    await captureAll(page, size.name);
+  });
+}
+
+async function captureAll(page: Page, size: string) {
   await openResults(page);
 
   /*
@@ -61,7 +76,9 @@ test('captures the results screen', async ({ page }, testInfo) => {
     view. On the desktop capture that meant starting halfway down the chart.
   */
   await page.evaluate(() => {
-    for (const id of ['sheet-content', 'content-column', 'funnel']) {
+    // bottom-sheet included: on a phone it is the fixed element, and leaving
+    // it fixed clipped the capture to one screenful.
+    for (const id of ['bottom-sheet', 'sheet-content', 'content-column', 'funnel']) {
       const el = document.querySelector<HTMLElement>(`[data-testid="${id}"]`);
       if (!el) continue;
       el.style.overflow = 'visible';
@@ -79,4 +96,4 @@ test('captures the results screen', async ({ page }, testInfo) => {
 
   await setInflation(page, 8);
   await page.screenshot({ path: `${DIR}/results-${size}-inflation-8.png`, fullPage: true });
-});
+}

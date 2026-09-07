@@ -326,6 +326,26 @@ export const UI = {
   resultsAssumptionFinancing: 'Financing',
   resultsAssumptionNoFinancing: 'None. This is arithmetic, not a loan.',
   resultsAssumptionCash: 'Assumes you pay cash. Financing changes the picture.',
+  resultsAssumptionRates: 'Rates you can pick from',
+  resultsAssumptionRatesSource: 'Texas history and EIA forecast.',
+
+  /*
+    Step 6, under the figures. Why people actually do this.
+
+    One image and as few words as will carry it. The argument is not that the
+    sun is remarkable — it is that it is dull, and that dullness is the point
+    when the thing you are comparing it to is a grid with a hundred ways to
+    fail.
+  */
+  whyTitle: 'Why people do this',
+  whyLead: 'Payback is one reason. Reliability is the other.',
+  whyBody:
+    'The grid has a hundred ways to go down: storms, demand, equipment, a tree a mile away. Texas saw it in February 2021. Your panels rely on one thing, and it has come up every morning for 4.6 billion years. Cloudy days are already in the production number.',
+  whyImageAlt: 'The sun beside the Earth, drawn to scale.',
+  whyEarthLabel: 'Earth',
+  whyFactWidth: '109 Earths wide',
+  whyFactVolume: '1.3 million Earths fit inside',
+  whyFactHour: "An hour of sunlight = a year of the world's power.",
   trenchNote: 'We route the trench around anything in the way once we are on site.',
   slopeChecking: 'checking',
   soilLabel: 'Soil',

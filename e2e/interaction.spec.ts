@@ -355,6 +355,32 @@ async function waitForStableHandle(page: Page) {
   }
 }
 
+/**
+ * Wait for the gap the test is about to measure to stop changing.
+ *
+ * waitForStableHandle settles the *computed* handle position. The gap is read
+ * from renderedGeom() — what Mapbox has actually drawn — and the two are a
+ * frame or two apart: the grip's ground offset is recomputed on zoomend and
+ * pushed into the source, and the layer catches up after that. Under load the
+ * test read the old frame and measured a gap from a stale grip.
+ *
+ * Three identical readings, rounded to the pixel, the same way the drift test
+ * settles the camera before trusting it.
+ */
+async function waitForStableGap(page: Page): Promise<number | null> {
+  let stable = 0;
+  let last = Number.NaN;
+  for (let i = 0; i < 40; i++) {
+    const geom = await page.evaluate(() => window.__gmTest.renderedGeom());
+    const gap = geom ? Math.round(distanceToPolygonEdge(geom.handlePx, geom.hullPx)) : Number.NaN;
+    stable = gap === last && Number.isFinite(gap) ? stable + 1 : 0;
+    if (stable >= 2) return gap;
+    last = gap;
+    await page.waitForTimeout(120);
+  }
+  return Number.isFinite(last) ? last : null;
+}
+
 const distance = (a: Pt, b: Pt) => Math.hypot(a[0] - b[0], a[1] - b[1]);
 
 /** Shortest distance from a point to a polygon's edges, in screen pixels. */
@@ -1229,13 +1255,14 @@ test.describe('design step gestures', () => {
       await page.evaluate((z) => window.__gmTest.viewArrayAt(z), zoom);
       await waitForStableHandle(page);
 
-      const geom = await page.evaluate(() => window.__gmTest.renderedGeom());
-      expect(geom, `no rendered array or grip at zoom ${zoom}`).not.toBeNull();
+      // Settle on the rendered gap itself, not on the computed handle: the
+      // layer redraws a frame or two after the offset is recomputed, and under
+      // load this read the stale frame and measured 102px against a 96 bound.
+      const gapPx = await waitForStableGap(page);
+      expect(gapPx, `no rendered array or grip at zoom ${zoom}`).not.toBeNull();
 
-      const gapPx = distanceToPolygonEdge(geom!.handlePx, geom!.hullPx);
-
-      expect(gapPx, `grip gap at zoom ${zoom}`).toBeGreaterThan(48);
-      expect(gapPx, `grip gap at zoom ${zoom}`).toBeLessThan(96);
+      expect(gapPx!, `grip gap at zoom ${zoom}`).toBeGreaterThan(48);
+      expect(gapPx!, `grip gap at zoom ${zoom}`).toBeLessThan(96);
     }
   });
 

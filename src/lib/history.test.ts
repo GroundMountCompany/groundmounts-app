@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { priceAt, priceCallouts, priceGrowthPct } from './history';
-import { DEMAND_CALLOUTS, ERCOT_FORECAST, HISTORY, PRICE_CALLOUTS } from '@/config/history';
+import { ERCOT_FORECAST, HISTORY, PRICE_CALLOUTS } from '@/config/history';
 
 /**
  * The history chart's arithmetic, and the shape of the data behind it.
@@ -88,11 +88,6 @@ describe('the series behind the chart', () => {
     for (const c of PRICE_CALLOUTS) {
       expect(years.has(c.fromYear), `${c.fromYear}`).toBe(true);
       expect(years.has(c.toYear), `${c.toYear}`).toBe(true);
-    }
-    for (const c of DEMAND_CALLOUTS) {
-      expect(years.has(c.year), `${c.year}`).toBe(true);
-      // On the recent half, where the labels are about.
-      expect(c.year).toBeGreaterThanOrEqual(2015);
     }
   });
 });

@@ -373,14 +373,31 @@ export const UI = {
   historyPriceAxis: '¢/kWh',
   historyDemandAxis: 'TWh',
   historyCaption:
-    'Demand is rising faster than the grid was built for. Prices follow.',
+    'Texas uses more power every year, and the price per kWh has climbed with it.',
+  /*
+    What EIA says is behind it, kept separate from what the chart shows.
+
+    The chart shows two series and the caption describes them. This line is an
+    attribution, so it names its source and says only what that source says.
+
+    EIA, Short-Term Energy Outlook (retrieved 7 September 2026), Electricity
+    section: "The amount of electricity generated in the United States has been
+    growing consistently in recent years to meet increasing power demand from
+    data centers. On August 3, the Texas governor announced a pause on new data
+    center development ... As a result, we have lowered our forecast for
+    electricity demand in Texas, with electricity load growing by 6% in 2027 in
+    contrast to our forecast of 14% growth in the previous STEO."
+
+    Data centers are the only driver that edition attributes to Texas. It does
+    not mention manufacturing, home electrification or electric vehicles in
+    connection with Texas demand, so neither does this line.
+  */
+  historySource:
+    "EIA points to data centers as what's driving the growth in Texas electricity demand.",
   historyRateSuffix: 'a year',
   historySince: 'since',
   historyAbout: 'About',
   historyOver: 'Over',
-  historyDemandElectrification: 'Home electrification',
-  historyDemandEvs: 'EVs',
-  historyDemandDataCentres: 'Data centers',
   trenchNote: 'We route the trench around anything in the way once we are on site.',
   slopeChecking: 'checking',
   soilLabel: 'Soil',

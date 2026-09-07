@@ -47,8 +47,8 @@ export interface HistoryYear {
   drawn as a continuation of this one.
 
   For scale: ERCOT net energy for load was 461.6 TWh in 2024 and 488.4 TWh in
-  2025 (ERCOT, Demand and Energy Report, February 2025), against the 505.4 and
-  519.7 below — ERCOT is roughly nine tenths of Texas.
+  2025, against the 505.4 and 519.7 below — ERCOT is roughly nine tenths of
+  Texas. See the ERCOT citation below for where those two came from.
 
   Pulled 7 September 2026.
 */
@@ -103,7 +103,15 @@ export interface ForecastYear {
 export const ERCOT_FORECAST: ForecastYear[] = [
   /*
     2025 is ERCOT's own actual, not a forecast: 488,406,479 MWh net energy for
-    load (ERCOT, Demand and Energy Report, February 2025, "Energy" sheet).
+    load — ERCOT, Demand and Energy Report, "Energy" sheet, workbook dated
+    9 March 2026.
+
+    The date is the workbook's own, not the one in its URL. ERCOT serves the
+    current edition from a path minted when the slot was created
+    (/files/docs/2025/02/07/DemandandEnergy2025-for-Corp-Comms.xlsx) and
+    refreshes the file in place, so the path reads February 2025 while the
+    contents are a full year of 2025 actuals. Citing the URL date would have
+    claimed December figures were published in February.
 
     It is here so the dashed line begins on an ERCOT number and stays on one
     basis for its whole length. Anchoring it to the EIA figure beside it would
@@ -131,12 +139,3 @@ export const PRICE_CALLOUTS = [
   { fromYear: 2021, toYear: 2025 },
 ] as const;
 
-/**
- * Plain labels on the recent demand years. No claim beyond the label: these
- * name things that are happening, not a decomposition of the curve.
- */
-export const DEMAND_CALLOUTS = [
-  { year: 2021, key: 'electrification' },
-  { year: 2023, key: 'evs' },
-  { year: 2025, key: 'dataCentres' },
-] as const;

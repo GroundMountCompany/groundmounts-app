@@ -789,6 +789,17 @@ function contactStepSeed(leadId: string) {
   };
 }
 
+/**
+ * How long the results section gets to appear.
+ *
+ * It is behind next/dynamic — Recharts is 110kB and only the customers who
+ * reach this screen should pay for it — so its first render waits on a chunk
+ * fetch, exactly like the success screen it sits inside. The generic 5s is a
+ * budget for a DOM update, not a download, and under a second concurrent suite
+ * it is not enough.
+ */
+const RESULTS_CHUNK_TIMEOUT = 15_000;
+
 /** Files a lead with a fixed server price, so the results maths is predictable. */
 async function submitWithServerPrice(page: Page, low: number, high: number) {
   await page.route('**/api/leads', (route) =>
@@ -1505,7 +1516,9 @@ test('?demo=results opens the finished screen without sending anything', async (
   await waitForHydration(page);
 
   await expect(page.getByTestId('success-screen')).toBeVisible({ timeout: 15_000 });
-  await expect(page.getByTestId('results-section')).toBeVisible();
+  await expect(page.getByTestId('results-section')).toBeVisible({
+    timeout: RESULTS_CHUNK_TIMEOUT,
+  });
   await expect(page.getByTestId('result-breakeven')).toBeVisible();
 
   expect(leadCalls, `the demo sent ${leadCalls.length} request(s) to /api/leads`).toEqual([]);
@@ -1560,7 +1573,7 @@ test('the results section answers the number it sits under', async ({ page }) =>
   await submitWithServerPrice(page, 29_799, 34_981);
 
   const section = page.getByTestId('results-section');
-  await expect(section).toBeVisible();
+  await expect(section).toBeVisible({ timeout: RESULTS_CHUNK_TIMEOUT });
 
   // It sits below the line items, not above them: the price comes first and
   // this answers it.
@@ -1669,7 +1682,7 @@ test('the inflation slider moves the whole comparison', async ({ page }) => {
   await submitWithServerPrice(page, 29_799, 34_981);
 
   const slider = page.getByTestId('inflation-slider');
-  await expect(slider).toBeVisible();
+  await expect(slider).toBeVisible({ timeout: RESULTS_CHUNK_TIMEOUT });
   await expect(page.getByTestId('inflation-value')).toHaveText('3%');
 
   const before = await page.getByTestId('result-utility-total').textContent();
@@ -1713,7 +1726,9 @@ test('the rate marks are somebody else\'s published figures, one tap away', asyn
 
   // The section is lazily loaded, so wait for it before reading the DOM
   // directly — page.evaluate does not retry the way a locator does.
-  await expect(page.getByTestId('inflation-marks')).toBeVisible();
+  await expect(page.getByTestId('inflation-marks')).toBeVisible({
+    timeout: RESULTS_CHUNK_TIMEOUT,
+  });
 
   // Every mark on screen, in order, with its label.
   const labels = await page.evaluate(() =>
@@ -1727,10 +1742,11 @@ test('the rate marks are somebody else\'s published figures, one tap away', asyn
     No two labels may overlap.
 
     Three of the four rates crowd the middle of the scale, so laid out along
-    the track their labels ran into each other and read as "Since 20E1A", and
-    their 44px tap targets overlapped besides. The ticks still mark the rate;
-    the chips are the control. Checked as rectangles rather than by eye,
-    because the next rate somebody adds will be the one that collides.
+    the track their labels ran into each other — an earlier set rendered as
+    "Since 20E1A" — and their 44px tap targets overlapped besides. The ticks
+    still mark the rate; the chips are the control. Checked as rectangles
+    rather than by eye, because the next rate somebody adds will be the one
+    that collides.
   */
   const boxes = await page.evaluate(() =>
     Array.from(document.querySelectorAll('[data-testid^="inflation-mark-"]')).map((el) => {
@@ -1794,7 +1810,7 @@ test('each rate mark explains itself in plain words', async ({ page }) => {
   const explain = page.getByTestId('inflation-explain');
 
   // The default mark, before anything is tapped.
-  await expect(explain).toContainText('2015–2025');
+  await expect(explain).toContainText('2015–2025', { timeout: RESULTS_CHUNK_TIMEOUT });
   await expect(explain).toContainText('3.0% a year');
 
   const expected: Array<[string, string[]]> = [
@@ -1828,7 +1844,7 @@ test('the history chart shows the record, above the forecast', async ({ page }) 
   await submitWithServerPrice(page, 29_799, 34_981);
 
   const history = page.getByTestId('history-chart');
-  await expect(history).toBeVisible();
+  await expect(history).toBeVisible({ timeout: RESULTS_CHUNK_TIMEOUT });
   await expect(history).toContainText("Electricity isn't getting cheaper");
 
   // Above the payback chart: the record comes before the projection that
@@ -1846,14 +1862,19 @@ test('the history chart shows the record, above the forecast', async ({ page }) 
   await expect(page.getByTestId('history-callouts')).toContainText('2000–2015');
   await expect(page.getByTestId('history-callouts')).toContainText('2021–2025');
 
-  // The three demand labels, and the caption.
-  const demand = page.getByTestId('history-demand-callouts');
-  await expect(demand).toContainText('Home electrification');
-  await expect(demand).toContainText('EVs');
-  await expect(demand).toContainText('Data centers');
+  // The caption describes the two series it sits under.
   await expect(page.getByTestId('history-caption')).toHaveText(
-    'Demand is rising faster than the grid was built for. Prices follow.'
+    'Texas uses more power every year, and the price per kWh has climbed with it.'
   );
+
+  // Attribution is a separate line and names its source. The year-pinned
+  // labels that used to sit on the demand series are gone: the chart says what
+  // the series show, and anything beyond that has to be somebody's claim with
+  // a name on it.
+  await expect(page.getByTestId('history-source')).toHaveText(
+    "EIA points to data centers as what's driving the growth in Texas electricity demand."
+  );
+  await expect(page.getByTestId('history-demand-callouts')).toHaveCount(0);
 
   // Both series and the forecast are named in words, not field names.
   await expect(history).toContainText('What Texas homes pay');
@@ -1889,7 +1910,7 @@ test('the sun section makes its case, with or without the photograph', async ({ 
   await submitWithServerPrice(page, 29_799, 34_981);
 
   const why = page.getByTestId('why-section');
-  await expect(why).toBeVisible();
+  await expect(why).toBeVisible({ timeout: RESULTS_CHUNK_TIMEOUT });
   await expect(why).toContainText('Payback is one reason. Reliability is the other.');
   // Present before reading positions out of the DOM directly.
   await expect(page.getByTestId('results-assumptions-toggle')).toBeVisible();
@@ -1939,7 +1960,9 @@ test('the sun section falls back to a drawing when the file is missing', async (
   // fetches early; a customer scrolls either way.
   await page.getByTestId('why-section').scrollIntoViewIfNeeded();
 
-  await expect(page.getByTestId('why-image-fallback')).toBeVisible();
+  await expect(page.getByTestId('why-image-fallback')).toBeVisible({
+    timeout: RESULTS_CHUNK_TIMEOUT,
+  });
   await expect(page.getByTestId('why-image')).toHaveCount(0);
   // The words and the facts are still there, which is most of the point.
   await expect(page.getByTestId('why-section')).toContainText('February 2021');
@@ -1954,6 +1977,9 @@ test('the assumptions are on the page, not just in our heads', async ({ page }) 
   await submitWithServerPrice(page, 29_799, 34_981);
 
   // Closed to begin with — the chart is the point, not the footnotes.
+  await expect(page.getByTestId('results-assumptions-toggle')).toBeVisible({
+    timeout: RESULTS_CHUNK_TIMEOUT,
+  });
   await expect(page.getByTestId('results-assumptions')).toHaveCount(0);
 
   await page.getByTestId('results-assumptions-toggle').click();

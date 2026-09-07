@@ -113,9 +113,9 @@ export const RESULTS: ResultsAssumptions = {
   /*
     A tenth, not a half.
 
-    The marks are published figures — 2.9 and 4.6 among them — and neither is
-    a multiple of 0.5. On a half-point step, tapping "25-yr" would snap to 3.0
-    and the chart would quietly disagree with the label that had just been
+    The marks are published figures — 2.7 and 6.3 among them — and neither is
+    a multiple of 0.5. On a half-point step, tapping "2000–25" would snap to
+    2.5 and the chart would quietly disagree with the label that had just been
     pressed. The step exists to keep the slider tidy, not to round somebody
     else's data.
   */

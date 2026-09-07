@@ -6,23 +6,16 @@ import {
   CartesianGrid,
   ComposedChart,
   Line,
-  ReferenceDot,
   ResponsiveContainer,
   XAxis,
   YAxis,
 } from 'recharts';
 import { UI } from '@/config/copy';
-import { DEMAND_CALLOUTS, ERCOT_FORECAST, HISTORY } from '@/config/history';
+import { ERCOT_FORECAST, HISTORY } from '@/config/history';
 import { priceCallouts } from '@/lib/history';
 
 /** How many x-axis labels fit on a 390px screen without turning to mush. */
 const MAX_TICKS = 6;
-
-const DEMAND_LABEL: Record<string, string> = {
-  electrification: UI.historyDemandElectrification,
-  evs: UI.historyDemandEvs,
-  dataCentres: UI.historyDemandDataCentres,
-};
 
 /**
  * What has already happened, above the forecast.
@@ -149,23 +142,6 @@ export default function HistoryChart() {
               connectNulls
             />
 
-            {/* Plain labels on the recent demand years. They name things that
-                are happening; they are not a decomposition of the curve. */}
-            {DEMAND_CALLOUTS.map((c) => {
-              const row = HISTORY.find((r) => r.year === c.year);
-              if (!row?.demandTwh) return null;
-              return (
-                <ReferenceDot
-                  key={c.key}
-                  yAxisId="demand"
-                  x={c.year}
-                  y={row.demandTwh}
-                  r={3}
-                  fill="#6b7280"
-                  stroke="none"
-                />
-              );
-            })}
           </ComposedChart>
         </ResponsiveContainer>
       </div>
@@ -205,12 +181,16 @@ export default function HistoryChart() {
         ))}
       </ul>
 
-      <p data-testid="history-demand-callouts" className="text-[17px] text-neutral-500">
-        {DEMAND_CALLOUTS.map((c) => DEMAND_LABEL[c.key]).join(' · ')}
-      </p>
-
+      {/* What the two series show. */}
       <p data-testid="history-caption" className="text-[17px] leading-snug text-neutral-800">
         {UI.historyCaption}
+      </p>
+
+      {/* What somebody else says is behind it, named as theirs. The chart
+          describes its own series; attribution is a separate sentence with a
+          source attached. */}
+      <p data-testid="history-source" className="text-[17px] leading-snug text-neutral-500">
+        {UI.historySource}
       </p>
     </section>
   );

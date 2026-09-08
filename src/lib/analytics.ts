@@ -36,7 +36,10 @@ export type AnalyticsEvent =
   | 'unlock_tapped'
   | 'lead_filed'
   | 'email_sent'
-  | 'book_call_tapped';
+  // Replaced book_call_tapped in Phase 12, when the Calendly button went. The
+  // old name is gone rather than kept as an alias: two names for one intent is
+  // how a funnel report ends up quietly counting half of it.
+  | 'call_time_selected';
 
 export type Props = Record<string, unknown>;
 

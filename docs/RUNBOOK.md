@@ -24,6 +24,7 @@ when a variable is missing, because "required" is rarely the whole truth.
 | `NEXT_PUBLIC_DEMO_PARAMS` | Vercel, **Preview only** | Without it `?demo=results` does nothing. Set it to `1` on Preview so the results screen can be reviewed without filing a lead. **Never set it on Production**: the screen it opens claims a quote was produced. |
 | `ANTHROPIC_MODEL` | Vercel (optional) | Defaults to `claude-sonnet-5`. Change the model without a code change. |
 | `ALLOWED_FRAME_ORIGINS` | Vercel (optional) | `frame-ancestors *`, which is deliberate: partner funnels embed this. Set a space-separated origin list to lock it down. |
+| `RESEND_WEBHOOK_SECRET` | Vercel | The email webhook refuses every delivery with a 401, so `Email Status` and `Email Opened At` stay blank. Quotes still send; only the reporting on them stops. |
 | `RESUME_SECRET` | Vercel + `.env.local` | **Finish later stops working.** The button reports a failure and `/api/resume` refuses every link with a 401 — deliberately, because a link that cannot be verified must not be honoured. Nothing else is affected. Rotating it invalidates every link already sitting in somebody's inbox. |
 | `NEXT_PUBLIC_POSTHOG_KEY`<br>`NEXT_PUBLIC_POSTHOG_HOST` | Vercel | No analytics at all: no events, no session replay, and the ~280KB library is never even fetched. The funnel is unaffected — that is the point, and the e2e proves it. |
 | `META_CAPI_TOKEN` | Vercel (optional) | The server does not report conversions to Meta. The browser pixel still fires, so Meta sees leads from browsers that were not blocking it. Setting it adds the server-side half, deduplicated against the pixel on the lead id. |
@@ -120,6 +121,18 @@ reloads four times is one person. Commit the reports: a drop-off number only
 means something next to the one from a fortnight ago.
 
 The rage-click section depends on PostHog autocapture being on, which it is.
+
+Three of the sections read **Airtable**, not PostHog, because the owner's own
+figures live there: estimate accuracy, outcomes by source, and the Status
+columns. They need `AIRTABLE_API_KEY` and `AIRTABLE_BASE_ID` — the same
+read-capable token the schema check uses — and say so plainly if the base
+cannot be read rather than reporting zeroes.
+
+Estimate accuracy reports a signed fraction of the actual, so **+12% means the
+estimate was twelve per cent high**. The spread is the 10th to 90th percentile
+rather than a standard deviation: with a handful of records the distribution is
+not normal and describing it as if it were would be a lie with decimal places.
+Under five records it says "not enough data" and stops.
 
 **A step reached by more people than the one before it is not negative
 drop-off.** The funnel is not strictly sequential: `?step=`, a resume link,
@@ -368,6 +381,77 @@ because a free signature check is an oracle for guessing tokens.
 
 **Rotating the secret revokes every link already in an inbox.** That is the
 intended behaviour, and there is a test for it. Rotate deliberately.
+
+---
+
+## After the lead
+
+### "When's a good time?"
+
+The success screen and the quote email both ask, and both write
+`Preferred Call Time` through `/api/call-time`. Three chips, no calendar — the
+Calendly button it replaced asked somebody who had just been shown a
+five-figure number to pick a thirty-minute slot, and most of them closed the
+tab. **Calendly is gone entirely**: the env var, the brand config field, the
+copy and the `book_call_tapped` event. The event is `call_time_selected`.
+
+The route takes two shapes and refuses to invent a lead in either:
+
+| | |
+|---|---|
+| `POST` | From the success screen, which still holds the id it just filed. |
+| `GET` | From the email, with the same HMAC the resume links use, because there is no session behind a link in an inbox. Answers with a small self-contained HTML page — a person opened it, not a program. |
+
+Both require a **filed** lead, checked against the submit record in Redis.
+Without that check an endpoint that takes a uuid and a word would be a way to
+fill the owner's base with rows for customers who do not exist. Both are
+leased and idempotent, so a double tap or a link opened twice is one write.
+
+### Email tracking
+
+Resend calls `/api/email-webhook` when the quote email is delivered, opened,
+clicked, bounced or complained about. It writes `Email Status` and, on an open,
+`Email Opened At`.
+
+**Register it in Resend** — Webhooks → Add Endpoint:
+
+```
+https://groundmounts-app.vercel.app/api/email-webhook
+```
+
+Select `email.delivered`, `email.opened`, `email.clicked`, `email.bounced` and
+`email.complained`, then copy the signing secret into `RESEND_WEBHOOK_SECRET`
+on Vercel. Until that is done the route answers 401 to everything, which is the
+correct state for an unverifiable public write endpoint.
+
+Three properties, in the order they bite:
+
+- **Verified.** Svix signature over `<id>.<timestamp>.<body>`, with a five
+  minute replay window checked before the signature. Implemented in
+  `src/lib/server/svix.ts` rather than by adding the `svix` package: it is
+  forty lines of HMAC and worth being able to read.
+- **Idempotent.** Keyed on Svix's message id, which is stable across retries.
+- **Ordered.** Webhooks arrive out of order — `delivered` after `opened` is
+  routine. Each status has a rank and a lower one never overwrites a higher,
+  so a late delivery notice cannot erase the fact that somebody read it.
+  `bounced` and `complained` outrank everything, because they are the two the
+  owner has to act on.
+
+Events are matched to leads through a Redis mapping written when the quote is
+sent (`gm:emaillead:<resend email id>`), not through Resend's tags: the mapping
+is ours and can be reasoned about. An evicted key means an unmatched event,
+which is logged and acknowledged; the TTL is thirty days.
+
+Anything the route cannot act on is **acknowledged, not rejected** — a 4xx has
+Resend retrying for hours.
+
+### Estimate accuracy
+
+`Actual Quote`, `Actual Trench Ft` and `Actual Notes` are filled in by the
+owner after a site visit and by **nothing in the app**. That is the point: a
+column the app could write would eventually be written by the app, and then it
+would be measuring itself. The funnel report reads them and says how wrong the
+estimate was.
 
 ---
 

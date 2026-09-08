@@ -264,8 +264,12 @@ export const UI = {
   priceHidden: 'Your price range',
   estimateNote: 'Estimates — final price after site visit',
   successTitle: 'On its way',
-  successBody: 'Check your email. If you want to talk it through, book a time below.',
-  bookCall: 'Book a call',
+  successBody: "Check your email. We'll reach out within one business day.",
+  callTimeAsk: "We'll reach out within one business day. When's a good time?",
+  callTimeGotIt: (when: string) => `Got it — ${when} it is.`,
+  callTimeFailed: 'That did not save. Tap again, or just reply to your email.',
+  questionsPrefix: 'Questions?',
+  contactEmail: 'bert@groundmounts.com',
 
   // Step 2
   ratePerKwhHint:

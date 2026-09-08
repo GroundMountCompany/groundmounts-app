@@ -2155,6 +2155,82 @@ test('the sun section falls back to a drawing when the file is missing', async (
   await expect(page.getByTestId('why-section')).toContainText('February 2021');
 });
 
+test('the success screen asks when to call, and records the answer', async ({ page }) => {
+  await page.addInitScript(
+    (payload) => window.localStorage.setItem('gmq:v3', JSON.stringify(payload)),
+    contactStepSeed('c4d5e6f7-8a9b-4c1d-8e2f-3a4b5c6d7e8f')
+  );
+
+  let sent: Record<string, unknown> | null = null;
+  await page.route('**/api/call-time', async (route) => {
+    sent = route.request().postDataJSON() as Record<string, unknown>;
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ ok: true, when: sent.when }),
+    });
+  });
+
+  await submitWithServerPrice(page, 29_799, 34_981);
+
+  // The Calendly button is gone for good. Owner QA: a booking calendar asked
+  // somebody who had just seen a five-figure number to pick a slot, and they
+  // closed the tab instead.
+  await expect(page.getByRole('link', { name: 'Book a call' })).toHaveCount(0);
+  await expect(page.locator('a[href*="calendly"]')).toHaveCount(0);
+
+  await expect(page.getByTestId('call-time')).toBeVisible();
+  await expect(page.getByTestId('call-time')).toContainText(
+    "We'll reach out within one business day. When's a good time?"
+  );
+  for (const when of ['morning', 'afternoon', 'evening']) {
+    await expect(page.getByTestId(`call-time-${when}`)).toBeVisible();
+  }
+
+  // The one address on the screen, as a mailto.
+  const mail = page.locator('a[href="mailto:bert@groundmounts.com"]');
+  await expect(mail).toBeVisible();
+  await expect(mail).toHaveText('bert@groundmounts.com');
+
+  await page.getByTestId('call-time-afternoon').click();
+  await expect(page.getByTestId('call-time-done')).toHaveText('Got it — Afternoon it is.');
+
+  const body = sent as unknown as Record<string, unknown>;
+  expect(body, 'nothing reached the server').not.toBeNull();
+  expect(body.when).toBe('Afternoon');
+  // The lead that was filed, not whatever the store holds — the store is
+  // deliberately cleared on this screen.
+  expect(body.id).toBe('c4d5e6f7-8a9b-4c1d-8e2f-3a4b5c6d7e8f');
+
+  // The chips are gone once answered; the address stays.
+  await expect(page.getByTestId('call-time-morning')).toHaveCount(0);
+  await expect(mail).toBeVisible();
+});
+
+test('a call time that will not save says so and leaves the chips up', async ({ page }) => {
+  await page.addInitScript(
+    (payload) => window.localStorage.setItem('gmq:v3', JSON.stringify(payload)),
+    contactStepSeed('d5e6f7a8-9b1c-4d2e-8f3a-4b5c6d7e8f9a')
+  );
+  await page.route('**/api/call-time', (route) =>
+    route.fulfill({ status: 502, contentType: 'application/json', body: '{"ok":false}' })
+  );
+
+  await submitWithServerPrice(page, 29_799, 34_981);
+  await page.getByTestId('call-time-morning').click();
+
+  /*
+    Quiet and recoverable.
+
+    The lead is already filed and the owner is already going to ring them, so a
+    failure here must not read as the quote having gone wrong — and the chips
+    have to stay, because the customer's answer is still worth having.
+  */
+  await expect(page.getByTestId('call-time-failed')).toBeVisible();
+  await expect(page.getByTestId('call-time-morning')).toBeVisible();
+  await expect(page.getByTestId('call-time-done')).toHaveCount(0);
+});
+
 test('the assumptions are on the page, not just in our heads', async ({ page }) => {
   await page.addInitScript(
     (payload) => window.localStorage.setItem('gmq:v3', JSON.stringify(payload)),

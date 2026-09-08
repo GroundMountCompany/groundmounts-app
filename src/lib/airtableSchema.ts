@@ -17,7 +17,8 @@ export type FieldKind =
   | 'currency'
   | 'checkbox'
   | 'select'
-  | 'attachment';
+  | 'attachment'
+  | 'date';
 
 export const LEAD_SCHEMA = {
   /** The upsert merge key. One record per funnel, from step 1 to submit. */
@@ -84,6 +85,27 @@ export const LEAD_SCHEMA = {
   'UTM Content': 'text',
   /** They asked for their design by email so they could come back to it. */
   'Resume Requested': 'checkbox',
+  /** When they said a call would suit them. Their answer, not a guess. */
+  'Preferred Call Time': 'select',
+  /**
+   * What the quote email did after it left.
+   *
+   * Written by the Resend webhook, never by the funnel. "Filed but never
+   * delivered" is a lead the owner should chase differently from one that
+   * arrived and was ignored, and without this the two look identical.
+   */
+  'Email Status': 'select',
+  'Email Opened At': 'date',
+  /*
+    Filled in by the owner after a site visit, never by the app.
+
+    The whole point is to be able to ask how wrong the estimate was. A column
+    the app could write would eventually be written by the app, and then it
+    would be measuring itself.
+  */
+  'Actual Quote': 'currency',
+  'Actual Trench Ft': 'number',
+  'Actual Notes': 'longText',
   Status: 'select',
   'Map Screenshot': 'attachment',
 } as const satisfies Record<string, FieldKind>;
@@ -96,7 +118,8 @@ type ValueFor<K extends FieldKind> = K extends 'number' | 'currency'
     ? boolean
     : K extends 'attachment'
       ? Array<{ url: string }>
-      : string;
+      : // A date is written as an ISO string, which is what Airtable accepts.
+        string;
 
 export type LeadFields = {
   [K in LeadFieldName]?: ValueFor<(typeof LEAD_SCHEMA)[K]>;
@@ -118,6 +141,9 @@ export const ACCEPTABLE_AIRTABLE_TYPES: Record<FieldKind, string[]> = {
   checkbox: ['checkbox'],
   select: ['singleSelect', 'singleLineText', 'multilineText'],
   attachment: ['multipleAttachments'],
+  // A plain text column holds an ISO string perfectly well, and the owner may
+  // already have one; only the reporting cares, and it parses either.
+  date: ['date', 'dateTime', 'createdTime', 'lastModifiedTime', 'singleLineText'],
 };
 
 export interface LiveField {
@@ -233,6 +259,17 @@ export const SELECT_CHOICES: Partial<Record<LeadFieldName, string[]>> = {
   // Matches SiteResponse.curveSource exactly; deliberately not renamed.
   'Curve Source': ['pvwatts', 'fallback'],
   Status: ['Partial', 'New', 'Contacted', 'Quoted', 'Won', 'Lost'],
+  // The three the success screen and the quote email offer, and nothing else:
+  // the value is decided by us, not typed by the customer.
+  'Preferred Call Time': ['Morning', 'Afternoon', 'Evening'],
+  /*
+    Resend's own event names, minus the prefix.
+
+    Deliberately not renamed to something prettier: when the owner is looking
+    at a bounced lead and then at Resend's dashboard, the two should say the
+    same word.
+  */
+  'Email Status': ['sent', 'delivered', 'opened', 'clicked', 'bounced', 'complained'],
 };
 
 /** Decimal places for the numeric columns. Money is whole dollars. */
@@ -240,6 +277,7 @@ const NUMBER_PRECISION: Partial<Record<LeadFieldName, number>> = {
   'System Size kW': 2,
   'Slope %': 1,
   'Utility Inflation Pct': 1,
+  'Actual Trench Ft': 0,
   // Six places is about 4 inches: enough to find the array again.
   Latitude: 6,
   Longitude: 6,
@@ -279,6 +317,19 @@ export function createSpecFor(name: LeadFieldName): AirtableFieldSpec {
       return { name, type: 'checkbox', options: { icon: 'check', color: 'greenBright' } };
     case 'attachment':
       return { name, type: 'multipleAttachments' };
+    case 'date':
+      // Time included: "delivered at 09:14" and "delivered on Tuesday" are
+      // different facts, and the second one cannot answer a question about
+      // whether the email arrived before the customer gave up.
+      return {
+        name,
+        type: 'dateTime',
+        options: {
+          timeZone: 'America/Chicago',
+          dateFormat: { name: 'iso' },
+          timeFormat: { name: '24hour' },
+        },
+      };
     case 'select': {
       const choices = SELECT_CHOICES[name];
       if (!choices?.length) {

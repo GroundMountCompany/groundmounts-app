@@ -20,7 +20,15 @@ export interface EmailTemplateProps {
   priceLow: number;
   priceHigh: number;
   date: string;
-  calendlyUrl: string;
+  /**
+   * Signed links that record when a call would suit them.
+   *
+   * Built by the caller, because signing needs the server's secret and this
+   * component renders in a route. Empty when RESUME_SECRET is unset, and then
+   * the section simply does not appear — a dead link in somebody's inbox is
+   * worse than no link.
+   */
+  callTimeLinks?: Array<{ label: string; href: string }>;
   /** Who the quote is from, as the customer knows them. */
   brandName: string;
   brandColor: string;
@@ -67,7 +75,7 @@ export default function EmailTemplate({
   priceLow,
   priceHigh,
   date,
-  calendlyUrl,
+  callTimeLinks,
   brandName,
   brandColor,
   brandLogoUrl,
@@ -266,24 +274,53 @@ export default function EmailTemplate({
       <p style={{ margin: '0 0 8px', fontSize: '15px', color: '#444' }}>
         Payback is one reason. Reliability is the other.
       </p>
-      <div style={{ marginTop: '24px' }}>
-        <a
-          href={calendlyUrl}
-          style={{
-            display: 'inline-block',
-            background: brandColor,
-            color: '#ffffff',
-            padding: '14px 24px',
-            borderRadius: '10px',
-            textDecoration: 'none',
-            fontWeight: 600,
-          }}
-        >
-          Book a call
-        </a>
-      </div>
+      {/*
+        The same question the success screen asks, as three plain links.
 
-      <p style={{ marginTop: '24px', fontSize: '13px', color: '#999' }}>
+        Links rather than buttons and no JavaScript: an inbox runs none, and a
+        customer who read the email on their phone at breakfast should be able
+        to answer it there rather than being sent back into the funnel. Each
+        one carries the same HMAC the resume links use, so the answer can be
+        trusted without a session behind it.
+      */}
+      {callTimeLinks && callTimeLinks.length > 0 ? (
+        <div style={{ marginTop: '24px' }}>
+          <p style={{ margin: '0 0 10px', fontSize: '17px', fontWeight: 600 }}>
+            We&rsquo;ll reach out within one business day. When&rsquo;s a good time?
+          </p>
+          <table role="presentation" cellPadding={0} cellSpacing={0}>
+            <tbody>
+              <tr>
+                {callTimeLinks.map((link) => (
+                  <td key={link.label} style={{ paddingRight: '8px' }}>
+                    <a
+                      href={link.href}
+                      style={{
+                        display: 'inline-block',
+                        border: `1px solid ${brandColor}`,
+                        borderRadius: '10px',
+                        color: brandColor,
+                        padding: '12px 18px',
+                        textDecoration: 'none',
+                        fontWeight: 600,
+                        fontSize: '16px',
+                      }}
+                    >
+                      {link.label}
+                    </a>
+                  </td>
+                ))}
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      ) : null}
+
+      <p style={{ marginTop: '24px', fontSize: '15px', color: '#525252' }}>
+        Questions? <a href="mailto:bert@groundmounts.com">bert@groundmounts.com</a>
+      </p>
+
+      <p style={{ marginTop: '12px', fontSize: '13px', color: '#999' }}>
         Sent to {client} by {brandName}. Reply to this email if anything looks wrong.
       </p>
     </div>

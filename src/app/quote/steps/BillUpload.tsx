@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { UI } from '@/config/copy';
 import { useQuoteStore } from '@/store/quoteStore';
+import { track } from '@/lib/analytics';
 import { MAX_MONTHS, sanitiseExtraction, type BillMonth } from '@/lib/billSchema';
 import { downscaleImage } from '@/lib/downscaleImage';
 
@@ -29,6 +30,15 @@ export interface BillUploadProps {
   onConfirm: (months: BillMonth[], annualKwh: number, ratePerKwh: number | null) => void;
   /** Called when they throw it away, so sizing goes back to the typed figures. */
   onDiscard: () => void;
+  /**
+   * Called when a read fails, with the sentence to show.
+   *
+   * Raised rather than rendered here, because this component is about to be
+   * unmounted: a failure hands the customer to the manual path, and a message
+   * that lives inside the upload half would vanish on the same frame it was
+   * meant to explain something.
+   */
+  onFailed: (reason: string) => void;
 }
 
 /** A year's usage from however many months we have. */
@@ -69,7 +79,7 @@ type Card =
   | { kind: 'found'; preview: string | null; isPdf: boolean; name: string; months: number }
   | { kind: 'failed'; preview: string | null; isPdf: boolean; name: string };
 
-export default function BillUpload({ onConfirm, onDiscard }: BillUploadProps) {
+export default function BillUpload({ onConfirm, onDiscard, onFailed }: BillUploadProps) {
   const phase = useQuoteStore((s) => s.billPhase);
   const setPhase = useQuoteStore((s) => s.setBillPhase);
   const draft = useQuoteStore((s) => s.billDraft);
@@ -78,11 +88,8 @@ export default function BillUpload({ onConfirm, onDiscard }: BillUploadProps) {
   const confirmed = useQuoteStore((s) => s.billMonths);
   const confirmedAnnual = useQuoteStore((s) => s.billAnnualKwh);
   const clearBill = useQuoteStore((s) => s.clearBillMonths);
+  const setBillPath = useQuoteStore((s) => s.setBillPath);
 
-  // Only the failure message is local: it describes one attempt, not the
-  // funnel's state, and it should not survive a refresh.
-  const [reason, setReason] = useState<string>(UI.billFailed);
-  const [failed, setFailed] = useState(false);
 
   /*
     The attempt in progress, shown as a card in place of the two buttons.
@@ -128,7 +135,6 @@ export default function BillUpload({ onConfirm, onDiscard }: BillUploadProps) {
   const months = draft ?? [];
 
   const upload = async (file: File) => {
-    setFailed(false);
     setPhase('reading');
     try {
       // Shrunk here, not apologised for later: a phone photo is 8-12 MB and
@@ -168,6 +174,7 @@ export default function BillUpload({ onConfirm, onDiscard }: BillUploadProps) {
 
       // Say what was found before showing it. The table on its own does not
       // tell anybody the upload worked — it just appears.
+      track('bill_upload_succeeded', { months: clean.months.length });
       setCard((c) => (c ? { ...c, kind: 'found', months: clean.months.length } : c));
       after(FOUND_HOLD_MS, () => {
         setCard(null);
@@ -180,12 +187,23 @@ export default function BillUpload({ onConfirm, onDiscard }: BillUploadProps) {
 
   /** Show the failure long enough to read, then hand over to manual entry. */
   const fail = (why: string) => {
-    setReason(why);
+    track('bill_upload_failed', { reason: why });
     setCard((c) => (c ? { ...c, kind: 'failed' } : c));
     after(FAILED_HOLD_MS, () => {
       setCard(null);
-      setFailed(true);
       setPhase('none');
+      /*
+        And actually open the fields.
+
+        The message has always said "Type it in instead", and before Phase 11
+        the fields were already on screen underneath so that sentence was
+        self-executing. Now that the two paths are separate, saying it is not
+        enough — the customer would be left on the upload path reading an
+        instruction with nothing to follow it. The upload card stays selectable
+        above, so this is a hand-over, not a lock-out.
+      */
+      setBillPath('manual');
+      onFailed(why);
     });
   };
 
@@ -219,8 +237,8 @@ export default function BillUpload({ onConfirm, onDiscard }: BillUploadProps) {
 
     const isPdf = file.type === 'application/pdf';
     previewUrl.current = isPdf ? null : URL.createObjectURL(file);
-    setFailed(false);
     setCard({ kind: 'reading', preview: previewUrl.current, isPdf, name: file.name });
+    track('bill_upload_started', { kind: isPdf ? 'pdf' : 'image', bytes: file.size });
 
     void upload(file);
   };
@@ -368,16 +386,10 @@ export default function BillUpload({ onConfirm, onDiscard }: BillUploadProps) {
               {UI.billChooseFile}
             </span>
             <span className="block text-[15px] text-neutral-500">
-              {failed ? reason : UI.billChooseFileNote}
+              {UI.billChooseFileNote}
             </span>
           </button>
         </div>
-      )}
-
-      {failed && phase === 'none' && (
-        <p data-testid="bill-failed" className="text-[15px] text-neutral-600">
-          {reason}
-        </p>
       )}
 
       {phase === 'review' && (
@@ -456,7 +468,6 @@ export default function BillUpload({ onConfirm, onDiscard }: BillUploadProps) {
                 // Back to the typed figures entirely: the stored months go, and
                 // so does the annual total that was overriding them.
                 clearBill();
-                setFailed(false);
                 onDiscard();
               }}
               className="min-h-[56px] rounded-xl border border-neutral-300 px-4 text-[17px] font-medium text-neutral-900"

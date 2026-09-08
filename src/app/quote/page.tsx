@@ -6,6 +6,7 @@ import { BrandProvider } from '@/contexts/BrandContext';
 import { PageContainer } from './pageContainer';
 import ErrorBoundary from '@/components/common/ErrorBoundary';
 import { initLeadQueue } from '@/lib/leadQueue';
+import AnalyticsProvider from '@/components/AnalyticsProvider';
 
 export default function QuotePage() {
   useEffect(() => {
@@ -16,6 +17,7 @@ export default function QuotePage() {
     <ErrorBoundary>
       <BrandProvider>
         <QuoteStoreHydrator />
+        <AnalyticsProvider />
         <main className="bg-white min-h-screen md:max-w-7xl md:mx-auto md:px-4 md:py-[64px] lg:px-10 lg:py-[80px]">
           <PageContainer />
         </main>

@@ -3,6 +3,7 @@
 import { UI } from '@/config/copy';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useQuoteStore } from '@/store/quoteStore';
+import { track } from '@/lib/analytics';
 import { useSettledLayout } from '@/lib/useSettledLayout';
 import { annualKwh } from '@/lib/production';
 import { PANELS } from '@/config/pricing';
@@ -209,6 +210,7 @@ export default function DesignHud() {
             type="button"
             data-testid="auto-size"
             onClick={() => {
+              track('auto_size_toggled', { to: 'auto' });
               returnToAuto();
               // Immediately, not on the next turn: the chip says it will size
               // for where the array is pointing now.

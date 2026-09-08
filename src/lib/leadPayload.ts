@@ -1,4 +1,5 @@
 import { useQuoteStore } from '@/store/quoteStore';
+import type { Utm } from './utm';
 import { captureMap } from './screenshot';
 import { mapRef } from '@/store/mapRefs';
 import type { QuoteInputs } from './quoteInputs';
@@ -46,6 +47,8 @@ export interface LeadPayload {
   address: string;
   source: string;
   brand?: string;
+  /** The campaign that produced this lead, kept since the landing page. */
+  utm: Utm;
   quote: LeadQuote;
   ts: number;
   honeypot: string;
@@ -104,6 +107,7 @@ export function buildLeadPayload(
     phone: contact.phone,
     address: s.address,
     source: contact.source,
+    utm: s.utm,
     brand: contact.brand,
     quote: {
       inputs,

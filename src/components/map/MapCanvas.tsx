@@ -6,6 +6,7 @@ import type mapboxgl from 'mapbox-gl';
 // Static CSS import only — it carries no JS, so mapbox-gl itself still loads lazily.
 import '@/app/quote/mapboxStyle.css';
 import { useQuoteStore } from '@/store/quoteStore';
+import { track } from '@/lib/analytics';
 import { mapRef, mapContainerRef } from '@/store/mapRefs';
 import {
   installLayers,
@@ -219,6 +220,12 @@ export default function MapStage({ mode }: { mode: MapMode }) {
         cameraCenter: [cam.lng, cam.lat],
       };
       map.dragPan.disable();
+
+      // The array is no longer a mystery once they have hold of it, so the
+      // pulse that says "this thing moves" can stop. Set on grab rather than
+      // on release: a customer who grabs it and puts it back has still found
+      // out what it does.
+      if (kind === 'array' || kind === 'rotate') st.markArrayTouched();
     };
 
     const onPointerMove = (e: PointerEvent) => {
@@ -269,6 +276,12 @@ export default function MapStage({ mode }: { mode: MapMode }) {
       // The turn is over, so the count can settle. Nothing resized while the
       // grip was under the finger — see applyAutoSize.
       if (kind === 'rotate') applyAutoSize();
+
+      // On release, not on every frame: a drag emits one event, not sixty.
+      if (kind === 'array') track('array_dragged');
+      else if (kind === 'rotate')
+        track('array_rotated', { azimuth: Math.round(useQuoteStore.getState().azimuth) });
+      else if (kind === 'meter') track('meter_moved');
 
       // Only the array's own moves change the ground under it or need the view
       // re-framed. Dragging the pin or the meter used to trigger a slope lookup
@@ -365,6 +378,8 @@ export default function MapStage({ mode }: { mode: MapMode }) {
 
     const onClick = (e: mapboxgl.MapMouseEvent) => {
       if (modeRef.current !== 'place-meter') return;
+      // A tap on the map to place it, as opposed to dragging one already there.
+      track(useQuoteStore.getState().electricalMeterPosition ? 'meter_moved' : 'meter_placed');
       useQuoteStore.getState().setElectricalMeterPosition([e.lngLat.lng, e.lngLat.lat]);
       syncFromStore();
     };

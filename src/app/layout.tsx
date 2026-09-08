@@ -3,6 +3,8 @@ import { Geist, Geist_Mono } from "next/font/google";
 import '@/styles/globals.css';
 import Script from 'next/script';
 import { getBrand } from "@/config/getBrand";
+import { Analytics } from "@vercel/analytics/next";
+import { SpeedInsights } from "@vercel/speed-insights/next";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -40,6 +42,10 @@ export default function RootLayout({
       </head>
       <body className={`${geistSans.variable} ${geistMono.variable} antialiased touch-manipulation overscroll-contain`}>
         {children}
+
+        {/* Vercel's own two. Both no-op off Vercel and neither blocks paint. */}
+        <Analytics />
+        <SpeedInsights />
 
         <Script id="fb-pixel-loader" strategy="lazyOnload">
           {`!function(f,b,e,v,n,t,s){if(f.fbq)return;n=f.fbq=function(){

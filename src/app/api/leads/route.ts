@@ -22,10 +22,17 @@ import { projectResults, type ResultsInput } from "@/lib/results";
 import {
   storeGet,
   storeSet,
+  cacheSet,
   acquireLease,
   releaseLease,
   StoreUnavailable,
 } from "@/lib/server/redis";
+import { parseUtm, UTM_FIELDS, UTM_KEYS, type Utm } from "@/lib/utm";
+import { parseSnapshot, RESUME_PREFIX } from "@/lib/resumeSnapshot";
+import { RESUME_TTL_SECONDS, resumeConfigured, signResume } from "@/lib/server/resumeToken";
+import ResumeEmail from "@/components/common/ResumeEmail";
+import { RESUME_EMAIL } from "@/config/copy";
+import { captureServer, metaLead } from "@/lib/server/analytics";
 
 /**
  * The twenty-five year comparison, from server figures only.
@@ -75,6 +82,15 @@ function midpoint(low: number, high: number): number {
  * deploy, and without it being a code change nobody remembers how to make.
  */
 const NOTIFICATION_EMAIL = process.env.NOTIFY_EMAIL || "bert@groundmounts.com";
+
+/**
+ * How long a saved design outlives the browser it was made in.
+ *
+ * Matched to the resume token's own lifetime on purpose: a link that still
+ * verifies but points at nothing is worse than one that says it has expired,
+ * because the customer cannot tell which of the two happened.
+ */
+const RESUME_SNAPSHOT_TTL_SECONDS = RESUME_TTL_SECONDS;
 
 /** How long a completed submit is remembered, so a repeat is a no-op. */
 const SUBMIT_TTL_SECONDS = 24 * 60 * 60;
@@ -171,6 +187,8 @@ interface LeadPayload {
   address?: string;
   name?: string;
   source?: string;
+  /** The campaign, five separate parameters. Attribution detail, never PII. */
+  utm: Utm;
   /** Which brand the funnel wore. Attribution is `source`, and separate. */
   brand?: string;
   quote?: {
@@ -211,6 +229,18 @@ const MAX_TEXT = 200;
  */
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
+/**
+ * Enough of an address to be worth storing and worth mailing.
+ *
+ * Deliberately not RFC 5322: that grammar accepts things no mail server will,
+ * and the only question here is whether Resend has a chance and whether the
+ * owner has something to follow up. A wrong address is the customer's typo,
+ * not a hole — the resume link goes to whatever they typed and nowhere else.
+ */
+function isEmail(value: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(value);
+}
+
 function isLeadId(value: unknown): value is string {
   return typeof value === 'string' && UUID_V4.test(value);
 }
@@ -243,6 +273,9 @@ function validateResend(obj: Record<string, unknown>): LeadPayload {
   return {
     id: obj.id,
     resend: true,
+    // A resend re-sends an email for a record that already carries its own
+    // attribution. Nothing here is written back, so an empty set is correct.
+    utm: {},
     state: '',
     email: '',
     phone: '',
@@ -331,6 +364,7 @@ function validateLead(data: unknown): LeadPayload {
     name: text(obj.name),
     source: slug(obj.source) ?? '',
     brand: typeof obj.brand === 'string' ? obj.brand : undefined,
+    utm: parseUtm(obj.utm),
     quote: validateContext(obj.quote),
     ts: obj.ts,
     honeypot: obj.honeypot as string,
@@ -377,6 +411,92 @@ async function sendOwnerNotification(
     console.error('[LEAD_EMAIL_ERROR]', error instanceof Error ? error.message : error);
     return false;
   }
+}
+
+/**
+ * Send the "pick up where you left off" link.
+ *
+ * Returns whether it actually went, because unlike every other partial-save
+ * side effect this one has somebody watching: they typed their address into a
+ * box and pressed a button, and "Sent" on screen has to mean sent.
+ */
+async function sendResumeEmail(
+  leadId: string,
+  to: string,
+  brandKey: string | undefined,
+  panels: number | undefined
+): Promise<boolean> {
+  const token = signResume(leadId);
+  if (!token) {
+    console.warn('[RESUME_EMAIL] RESUME_SECRET is not set; not sending');
+    return false;
+  }
+
+  try {
+    const resend = getResendOrThrow();
+    const brand = brandFor(brandKey);
+    const base = publicBaseUrl();
+    const resumeUrl = `${base}/quote?resume=${encodeURIComponent(leadId)}&t=${encodeURIComponent(token)}`;
+
+    const template = ResumeEmail({
+      resumeUrl,
+      brandName: brand.name,
+      brandColor: brand.primaryColor,
+      brandLogoUrl: brand.logoUrl,
+      expiresInDays: Math.round(RESUME_TTL_SECONDS / 86400),
+      panels,
+    }) as ReactElement;
+
+    const { error } = await resend.emails.send(
+      {
+        from: `${headerSafe(brand.name)} <${brand.fromEmail}>`,
+        replyTo: brand.replyTo,
+        to,
+        subject: RESUME_EMAIL.subject,
+        react: template,
+      },
+      {
+        // One link per lead, however many times they tap the button. A second
+        // identical email is not help, it is noise in somebody's inbox.
+        idempotencyKey: `gm:resume:${leadId}`,
+      }
+    );
+
+    if (error) {
+      console.error('[RESUME_EMAIL_ERROR]', error);
+      return false;
+    }
+    console.log('[RESUME_EMAIL_SENT]', leadId);
+    return true;
+  } catch (error) {
+    console.error('[RESUME_EMAIL_ERROR]', error instanceof Error ? error.message : error);
+    return false;
+  }
+}
+
+/**
+ * Where the funnel lives, as an absolute URL an inbox can follow.
+ *
+ * Vercel gives the deployment host without a scheme, and a preview deployment
+ * has a different one every time — so a hard-coded production URL would send
+ * every preview's test link to production.
+ */
+function publicBaseUrl(): string {
+  const explicit = process.env.NEXT_PUBLIC_SITE_URL?.trim();
+  if (explicit) return explicit.replace(/\/$/, '');
+  const vercel = process.env.VERCEL_URL?.trim() || process.env.NEXT_PUBLIC_VERCEL_URL?.trim();
+  if (vercel) return `https://${vercel.replace(/^https?:\/\//, '').replace(/\/$/, '')}`;
+  return 'https://groundmounts-app.vercel.app';
+}
+
+/** The five campaign parameters as Airtable columns, undefined ones dropped. */
+function utmFields(utm: Utm): Partial<Record<string, string>> {
+  const out: Record<string, string> = {};
+  for (const key of UTM_KEYS) {
+    const value = utm[key];
+    if (value) out[UTM_FIELDS[key]] = value;
+  }
+  return out;
 }
 
 /** Stable per lead, so a repeat of the same send is recognised as one. */
@@ -488,9 +608,22 @@ async function savePartial(raw: Record<string, unknown>, ip: string): Promise<Ne
   const id = raw.id;
 
   const stepReached = Number(raw.stepReached);
-  // Only the three steps worth recording. A caller naming step 7 is not a
-  // funnel, and a caller naming step 0 would overwrite a real one with less.
-  if (!PARTIAL_STEPS.includes(stepReached)) {
+  const resumeRequest = raw.resumeRequest === true;
+
+  /*
+    Only the three steps worth recording, for a background save — a caller
+    naming step 7 is not a funnel, and one naming step 0 would overwrite a
+    real row with less.
+
+    A resume request is not a background save. The customer pressed a button on
+    whichever step they were standing on, so any real step is legitimate, and
+    refusing step 2 would mean "Finish later" silently did nothing on the meter
+    step.
+  */
+  const stepOk = resumeRequest
+    ? Number.isInteger(stepReached) && stepReached >= 0 && stepReached <= 5
+    : PARTIAL_STEPS.includes(stepReached);
+  if (!stepOk) {
     return NextResponse.json({ ok: false, error: 'invalid_step' }, { status: 400 });
   }
 
@@ -515,9 +648,35 @@ async function savePartial(raw: Record<string, unknown>, ip: string): Promise<Ne
     return NextResponse.json({ ok: true, partial: true, skipped: 'store_unavailable' });
   }
 
-  if (!(await rateLimitOkAsync(`partial:${id}`, 'lead-partial-id'))) {
+  /*
+    The per-lead limit covers background saves only.
+
+    A resume request has its own, tighter budget because it sends mail; running
+    it through the save limiter as well would mean three steps of ordinary
+    saving used up the customer's ability to ask for their own link.
+  */
+  if (resumeRequest) {
+    if (!(await rateLimitOkAsync(ip, 'resume-request'))) {
+      console.log('[RESUME_REQUEST] limit hit', id, 'from', ip);
+      return NextResponse.json({ ok: false, error: 'rate_limited' }, { status: 429 });
+    }
+  } else if (!(await rateLimitOkAsync(`partial:${id}`, 'lead-partial-id'))) {
     console.log('[LEAD_PARTIAL] per-lead limit hit', id, 'from', ip);
     return NextResponse.json({ ok: true, partial: true, skipped: 'rate_limited' });
+  }
+
+  /*
+    The snapshot, on every save.
+
+    Written outside the lease and before anything that can fail: it is the one
+    thing a resume link needs, it belongs to nobody but this lead, and
+    re-writing it is idempotent. `cacheSet` swallows a store failure, which is
+    right — a design that could not be snapshotted is not a reason to refuse
+    the customer their next step.
+  */
+  const snapshot = parseSnapshot(raw.snapshot);
+  if (snapshot) {
+    await cacheSet(RESUME_PREFIX + id, snapshot, RESUME_SNAPSHOT_TTL_SECONDS);
   }
 
   /**
@@ -529,6 +688,49 @@ async function savePartial(raw: Record<string, unknown>, ip: string): Promise<Ne
    * funnel has not finished, and the write.
    */
   const fields = await partialFields(raw, stepReached);
+
+  /*
+    An email on a partial, and the only one there will ever be.
+
+    Partials are anonymous by design — see the note on savePartialLead — but a
+    customer who types their address into a box marked "send me my design" has
+    asked for exactly this. Nothing else joins it: no name, no phone, no
+    street address. The checkbox is what tells the owner the address arrived
+    that way rather than through a finished submit.
+  */
+  if (resumeRequest) {
+    const email = text(raw.email, 200).toLowerCase();
+    if (!isEmail(email)) {
+      return NextResponse.json({ ok: false, error: 'invalid_email' }, { status: 400 });
+    }
+    if (!resumeConfigured()) {
+      console.warn('[RESUME_REQUEST] RESUME_SECRET is not set; refusing');
+      return NextResponse.json({ ok: false, error: 'unavailable' }, { status: 503 });
+    }
+
+    fields.Email = email;
+    fields['Resume Requested'] = true;
+
+    const sent = await sendResumeEmail(
+      id,
+      email,
+      slug(raw.brand),
+      typeof fields.Panels === 'number' ? fields.Panels : undefined
+    );
+
+    // The record is written whichever way the send went: an address the owner
+    // can follow up is worth having even when the mail bounced off Resend.
+    try {
+      const clean = Object.fromEntries(
+        Object.entries(fields).filter(([, v]) => v !== undefined && v !== '')
+      ) as LeadFields;
+      await upsertLeadByLeadId(clean, id);
+    } catch (error) {
+      console.error('[RESUME_REQUEST_ERROR]', id, error instanceof Error ? error.message : error);
+    }
+
+    return NextResponse.json({ ok: true, partial: true, resume: true, sent });
+  }
 
   const leaseKey = LEASE_PREFIX + id;
   let leaseToken: string | null;
@@ -600,6 +802,15 @@ async function partialFields(
   } catch {
     // No usable design yet. The row is still worth writing: it says somebody
     // got this far and where they were looking.
+  }
+
+  // The campaign that produced this, on the row from the very first save —
+  // most funnels never reach a submit, and attribution on an abandoned design
+  // is exactly what tells the owner which campaign is wasting money.
+  const utm = parseUtm(raw.utm);
+  for (const key of UTM_KEYS) {
+    const value = utm[key];
+    if (value) fields[UTM_FIELDS[key] as 'UTM Source'] = value;
   }
 
   const coordinates = raw.coordinates as { latitude?: number; longitude?: number } | undefined;
@@ -1106,6 +1317,7 @@ export async function POST(req: NextRequest) {
       'Curve Source': facts.curveSource,
       Azimuth: inputs.azimuth,
       Source: lead.source || undefined,
+      ...utmFields(lead.utm),
       // The funnel is finished, so the row stops being a partial.
       Status: 'New',
       'Step Reached': 6,
@@ -1138,6 +1350,29 @@ export async function POST(req: NextRequest) {
     }
 
     console.log("[LEAD_CAPTURED]", lead.id, "airtable_id:", result.id);
+
+    /*
+      Reported from here, where the write actually happened.
+
+      Not awaited into the customer's critical path beyond its own short
+      timeout, and both calls swallow everything — see server/analytics.ts. The
+      lead id is the distinct id on the PostHog side and the dedup key on
+      Meta's, so this and the browser's copy describe one conversion rather
+      than two.
+    */
+    void captureServer('lead_filed', lead.id, {
+      priceLow: priced.quote.low,
+      priceHigh: priced.quote.high,
+      panels: inputs.panelCount,
+      source: lead.source || undefined,
+      ...lead.utm,
+    });
+    void metaLead(lead.id, {
+      email: lead.email,
+      phone: lead.phone,
+      value: midpoint(priced.quote.low, priced.quote.high),
+      sourceUrl: req.headers.get('referer') ?? undefined,
+    });
 
     // Now that the record exists, and only now, the screenshot is worth
     // storing. The row is then patched with the attachment; a failure here
@@ -1232,6 +1467,10 @@ export async function POST(req: NextRequest) {
       : false;
 
     record.emailSent = emailSent;
+    // Recorded either way. "The lead was filed and the email did not go" is
+    // the failure worth being able to count, and it is invisible if only
+    // successes are reported.
+    void captureServer('email_sent', lead.id, { sent: emailSent });
     record.results = results;
     // Kept on the record so a resend reproduces the same email, picture and all.
     record.mapScreenshotUrl = mapScreenshotUrl;

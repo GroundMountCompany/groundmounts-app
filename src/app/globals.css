@@ -64,3 +64,92 @@ html {
     opacity: 0.6;
   }
 }
+
+/*
+  The design coach's three seconds.
+
+  One timeline in three keyframe sets that share a 3s duration, so the hand,
+  the array and the compass stay in step without any JavaScript clock: drag
+  from 10% to 45%, settle, then the ring sweeps from 60% to 90%. Run once —
+  the overlay is gone by the time it would loop.
+*/
+@keyframes gm-coach-hand {
+  0%,
+  8% {
+    transform: translate(60px, 58px);
+    opacity: 0;
+  }
+  12% {
+    opacity: 1;
+  }
+  45% {
+    transform: translate(96px, 58px);
+    opacity: 1;
+  }
+  55% {
+    transform: translate(140px, 52px);
+    opacity: 1;
+  }
+  90% {
+    transform: translate(160px, 66px);
+    opacity: 1;
+  }
+  100% {
+    transform: translate(160px, 66px);
+    opacity: 0;
+  }
+}
+
+@keyframes gm-coach-array {
+  0%,
+  10% {
+    transform: translateX(0);
+  }
+  45%,
+  100% {
+    transform: translateX(36px);
+  }
+}
+
+@keyframes gm-coach-compass {
+  0%,
+  60% {
+    transform: translate(150px, 61px) rotate(0deg);
+  }
+  90%,
+  100% {
+    transform: translate(150px, 61px) rotate(55deg);
+  }
+}
+
+.gm-coach-hand {
+  animation: gm-coach-hand 3s ease-in-out forwards;
+}
+
+.gm-coach-array {
+  animation: gm-coach-array 3s ease-in-out forwards;
+}
+
+.gm-coach-compass {
+  animation: gm-coach-compass 3s ease-in-out forwards;
+  transform-origin: center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /*
+    The picture, held still. It shows an array, a hand on it and a compass —
+    which is what the sentence underneath says — so nothing is lost but the
+    movement, and movement is the part that hurts here.
+  */
+  .gm-coach-hand,
+  .gm-coach-array,
+  .gm-coach-compass {
+    animation: none;
+  }
+  .gm-coach-hand {
+    transform: translate(96px, 58px);
+  }
+  .gm-coach-array {
+    transform: translateX(18px);
+  }
+}

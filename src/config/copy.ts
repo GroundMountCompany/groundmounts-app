@@ -150,6 +150,23 @@ export const UI = {
   back: 'Back',
   billUpload: 'Upload a photo of your bill',
   billUploadNote: 'Or type your numbers in below.',
+  billPathUpload: 'Upload a bill',
+  billPathUploadNote: 'A photo or a PDF. We read the numbers off it.',
+  billPathManual: 'Type it in',
+  billPathManualNote: 'No bill handy? Your average monthly bill and your rate is all we need.',
+  billPathSwitch: 'Choose a different way',
+  coachDesign: 'Drag the panels. Turn them with the compass.',
+  finishLater: 'Finish later',
+  finishLaterPrompt: 'Where should we send your design?',
+  finishLaterSend: 'Send me the link',
+  finishLaterSending: 'Sending...',
+  finishLaterCancel: 'Not now',
+  finishLaterSent: 'Sent. Check your inbox for a link back to this design.',
+  finishLaterFailed: 'That did not send. Check the address and try again.',
+  finishLaterNote: 'Only to send you the link. No calls.',
+  resumeExpired: 'That link has expired. Start again and it will only take a minute.',
+  resumeInvalid: 'That link did not work. Start again and it will only take a minute.',
+  coachAnimationAlt: 'A hand dragging the panels, then turning them with the compass',
   billTakePhoto: 'Take a photo',
   billTakePhotoNote: 'Opens the camera.',
   billChooseFile: 'Choose a photo or PDF',
@@ -467,6 +484,23 @@ export const BANNED_WORDS = [
   'journey',
   'empower',
 ] as const;
+
+/**
+ * The resume email, in the same file as everything else the customer reads.
+ *
+ * The quote email predates this rule and is still exempted in the lint config;
+ * this one is not, because there was no reason to add a second exemption.
+ */
+export const RESUME_EMAIL = {
+  subject: 'Pick up where you left off',
+  heading: 'Pick up where you left off',
+  bodyWithPanels: (panels: number) =>
+    `Your design is saved — ${panels} panels on your land. Open it on any device and carry on where you stopped.`,
+  bodyPlain: 'Your design is saved. Open it on any device and carry on where you stopped.',
+  cta: 'Open my design',
+  expiry: (days: number) => `This link works for ${days} days and only opens your own design.`,
+  reassurance: 'Nobody will call you about this. You asked us to save it, so we saved it.',
+} as const;
 
 export const BANNED_OPENINGS = [
   "in today's world",

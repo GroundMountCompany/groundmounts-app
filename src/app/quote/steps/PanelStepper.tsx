@@ -2,6 +2,7 @@
 
 import { UI } from '@/config/copy';
 import { useQuoteStore } from '@/store/quoteStore';
+import { track } from '@/lib/analytics';
 
 /**
  * Add or remove a panel.
@@ -24,7 +25,10 @@ export default function PanelStepper() {
           type="button"
           data-testid="panel-minus"
           aria-label={UI.removePanel}
-          onClick={() => setPanelAdjust(panelAdjust - 1)}
+          onClick={() => {
+            setPanelAdjust(panelAdjust - 1);
+            track('panels_adjusted', { direction: 'down' });
+          }}
           disabled={totalPanels <= 1}
           className="h-12 w-12 rounded-xl border border-neutral-300 text-[22px] font-semibold disabled:opacity-40"
         >
@@ -40,7 +44,10 @@ export default function PanelStepper() {
           type="button"
           data-testid="panel-plus"
           aria-label={UI.addPanel}
-          onClick={() => setPanelAdjust(panelAdjust + 1)}
+          onClick={() => {
+            setPanelAdjust(panelAdjust + 1);
+            track('panels_adjusted', { direction: 'up' });
+          }}
           className="h-12 w-12 rounded-xl border border-neutral-300 text-[22px] font-semibold"
         >
           +

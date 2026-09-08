@@ -30,6 +30,22 @@ export default withAnalyzer({
      * bundle. The owner sets it on Preview only.
      */
     NEXT_PUBLIC_DEMO_PARAMS: process.env.NEXT_PUBLIC_DEMO_PARAMS ?? "",
+    /**
+     * Analytics, for the same reason again.
+     *
+     * A blank key has to compile to a blank literal so `analyticsEnabled()`
+     * folds to false and the `import('posthog-js')` behind it never runs.
+     * Without this an unset key is a runtime lookup the minifier cannot fold,
+     * so the import executes and a deployment with no analytics configured
+     * still downloads and boots the analytics library.
+     *
+     * The library's chunk is still *emitted* either way — a dynamic import is
+     * a code split, not a conditional compile. What this buys is that a blank
+     * key never fetches it: ~280KB the customer does not pay for, and no init,
+     * no session recorder, no requests. The e2e asserts exactly that.
+     */
+    NEXT_PUBLIC_POSTHOG_KEY: process.env.NEXT_PUBLIC_POSTHOG_KEY ?? "",
+    NEXT_PUBLIC_POSTHOG_HOST: process.env.NEXT_PUBLIC_POSTHOG_HOST ?? "",
   },
   experimental: {
     // helps tree-shake framer-motion submodules

@@ -57,6 +57,24 @@ async function gotoStep(page: Page, step: number) {
 }
 
 /**
+ * Open one of step 2's two paths.
+ *
+ * Phase 11 put a chooser in front of the bill inputs — two equal offers, and
+ * neither of them selected on arrival, which is the whole point of it. Every
+ * test that reaches for an upload button or a bill field has to say which door
+ * it came through first.
+ *
+ * Idempotent: a funnel that already has an answer opens on the matching path
+ * by itself, and clicking the card it is already on changes nothing.
+ */
+async function chooseBillPath(page: Page, path: 'upload' | 'manual') {
+  const card = page.getByTestId(`bill-path-${path}`);
+  await expect(card).toBeVisible({ timeout: 15_000 });
+  if ((await card.getAttribute('aria-pressed')) !== 'true') await card.click();
+  await expect(card).toHaveAttribute('aria-pressed', 'true');
+}
+
+/**
  * Wait for the sheet to stop resizing before measuring anything.
  *
  * Its height comes from a ResizeObserver over the header and footer, so right
@@ -992,6 +1010,7 @@ test('a bill upload fills the table and sizes the array from it', async ({ page 
 
   await mockGeocoding(page);
   await gotoStep(page, 1);
+  await chooseBillPath(page, 'upload');
 
   await page.getByTestId('bill-file').setInputFiles('e2e/fixtures/bill.png');
   await expect(page.getByTestId('bill-review')).toBeVisible();
@@ -1046,6 +1065,7 @@ test('a bill survives confirm, reload, edit, discard and reload again', async ({
 
   await mockGeocoding(page);
   await gotoStep(page, 1);
+  await chooseBillPath(page, 'upload');
 
   // CONFIRM
   await page.getByTestId('bill-file').setInputFiles('e2e/fixtures/bills/bill-municipal.png');
@@ -1080,7 +1100,16 @@ test('a bill survives confirm, reload, edit, discard and reload again', async ({
   // DISCARD — sizing returns to the typed figures and the rate to the default.
   await page.getByTestId('bill-edit').click();
   await page.getByTestId('bill-discard').click();
-  await expect(page.getByTestId('bill-upload')).toBeVisible();
+  /*
+    And the fields are actually there to return to.
+
+    Before Phase 11 they were always on screen underneath, so "sizing returns
+    to the typed figures" needed no help. Now that the two paths are separate,
+    throwing the bill away has to open the half of the screen it is sending
+    them to — otherwise the customer is left on the upload path with the
+    numbers they typed governing a quote they cannot see.
+  */
+  await expect(page.getByTestId('bill-path-upload'), 'the upload path is gone').toBeVisible();
   await expect(page.getByTestId('bill-confirmed')).toHaveCount(0);
   await expect(page.getByTestId('rate-kwh')).toHaveValue(String(DEFAULT_RATE_CENTS));
 
@@ -1089,10 +1118,10 @@ test('a bill survives confirm, reload, edit, discard and reload again', async ({
   );
   expect(manualTarget, 'the discarded bill was still driving the target').not.toBe(24_000);
 
-  // RELOAD — and it is still discarded.
+  // RELOAD — and it is still discarded, still on the typing half.
   await page.reload();
   await waitForHydration(page);
-  await expect(page.getByTestId('bill-upload')).toBeVisible();
+  await expect(page.getByTestId('bill-path-manual')).toHaveAttribute('aria-pressed', 'true');
   await expect(page.getByTestId('bill-confirmed')).toHaveCount(0);
   await expect(page.getByTestId('annual-target')).toContainText(manualTarget.toLocaleString());
 });
@@ -1115,6 +1144,7 @@ test('discarding a bill puts sizing back on the typed figures', async ({ page })
 
   await mockGeocoding(page);
   await gotoStep(page, 1);
+  await chooseBillPath(page, 'upload');
 
   // A deliberately huge bill, so sizing against it is unmistakable.
   await page.getByTestId('bill-file').setInputFiles('e2e/fixtures/bill.png');
@@ -1129,7 +1159,9 @@ test('discarding a bill puts sizing back on the typed figures', async ({ page })
   // Throw it away and type a figure in instead.
   await page.getByTestId('bill-edit').click();
   await page.getByTestId('bill-discard').click();
-  await expect(page.getByTestId('bill-upload')).toBeVisible();
+  // Landed on the typing half, with the upload still one tap away above.
+  await expect(page.getByTestId('bill-path-manual')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByTestId('bill-path-upload')).toBeVisible();
 
   const bill = page.getByTestId('avg-bill');
   await bill.fill('180');
@@ -1141,10 +1173,11 @@ test('discarding a bill puts sizing back on the typed figures', async ({ page })
   expect(manual, 'the discarded bill was still driving the target').toBeLessThan(withBill);
   expect(manual).toBeGreaterThan(0);
 
-  // And it stays discarded across a refresh.
+  // And it stays discarded across a refresh — the chosen path is persisted
+  // with everything else, so a reload does not re-ask a question they answered.
   await page.reload();
   await waitForHydration(page);
-  await expect(page.getByTestId('bill-upload')).toBeVisible();
+  await expect(page.getByTestId('bill-path-manual')).toHaveAttribute('aria-pressed', 'true');
   await expect(page.getByTestId('bill-confirmed')).toHaveCount(0);
 });
 
@@ -1159,6 +1192,7 @@ test('an unreadable bill lands on the manual fields, not a dead end', async ({ p
 
   await mockGeocoding(page);
   await gotoStep(page, 1);
+  await chooseBillPath(page, 'upload');
 
   await page.getByTestId('bill-file').setInputFiles('e2e/fixtures/bill.png');
 
@@ -1191,6 +1225,7 @@ test.describe('real bills, as the deployed extractor read them', () => {
     );
     await mockGeocoding(page);
     await gotoStep(page, 1);
+    await chooseBillPath(page, 'upload');
   }
 
   test('a retailer chart of thirteen months keeps the newest twelve', async ({ page }) => {
@@ -1268,6 +1303,7 @@ test.describe('real bills, as the deployed extractor read them', () => {
 
     await mockGeocoding(page);
     await gotoStep(page, 1);
+    await chooseBillPath(page, 'upload');
 
     await page.getByTestId('bill-file').setInputFiles('e2e/fixtures/bills/bill-oversized.png');
 
@@ -1302,6 +1338,7 @@ test.describe('real bills, as the deployed extractor read them', () => {
     );
     await mockGeocoding(page);
     await gotoStep(page, 1);
+    await chooseBillPath(page, 'upload');
 
     await page.getByTestId('bill-file').setInputFiles('e2e/fixtures/bills/bill-photo-blurry.png');
     await expect(page.getByTestId('bill-failed')).toBeVisible({ timeout: BILL_HOLD_TIMEOUT });
@@ -1531,6 +1568,7 @@ test('a focused field and the button are both visible with a keyboard up', async
 
   // Step 2: focus each bill field in turn.
   await gotoStep(page, 1);
+  await chooseBillPath(page, 'manual');
   await page.evaluate(() => window.visualViewport?.dispatchEvent(new Event('resize')));
 
   for (const field of ['#avg-bill', '#rate-kwh']) {
@@ -2378,6 +2416,7 @@ test('?reset=1 clears the funnel and starts over', async ({ page }) => {
 test('the bill field rounds to whole dollars on blur', async ({ page }) => {
   await mockGeocoding(page);
   await gotoStep(page, 1);
+  await chooseBillPath(page, 'manual');
 
   const bill = page.locator('#avg-bill');
   await bill.fill('240.75');
@@ -2577,6 +2616,7 @@ test('choosing a bill shows what is happening, start to finish', async ({ page }
 
   await mockGeocoding(page);
   await gotoStep(page, 1);
+  await chooseBillPath(page, 'upload');
 
   const card = page.getByTestId('bill-card');
   const started = Date.now();
@@ -2634,6 +2674,7 @@ test('a bill that cannot be read says so before dropping to manual', async ({ pa
 
   await mockGeocoding(page);
   await gotoStep(page, 1);
+  await chooseBillPath(page, 'upload');
 
   await page.getByTestId('bill-file').setInputFiles('e2e/fixtures/bill.png');
 
@@ -2654,8 +2695,17 @@ test('a bill that cannot be read says so before dropping to manual', async ({ pa
   // Then it hands over. Nothing to dismiss.
   await expect(card).toHaveCount(0, { timeout: BILL_HOLD_TIMEOUT });
   await expect(page.getByTestId('bill-failed')).toBeVisible({ timeout: BILL_HOLD_TIMEOUT });
-  await expect(page.getByTestId('bill-upload')).toBeVisible();
+  /*
+    Hands over, rather than just saying so.
+
+    "Type it in instead" used to be self-executing because the fields were
+    already below. With the two paths separate it has to actually open them —
+    and the message has to survive the hand-over, which is why it is rendered
+    by the step rather than by the upload component that raised it.
+  */
+  await expect(page.getByTestId('bill-path-manual')).toHaveAttribute('aria-pressed', 'true');
   await expect(page.locator('#avg-bill')).toBeVisible();
+  await expect(page.getByTestId('bill-path-upload'), 'no way back to the upload').toBeVisible();
 });
 
 test('a PDF shows an icon rather than a broken thumbnail', async ({ page }) => {
@@ -2676,6 +2726,7 @@ test('a PDF shows an icon rather than a broken thumbnail', async ({ page }) => {
 
   await mockGeocoding(page);
   await gotoStep(page, 1);
+  await chooseBillPath(page, 'upload');
 
   await page.getByTestId('bill-file-library').setInputFiles({
     name: 'bill.pdf',
@@ -2885,6 +2936,7 @@ test('the suggestions are not crushed by the side panel on a desktop', async ({
 test('a bill can be chosen from the library, not only shot with the camera', async ({ page }) => {
   await mockGeocoding(page);
   await gotoStep(page, 1);
+  await chooseBillPath(page, 'upload');
 
   // The camera door keeps `capture`, because somebody standing at their meter
   // box wants the camera and nothing else.

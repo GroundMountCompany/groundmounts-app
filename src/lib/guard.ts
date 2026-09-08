@@ -30,6 +30,11 @@ export const ROUTE_LIMITS: Record<string, number> = {
   // Per lead id rather than per IP: three is the number of steps that save.
   "lead-partial-id": 3,
   "bill-extract": 10,
+  // A signature check is an oracle if it is free to call, so this is the
+  // tightest limit here: a customer opens their own link once, maybe twice.
+  resume: 10,
+  // Asking for a resume email sends mail. Tighter still.
+  "resume-request": 5,
   health: 30,
 };
 

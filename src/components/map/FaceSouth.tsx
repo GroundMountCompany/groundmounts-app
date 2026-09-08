@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { UI } from '@/config/copy';
 import { useQuoteStore } from '@/store/quoteStore';
+import { track } from '@/lib/analytics';
 import { subscribeHandleScreen, type ScreenPoint } from './MapCanvas';
 import { easeAzimuthTo, isFacingSouth, SOUTH } from '@/lib/easeAzimuth';
 import { applyAutoSize } from '@/lib/applyAutoSize';
@@ -51,6 +52,7 @@ export default function FaceSouth() {
       aria-label={UI.faceSouth}
       title={UI.faceSouth}
       onClick={() => {
+        track('face_south', { from: Math.round(azimuth) });
         cancelRef.current?.();
         cancelRef.current = easeAzimuthTo(azimuth, SOUTH, (next) => {
           setAzimuth(next);

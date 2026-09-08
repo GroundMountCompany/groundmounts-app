@@ -13,7 +13,7 @@ import {
 } from 'recharts';
 import { UI } from '@/config/copy';
 import { INFLATION_MARKS, RESULTS } from '@/config/results';
-import { projectResults } from '@/lib/results';
+import { displayOffsetPct, projectResults } from '@/lib/results';
 import { useQuoteStore } from '@/store/quoteStore';
 import WhyPeopleDoThis from './WhyPeopleDoThis';
 import HistoryChart from './HistoryChart';
@@ -82,6 +82,9 @@ export default function ResultsSection({
   const inflationPct = useQuoteStore((s) => s.utilityInflationPct);
   const setInflationPct = useQuoteStore((s) => s.setUtilityInflationPct);
   const [assumptionsOpen, setAssumptionsOpen] = useState(false);
+
+  // What they chose, not what the model was able to use.
+  const displayedOffsetPct = displayOffsetPct(offsetFraction);
 
   const model = useMemo(
     () =>
@@ -332,8 +335,16 @@ export default function ResultsSection({
             <Assumption label={UI.resultsAssumptionBill} value={`${money(monthlyBillUsd)}/mo`} />
             <Assumption
               label={UI.resultsAssumptionOffset}
-              value={`${Math.round(Math.min(1, Math.max(0, offsetFraction)) * 100)}%`}
+              value={`${displayedOffsetPct}%`}
             />
+            {displayedOffsetPct > 100 && (
+              <p
+                data-testid="results-offset-cushion"
+                className="pb-1 text-[16px] leading-snug text-neutral-600"
+              >
+                {UI.resultsOffsetCushion}
+              </p>
+            )}
             <Assumption label={UI.resultsAssumptionInflation} value={`${inflationPct}%`} />
             <div className="py-1">
               <dt className="text-neutral-600">{UI.resultsAssumptionRates}</dt>

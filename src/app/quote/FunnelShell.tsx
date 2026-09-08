@@ -82,7 +82,7 @@ export default function FunnelShell() {
   }, []);
 
   useEffect(() => {
-    setSnap(MAP_FIRST_STEPS.includes(step) ? 'peek' : 'half');
+    setSnap(MAP_FIRST_STEPS.includes(step) ? 'peek' : 'full');
     // Arriving at the design step frames the array again, however the customer
     // got here — forward, back, or a reload.
     if (step === 3) rearmDesignFraming();

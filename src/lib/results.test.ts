@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { projectResults } from './results';
+import { displayOffsetPct, projectResults } from './results';
 import { INFLATION_MARKS, RESULTS } from '@/config/results';
 
 /**
@@ -353,5 +353,52 @@ describe('the rates the customer can tap', () => {
       expect(mark.label.length, `${mark.label} is too long for a tick`).toBeLessThanOrEqual(10);
       expect(mark.detail.length, `${mark.label} has no source`).toBeGreaterThan(20);
     }
+  });
+});
+
+/**
+ * An offset over 100%, which the step-2 slider goes to 150.
+ *
+ * The assumptions panel printed the model's cap instead of the answer, so a
+ * customer who deliberately oversized to 110% was shown "100%" and told that
+ * was what they had entered. Owner QA caught it on a real phone.
+ */
+describe('an offset the customer set above 100%', () => {
+  const input = {
+    monthlyBillUsd: 240,
+    systemPriceUsd: 32_000,
+    inflationPct: HAND_CHECKED_INFLATION_PCT,
+    startYear: 2026,
+  };
+
+  it('prints the number they chose', () => {
+    expect(displayOffsetPct(1.1)).toBe(110);
+    expect(displayOffsetPct(1.5)).toBe(150);
+  });
+
+  it('still prints an ordinary answer unchanged', () => {
+    expect(displayOffsetPct(1)).toBe(100);
+    expect(displayOffsetPct(0.75)).toBe(75);
+  });
+
+  it('never prints a negative offset', () => {
+    expect(displayOffsetPct(-0.2)).toBe(0);
+  });
+
+  it('computes the residual bill at 100, not 110', () => {
+    // The utility does not pay for the surplus in this model, so the money
+    // side of 110% has to be identical to 100% — that cap is the reason the
+    // label was wrong, and it is the part that must not move.
+    const at110 = projectResults({ ...input, offsetFraction: 1.1 });
+    const at100 = projectResults({ ...input, offsetFraction: 1 });
+
+    expect(at110.paybackMonth).toBe(at100.paybackMonth);
+    expect(at110.rows).toEqual(at100.rows);
+  });
+
+  it('and 110 is genuinely different from an offset below the cap', () => {
+    // Otherwise the check above would pass on a model that ignored offset.
+    const at80 = projectResults({ ...input, offsetFraction: 0.8 });
+    expect(projectResults({ ...input, offsetFraction: 1.1 }).rows).not.toEqual(at80.rows);
   });
 });

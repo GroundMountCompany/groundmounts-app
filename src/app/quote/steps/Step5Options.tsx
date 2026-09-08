@@ -5,7 +5,7 @@ import EducationCard from '@/components/shell/EducationCard';
 import { STEPS, UI, OPTION_CARDS } from '@/config/copy';
 import { useQuoteStore } from '@/store/quoteStore';
 import { useQuote } from './useQuote';
-import { looksRocky, priceQuote } from '@/lib/pricing';
+import { looksRocky, priceQuote, rockyAdderFor, slopeAdderFor } from '@/lib/pricing';
 import { SITE, type SlopeAnswer } from '@/config/pricing';
 
 /** Signed money, so a choice that saves money reads as a saving. */
@@ -17,6 +17,20 @@ function delta(amount: number): string {
     currency: 'USD',
     maximumFractionDigits: 0,
   })}`;
+}
+
+/**
+ * The adder as the config states it, not as dollars.
+ *
+ * Slope and rocky ground are percentage adders on the groundwork. Rendering
+ * them as dollars meant the figure on a button moved when an unrelated answer
+ * changed — pick "Rocky" and the slope buttons all re-priced — which reads as
+ * the tool changing its mind. The percentage is the number the config actually
+ * holds, and it stays put.
+ */
+function pct(fraction: number): string {
+  if (fraction === 0) return UI.included;
+  return `+${Math.round(fraction * 100)}%`;
 }
 
 function Choice({
@@ -122,17 +136,18 @@ export default function Step5Options() {
     });
   }, [slopeTier, surveySaysRocky, suggestSiteAnswers]);
 
-  /** What the total would be with one thing changed. */
-  const priceWith = (
-    over: Partial<{ needsClearing: boolean; slopeAnswer: SlopeAnswer; rocky: boolean }>
-  ) =>
+  /**
+   * What the total would be with the clearing answer flipped.
+   *
+   * Only clearing is priced this way now: it is a flat charge, so a dollar
+   * figure is the honest label for it. Slope and rocky are percentage adders
+   * and say so.
+   */
+  const priceWith = (over: { needsClearing: boolean }) =>
     priceQuote(
       { panelCount: totalPanels, tier: panelTier, trenchFeet },
-      { batteryUnits, needsClearing: over.needsClearing ?? needsClearing },
-      {
-        slopeAnswer: over.slopeAnswer ?? slopeAnswer,
-        rocky: over.rocky ?? rocky,
-      }
+      { batteryUnits, needsClearing: over.needsClearing },
+      { slopeAnswer, rocky }
     ).estimate;
 
   const against = (over: Parameters<typeof priceWith>[0]) => priceWith(over) - current.estimate;
@@ -179,7 +194,7 @@ export default function Step5Options() {
               key={choice.answer}
               testId={`slope-answer-${choice.answer}`}
               label={choice.label}
-              price={delta(against({ slopeAnswer: choice.answer }))}
+              price={pct(slopeAdderFor(choice.answer))}
               selected={slopeAnswer === choice.answer}
               onSelect={() => setSlopeAnswer(choice.answer)}
             />
@@ -192,14 +207,14 @@ export default function Step5Options() {
           <Choice
             testId="rocky-no"
             label={UI.rockyNo}
-            price={delta(against({ rocky: false }))}
+            price={pct(rockyAdderFor(false))}
             selected={!rocky}
             onSelect={() => setRocky(false)}
           />
           <Choice
             testId="rocky-yes"
             label={UI.rockyYes}
-            price={delta(against({ rocky: true }))}
+            price={pct(rockyAdderFor(true))}
             selected={rocky}
             onSelect={() => setRocky(true)}
           />

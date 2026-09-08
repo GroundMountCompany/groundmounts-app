@@ -75,6 +75,36 @@ describe('the resume link signature', () => {
     expect(verifyResume(LEAD, token, past)).toBe('expired');
   });
 
+  it('rejects a token at the exact second it expires', () => {
+    /*
+      The boundary, which is the only place this is observable.
+
+      The token names the second it expires, so that second is already outside
+      it. With `>` the link was still honoured for the whole of its own
+      deadline second — valid for one second longer than it claimed. Nobody
+      would ever notice, which is precisely why it needs a test rather than an
+      argument.
+
+      Sub-second offsets too: the check floors to whole seconds, so anything
+      inside the deadline second has to give the same answer as its start.
+    */
+    const issuedAt = Date.UTC(2026, 0, 1);
+    const token = signResume(LEAD, issuedAt)!;
+    const expiresAtMs = (Math.floor(issuedAt / 1000) + RESUME_TTL_SECONDS) * 1000;
+
+    // The last instant it is good for: one second before the deadline.
+    expect(verifyResume(LEAD, token, expiresAtMs - 1)).toBe('ok');
+    expect(verifyResume(LEAD, token, expiresAtMs - 1000)).toBe('ok');
+
+    // The deadline second itself, and every part of it.
+    expect(verifyResume(LEAD, token, expiresAtMs), 'honoured at its own expiry').toBe('expired');
+    expect(verifyResume(LEAD, token, expiresAtMs + 1)).toBe('expired');
+    expect(verifyResume(LEAD, token, expiresAtMs + 999)).toBe('expired');
+
+    // And after it, unchanged.
+    expect(verifyResume(LEAD, token, expiresAtMs + 1000)).toBe('expired');
+  });
+
   it('signs nothing and verifies nothing without a secret', () => {
     delete process.env.RESUME_SECRET;
     expect(signResume(LEAD)).toBeNull();

@@ -6,28 +6,67 @@
  * without one, so it is safe to leave wired into a repo that most people
  * cloning it cannot run.
  *
- *   POSTHOG_PERSONAL_API_KEY=phx_... npm run report:funnel
+ *   npm run report:funnel
+ *
+ * Reads `.env.local` itself, so that is the whole command — there is nothing
+ * to remember and nothing to paste into a shell where it would land in the
+ * history file. **Never commit the key.** `.env.local` is gitignored; keep it
+ * that way.
  *
  * Writes docs/reports/YYYY-MM-DD.md. Committing those is the point: a drop-off
  * number is only useful next to the one from a fortnight ago.
  */
 
 import { mkdir, writeFile } from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
+import { STEPS } from '../src/config/copy';
+
+/**
+ * Fill blanks from `.env.local`, without overriding anything already set.
+ *
+ * Hand-rolled rather than a dependency, and deliberately *not*
+ * `process.loadEnvFile`: that one overwrites, which would mean a deliberate
+ * `POSTHOG_PROJECT_ID=other npm run report:funnel` was silently ignored in
+ * favour of the file. Explicit beats ambient; the file is the fallback.
+ */
+function loadEnvLocal(): void {
+  let text: string;
+  try {
+    // Synchronous, because this has to finish before the constants below are
+    // read and tsx compiles this file to CommonJS, where there is no
+    // top-level await to wait for it with.
+    text = readFileSync(path.join(process.cwd(), '.env.local'), 'utf8');
+  } catch {
+    // No file is not an error. The variables may come from the environment.
+    return;
+  }
+
+  for (const line of text.split('\n')) {
+    const match = line.match(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/);
+    if (!match) continue;
+    const [, name, rawValue] = match;
+    if (process.env[name] !== undefined && process.env[name] !== '') continue;
+    // Strip one layer of matching quotes, and anything after an unquoted #.
+    const value = rawValue.trim().replace(/^(['"])([^]*)\1$/, '$2');
+    process.env[name] = /^['"]/.test(rawValue.trim()) ? value : value.split(' #')[0].trim();
+  }
+}
+
+loadEnvLocal();
 
 const KEY = process.env.POSTHOG_PERSONAL_API_KEY?.trim();
 const HOST = (process.env.POSTHOG_HOST || 'https://us.posthog.com').replace(/\/$/, '');
 const PROJECT = process.env.POSTHOG_PROJECT_ID?.trim();
 
-/** The funnel, in the order a customer walks it. */
-const STEP_NAMES = [
-  'Find your property',
-  'Your power use',
-  'Where the power comes in',
-  'Place your panels',
-  'A few questions',
-  'Your quote',
-];
+/**
+ * The funnel, in the order a customer walks it.
+ *
+ * Read from copy.ts rather than typed out again — an earlier version of this
+ * file had its own list, and four of the six names were wrong, so the report
+ * labelled real drop-off with steps that do not exist.
+ */
+const STEP_NAMES = STEPS.map((step) => step.title);
 
 const WINDOWS = [7, 30] as const;
 
@@ -80,14 +119,41 @@ async function dropOff(days: number): Promise<string> {
   const byStep = new Map<number, number>(rows.map((r) => [num(r[0]), num(r[1])]));
   const lines = ['| Step | Reached | Lost from previous |', '| --- | ---: | ---: |'];
   let previous: number | null = null;
+  let sawRise = false;
+
   for (let i = 0; i < STEP_NAMES.length; i++) {
     const people = byStep.get(i) ?? 0;
-    const lost =
-      previous === null || previous === 0
-        ? '—'
-        : `${(((previous - people) / previous) * 100).toFixed(1)}%`;
+    let lost: string;
+
+    if (previous === null || previous === 0) {
+      lost = '—';
+    } else if (people > previous) {
+      /*
+        More people on this step than the one before it.
+
+        Not a negative loss — the funnel is not strictly sequential. `?step=`,
+        a resume link, `?demo=results` and every automated check land people
+        directly on a later step without passing through the earlier ones. An
+        earlier version printed "-50.0%" here, which reads as a gain and is
+        nonsense either way.
+      */
+      lost = `+${people - previous} arrived directly`;
+      sawRise = true;
+    } else {
+      lost = `${(((previous - people) / previous) * 100).toFixed(1)}%`;
+    }
+
     lines.push(`| ${i + 1}. ${STEP_NAMES[i]} | ${people} | ${lost} |`);
     previous = people;
+  }
+
+  if (sawRise) {
+    lines.push('');
+    lines.push(
+      '> A step reached by more people than the one before it means somebody ' +
+        'arrived there directly — a `?step=` link, a resume link, or an ' +
+        'automated check. Drop-off between those two steps cannot be read.'
+    );
   }
   return lines.join('\n');
 }
@@ -97,6 +163,21 @@ async function dropOff(days: number): Promise<string> {
  *
  * Median rather than mean: one person who left the tab open overnight would
  * otherwise make a ten-second step look like a four-hour one.
+ *
+ * `leadInFrame` is a window function and has to be written as one. The first
+ * version of this called it bare, alongside a GROUP BY, and PostHog answered
+ * "can only be used as a window function, not as an aggregate function" —
+ * correctly, because without a frame there is no next row to look at.
+ *
+ * Two details in the OVER clause, both load-bearing:
+ *
+ *   PARTITION BY leadId  — the next step *this customer* reached. Without it
+ *                          the frame runs across everybody and the gap becomes
+ *                          the time to some stranger's next event.
+ *   ROWS BETWEEN CURRENT ROW AND 1 FOLLOWING
+ *                        — the default frame ends at the current row, so
+ *                          `leadInFrame` would have nothing ahead of it and
+ *                          return the zero value on every row.
  */
 async function timePerStep(days: number): Promise<string> {
   const rows = (
@@ -104,14 +185,23 @@ async function timePerStep(days: number): Promise<string> {
       SELECT step, median(gap) AS seconds FROM (
         SELECT
           toInt(properties.step) AS step,
-          dateDiff('second', timestamp, leadInFrame(timestamp)) AS gap
+          dateDiff(
+            'second',
+            timestamp,
+            leadInFrame(timestamp) OVER (
+              PARTITION BY properties.leadId
+              ORDER BY timestamp ASC
+              ROWS BETWEEN CURRENT ROW AND 1 FOLLOWING
+            )
+          ) AS gap
         FROM events
         WHERE event = 'step_viewed'
           AND timestamp > now() - INTERVAL ${days} DAY
           AND notEmpty(toString(properties.leadId))
-        GROUP BY properties.leadId, step, timestamp
-        ORDER BY properties.leadId, timestamp
       )
+      -- Drops the last step of every funnel, which has no next row and so a
+      -- gap of zero, and anything over an hour, which is a tab left open
+      -- rather than somebody reading the screen.
       WHERE gap > 0 AND gap < 3600
       GROUP BY step
       ORDER BY step

@@ -94,8 +94,21 @@ Pulls the last 7 and 30 days out of PostHog and writes
 upload success rate, top rage-click targets and lead count.
 
 ```bash
-POSTHOG_PERSONAL_API_KEY=phx_... POSTHOG_PROJECT_ID=12345 npm run report:funnel
+npm run report:funnel
 ```
+
+It reads `.env.local` itself, so that is the whole command. Put the two
+variables there:
+
+```
+POSTHOG_PERSONAL_API_KEY=phx_...
+POSTHOG_PROJECT_ID=12345
+```
+
+`.env.local` is gitignored — **never commit the key.** Passing a variable on
+the command line still wins over the file, so a one-off against another
+project works, but it also puts the key in your shell history; the file is the
+better habit.
 
 Opt-in and read-only. Without the personal key it prints one line and exits 0,
 so it is safe to leave wired into a repo most people cannot run it in. The key
@@ -107,6 +120,19 @@ reloads four times is one person. Commit the reports: a drop-off number only
 means something next to the one from a fortnight ago.
 
 The rage-click section depends on PostHog autocapture being on, which it is.
+
+**A step reached by more people than the one before it is not negative
+drop-off.** The funnel is not strictly sequential: `?step=`, a resume link,
+`?demo=results` and every automated check land somebody on a later step
+without passing through the earlier ones. The report says "+N arrived
+directly" and footnotes it rather than printing a nonsense percentage.
+
+The timings query uses `leadInFrame` as a window function, partitioned by lead
+id with an explicit `ROWS BETWEEN CURRENT ROW AND 1 FOLLOWING` frame. Both
+parts matter: without the partition the gap is the time to a stranger's next
+event, and without the frame the default window ends at the current row, so
+there is no next row to read and every gap comes back zero. Calling it bare is
+what PostHog rejects with "can only be used as a window function".
 
 ### `npm run verify:hooks`
 

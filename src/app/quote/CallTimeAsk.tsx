@@ -61,7 +61,15 @@ export default function CallTimeAsk({ leadId }: { leadId: string | null }) {
                 key={when}
                 type="button"
                 data-testid={`call-time-${when.toLowerCase()}`}
-                disabled={sending !== null}
+                /*
+                  Disabled without a lead, rather than silently inert.
+
+                  The ?demo=results screen reveals this component without
+                  filing anything, so there is no record to write an answer
+                  to. A chip that looks tappable and does nothing is worse
+                  than one that plainly cannot be tapped.
+                */
+                disabled={sending !== null || !leadId}
                 onClick={() => void choose(when)}
                 className="min-h-[56px] flex-1 basis-0 rounded-xl border border-neutral-300 bg-white px-2 text-[17px] font-semibold text-neutral-900 disabled:opacity-60"
               >

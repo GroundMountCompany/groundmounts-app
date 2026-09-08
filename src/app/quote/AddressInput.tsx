@@ -9,6 +9,7 @@ import { useSettledLayout } from '@/lib/useSettledLayout';
 import { useQuoteContext } from '@/contexts/quoteContext';
 import { useSearchParams } from 'next/navigation';
 import { fireDesignStartOnce } from '@/lib/fb';
+import { track } from '@/lib/analytics';
 import { UI } from '@/config/copy';
 
 /** Where the portalled list is drawn, in viewport coordinates. */
@@ -164,7 +165,8 @@ export const AddressInput = ({ onFocusRequestPeek }: AddressInputProps = {}): JS
       longitude: suggestion.center[0],
     });
     inputAddressRef.current?.blur();
-    
+    track('address_selected');
+
     // Fire DesignStart once per session
     try { fireDesignStartOnce(); } catch {}
   };

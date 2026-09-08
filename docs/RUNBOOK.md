@@ -24,6 +24,11 @@ when a variable is missing, because "required" is rarely the whole truth.
 | `NEXT_PUBLIC_DEMO_PARAMS` | Vercel, **Preview only** | Without it `?demo=results` does nothing. Set it to `1` on Preview so the results screen can be reviewed without filing a lead. **Never set it on Production**: the screen it opens claims a quote was produced. |
 | `ANTHROPIC_MODEL` | Vercel (optional) | Defaults to `claude-sonnet-5`. Change the model without a code change. |
 | `ALLOWED_FRAME_ORIGINS` | Vercel (optional) | `frame-ancestors *`, which is deliberate: partner funnels embed this. Set a space-separated origin list to lock it down. |
+| `RESUME_SECRET` | Vercel + `.env.local` | **Finish later stops working.** The button reports a failure and `/api/resume` refuses every link with a 401 — deliberately, because a link that cannot be verified must not be honoured. Nothing else is affected. Rotating it invalidates every link already sitting in somebody's inbox. |
+| `NEXT_PUBLIC_POSTHOG_KEY`<br>`NEXT_PUBLIC_POSTHOG_HOST` | Vercel | No analytics at all: no events, no session replay, and the ~280KB library is never even fetched. The funnel is unaffected — that is the point, and the e2e proves it. |
+| `META_CAPI_TOKEN` | Vercel (optional) | The server does not report conversions to Meta. The browser pixel still fires, so Meta sees leads from browsers that were not blocking it. Setting it adds the server-side half, deduplicated against the pixel on the lead id. |
+| `NEXT_PUBLIC_SITE_URL` | Vercel (optional) | Resume links are built from `VERCEL_URL`, then from the production host. Set it if the funnel is served from a domain neither of those names. |
+| `POSTHOG_PERSONAL_API_KEY`<br>`POSTHOG_PROJECT_ID` | Local only | `npm run report:funnel` exits cleanly and writes nothing. Never set these on Vercel — a personal key is not a project key and does not belong in a deployment. |
 
 Check what a deployment actually has: `GET /api/health`.
 
@@ -52,6 +57,8 @@ The client also sends the honeypot as `x-gm-hp` alongside the body field, so
 the server's pre-parse check applies to real traffic rather than only to
 whatever a bot chooses to send. Both are checked.
 | `?state=` | Sets the state on the lead. Defaults to `TX`. | `/quote?state=TX` |
+| `?resume=<leadId>&t=<token>` | Restores a saved design from a "Finish later" email. The token is an HMAC over the lead id and the expiry; both parameters are stripped from the URL as soon as they are read, so a refresh cannot re-hydrate over later work. A tampered link is a 401, an expired one a 410, and a valid link with nothing behind it a 404. | `/quote?resume=<id>&t=<token>` |
+| `utm_source=`<br>`utm_medium=`<br>`utm_campaign=`<br>`utm_term=`<br>`utm_content=` | Read once off the landing URL, registered as PostHog super properties, kept in the store, and written to their own Airtable columns from the first partial save onward. `?source=` is unchanged and separate. | `/quote?utm_source=meta&utm_campaign=tx-spring` |
 | `?demo=results` | **Preview only.** Seeds a worked example and opens the revealed success screen, with the results section, **without sending anything** — no Airtable write, no email, no request to `/api/leads` at all. Needs `NEXT_PUBLIC_DEMO_PARAMS=1`; without it the parameter does nothing. | `/quote?demo=results` |
 
 ---
@@ -79,6 +86,27 @@ reported and left alone for you to decide about.
 Airtable will not let the API add an option to an existing single-select. Those
 are reported as a warning, and every write uses `typecast`, so the first record
 carrying a new value creates it.
+
+### `npm run report:funnel`
+
+Pulls the last 7 and 30 days out of PostHog and writes
+`docs/reports/YYYY-MM-DD.md`: step-by-step drop-off, median time per step, bill
+upload success rate, top rage-click targets and lead count.
+
+```bash
+POSTHOG_PERSONAL_API_KEY=phx_... POSTHOG_PROJECT_ID=12345 npm run report:funnel
+```
+
+Opt-in and read-only. Without the personal key it prints one line and exits 0,
+so it is safe to leave wired into a repo most people cannot run it in. The key
+is a **personal** key, not the public project key the browser uses — it belongs
+on a laptop, not in Vercel.
+
+Every figure counts distinct lead ids rather than browsers, so one customer who
+reloads four times is one person. Commit the reports: a drop-off number only
+means something next to the one from a fortnight ago.
+
+The rage-click section depends on PostHog autocapture being on, which it is.
 
 ### `npm run verify:hooks`
 
@@ -113,6 +141,31 @@ passes in both directions is worse than none. What guards it instead:
   ```bash
   E2E_DEMO_PARAMS= E2E_PORT=3101 npx playwright test -g "flag is off"
   ```
+
+### The analytics off-switch
+
+`NEXT_PUBLIC_POSTHOG_KEY` has exactly the same shape of problem, and the same
+answer. A blank key has to be a literal so the branch folds and the library is
+never fetched — which means "configured" and "not configured" are two different
+bundles with no runtime signal between them. The default e2e run builds with a
+dummy key and asserts the events fire; the other half is:
+
+```bash
+E2E_POSTHOG_KEY= E2E_PORT=3101 npx playwright test --project=mobile -g "analytics is off"
+```
+
+That test asserts two things: no request reaches PostHog, and no chunk the page
+downloaded contains the library. It **skips** rather than passing when run
+against the wrong build, so a green ordinary run never implies it ran.
+
+Two things worth knowing if these tests ever look broken:
+
+- The suite points `NEXT_PUBLIC_POSTHOG_HOST` at the test server itself, so
+  nothing ever reaches `us.i.posthog.com` and every request is interceptable.
+- **posthog-js drops every event when `navigator.webdriver` is true.** It
+  treats automation as a bot, which is right in production and fatal under
+  Playwright. The specs mask it in an init script. Without that mask the
+  endpoint sees no traffic at all and a working integration looks dead.
 
 ### Capturing the results screen
 
@@ -249,6 +302,86 @@ SwiftShader, which is CPU rasterisation. They are configured to run alone
 them cannot share a machine** — the second starves the first's renderer and the
 drag-drift assertions fail with a several-hundred-millisecond worst frame,
 which the failure message reports.
+
+---
+
+## Save and resume
+
+The middle of this funnel asks somebody to stand in their garden and draw an
+array on a satellite photo. People get interrupted. "Finish later" on steps
+3–5 is the exit that is not abandonment.
+
+**What is stored.** A snapshot of the design in Redis under
+`gm:resume:<leadId>`, written on **every** partial save — not only when the
+button is pressed — with a 30-day TTL. It is built from an explicit allow-list
+in `src/lib/resumeSnapshot.ts`, never by omission, so a field added to the
+store later cannot join it by accident. It carries no name, email, phone or
+street address; a unit test asserts that against a snapshot with all four
+pushed into it.
+
+**The email address is the one exception to a partial's anonymity.** Every
+other partial write is deliberately PII-free. This one carries an email
+because the customer typed it into a box that says what it is for, and it
+arrives with `Resume Requested` ticked so the owner can see it came that way
+rather than through a finished submit.
+
+**The link.** `/quote?resume=<leadId>&t=<expiry>.<hmac>`, signed with
+`RESUME_SECRET`. The HMAC covers the lead id *and* the expiry, so the date
+cannot be extended and a token for one lead is not a key to another.
+
+Three answers, deliberately distinct:
+
+| Response | Means | Why not the same as the others |
+|---|---|---|
+| `401` | The signature does not check out. | Says nothing about whether the lead exists, so ids cannot be probed. Also the answer when `RESUME_SECRET` is unset — nothing we cannot verify may be honoured. |
+| `410` | Signed by us, but the 30 days are up. | The customer did nothing wrong and the screen should not imply they did. |
+| `404` | Valid link, no snapshot. Redis dropped it, or the funnel was submitted. | Distinguishes "gone" from "forged" in the logs. |
+
+The route is rate-limited more tightly than anything else here (10/min per IP),
+because a free signature check is an oracle for guessing tokens.
+
+**Rotating the secret revokes every link already in an inbox.** That is the
+intended behaviour, and there is a test for it. Rotate deliberately.
+
+---
+
+## Analytics
+
+Nothing analytics-related may block the funnel. That is a rule with teeth, not
+a slogan: every call is wrapped, every failure swallowed, a blank key is a
+complete no-op, and there is an e2e that kills the endpoint outright and walks
+a customer through a step anyway.
+
+**PostHog** boots from `AnalyticsProvider`, mounted on `/quote`. Autocapture
+and session replay are on; **every input is masked**, plus anything carrying
+`.gm-mask`. `identify()` happens when a lead id exists, not on first pageview.
+`?source=` and the five `utm_*` parameters are registered as super properties,
+so every event carries them without a call site remembering to.
+
+`step_viewed` fires on every arrival at a step, including back-navigation and
+reloads — the drop-off report counts distinct lead ids per step and would
+otherwise miss anyone who came back.
+
+**Server-side.** `lead_filed` and `email_sent` are also sent from
+`/api/leads`, from the code path that actually wrote the record, with the lead
+id as the distinct id. A browser's copy can be blocked; the server's cannot.
+`email_sent` is reported with `sent: true` **or** `false` — "the lead was filed
+and the email did not go" is the failure worth being able to count, and it is
+invisible if only successes are reported.
+
+**Meta.** The pixel fires `ViewContent` per step and `Lead` on submit. When
+`META_CAPI_TOKEN` is set, `/api/leads` also posts the same `Lead` to the
+Conversions API with `event_id` set to the lead id — the pixel sends the same
+value as `eventID`, so Meta collapses the pair rather than counting the lead
+twice. Absent, the server simply does not call Meta.
+
+**Vercel Web Analytics and Speed Insights** are mounted in the root layout.
+Both no-op off Vercel; locally they log a 404 for their script, which is
+expected and harmless.
+
+**One event in the list has nowhere to fire from.** `use_location_tapped` is
+declared but never sent, because there is no "use my location" control in the
+funnel. It is left in the union so the name is reserved for when there is one.
 
 ---
 

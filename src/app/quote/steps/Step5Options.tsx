@@ -2,9 +2,11 @@
 
 import { useEffect } from 'react';
 import EducationCard from '@/components/shell/EducationCard';
+import FinishLater from '../FinishLater';
 import { STEPS, UI, OPTION_CARDS } from '@/config/copy';
 import { useQuoteStore } from '@/store/quoteStore';
 import { useQuote } from './useQuote';
+import { track } from '@/lib/analytics';
 import { looksRocky, priceQuote, rockyAdderFor, slopeAdderFor } from '@/lib/pricing';
 import { SITE, type SlopeAnswer } from '@/config/pricing';
 
@@ -154,6 +156,12 @@ export default function Step5Options() {
 
   const showClearing = SITE.vegetationClearing.enabled;
 
+  /** Record which question was answered and with what, then answer it. */
+  const choose = (which: string, value: string | boolean, apply: () => void) => {
+    track('option_selected', { which, value });
+    apply();
+  };
+
   const SLOPE_CHOICES: Array<{ answer: SlopeAnswer; label: string }> = [
     { answer: 'flat', label: UI.slopeAnswerFlat },
     { answer: 'slight', label: UI.slopeAnswerSlight },
@@ -174,14 +182,14 @@ export default function Step5Options() {
               label={UI.clearingNo}
               price={delta(against({ needsClearing: false }))}
               selected={!needsClearing}
-              onSelect={() => setNeedsClearing(false)}
+              onSelect={() => choose('clearing', false, () => setNeedsClearing(false))}
             />
             <Choice
               testId="clearing-yes"
               label={UI.clearingYes}
               price={delta(against({ needsClearing: true }))}
               selected={needsClearing}
-              onSelect={() => setNeedsClearing(true)}
+              onSelect={() => choose('clearing', true, () => setNeedsClearing(true))}
             />
           </div>
         </Question>
@@ -196,7 +204,7 @@ export default function Step5Options() {
               label={choice.label}
               price={pct(slopeAdderFor(choice.answer))}
               selected={slopeAnswer === choice.answer}
-              onSelect={() => setSlopeAnswer(choice.answer)}
+              onSelect={() => choose('slope', choice.answer, () => setSlopeAnswer(choice.answer))}
             />
           ))}
         </div>
@@ -209,14 +217,14 @@ export default function Step5Options() {
             label={UI.rockyNo}
             price={pct(rockyAdderFor(false))}
             selected={!rocky}
-            onSelect={() => setRocky(false)}
+            onSelect={() => choose('rocky', false, () => setRocky(false))}
           />
           <Choice
             testId="rocky-yes"
             label={UI.rockyYes}
             price={pct(rockyAdderFor(true))}
             selected={rocky}
-            onSelect={() => setRocky(true)}
+            onSelect={() => choose('rocky', true, () => setRocky(true))}
           />
         </div>
         {surveySaysRocky && (
@@ -232,13 +240,13 @@ export default function Step5Options() {
             testId="battery-interest-yes"
             label={UI.batteryInterestYes}
             selected={batteryInterest}
-            onSelect={() => setBatteryInterest(true)}
+            onSelect={() => choose('battery', true, () => setBatteryInterest(true))}
           />
           <Choice
             testId="battery-interest-no"
             label={UI.batteryInterestNo}
             selected={!batteryInterest}
-            onSelect={() => setBatteryInterest(false)}
+            onSelect={() => choose('battery', false, () => setBatteryInterest(false))}
           />
         </div>
         {/* No price on either button, deliberately: this question does not
@@ -247,6 +255,8 @@ export default function Step5Options() {
       </Question>
 
       <EducationCard copy={STEPS[4].education} />
+
+      <FinishLater />
     </div>
   );
 }

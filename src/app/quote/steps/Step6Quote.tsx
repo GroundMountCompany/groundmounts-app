@@ -5,6 +5,7 @@ import { useSearchParams } from 'next/navigation';
 import EducationCard from '@/components/shell/EducationCard';
 import { STEPS, UI } from '@/config/copy';
 import { useQuoteStore, clearPersistedQuote } from '@/store/quoteStore';
+import { track, trackLeadFiled } from '@/lib/analytics';
 import dynamic from 'next/dynamic';
 
 /*
@@ -120,6 +121,7 @@ export default function Step6Quote() {
     if (!ready || submitting) return;
     setSubmitting(true);
     setError(null);
+    track('unlock_tapped');
 
     const state = useQuoteStore.getState();
     const payload = buildLeadPayload(
@@ -180,6 +182,19 @@ export default function Step6Quote() {
         return;
       }
       useQuoteStore.getState().setEmailSent(payload.id);
+
+      /*
+        Both counts, once, sharing an id.
+
+        The same conversion is reported by the browser and by the server — the
+        browser's can be blocked and the server's cannot, so neither alone is
+        reliable. `payload.id` is the lead id, which is already unique per
+        submission and already idempotent server-side, so Meta and PostHog
+        both de-duplicate on it rather than counting the lead twice.
+      */
+      trackLeadFiled(payload.id, {
+        value: Math.round(((body?.priceLow ?? 0) + (body?.priceHigh ?? 0)) / 2),
+      });
 
       clearPersistedQuote();
       setDone(true);
@@ -249,6 +264,7 @@ export default function Step6Quote() {
           href={brand.calendlyUrl}
           target="_blank"
           rel="noopener noreferrer"
+          onClick={() => track('book_call_tapped')}
           className="flex h-14 w-full items-center justify-center rounded-xl bg-green-700 text-[17px] font-semibold text-white"
         >
           {UI.bookCall}

@@ -23,6 +23,9 @@ import Step4Design from './steps/Step4Design';
 import PanelStepper from './steps/PanelStepper';
 import DesignHud from '@/components/map/DesignHud';
 import FaceSouth from '@/components/map/FaceSouth';
+import DesignCoach from '@/components/map/DesignCoach';
+import { track, trackStepView } from '@/lib/analytics';
+import { useResume } from '@/lib/useResume';
 import SizeToast from '@/components/map/SizeToast';
 import Step5Options from './steps/Step5Options';
 import Step6Quote from './steps/Step6Quote';
@@ -42,6 +45,15 @@ const MAP_FIRST_STEPS = [0, 2, 3];
 
 export default function FunnelShell() {
   useStepUrl();
+  /*
+    A design coming back from an emailed link.
+
+    Runs alongside useStepUrl rather than before it: the fetch is async, so the
+    URL has already been adopted by the time the snapshot lands, and the store
+    write that follows drives the step through the ordinary store -> URL mirror
+    below. There is no ?step= on a resume link, so nothing is being overridden.
+  */
+  const resume = useResume();
   // Before sizing, so the seeded design is what gets sized. Does nothing at
   // all unless NEXT_PUBLIC_DEMO_PARAMS is set — see demoMode.ts.
   useDemoSeed();
@@ -79,6 +91,20 @@ export default function FunnelShell() {
       body.style.overflow = prev;
       documentElement.style.overflow = '';
     };
+  }, []);
+
+  // One per arrival at a step, however they got there. The funnel report is
+  // built on this event, so it has to fire on back and on reload too.
+  useEffect(() => {
+    trackStepView(step);
+  }, [step]);
+
+  /** setSnap, with the tap recorded. The sheet is a step people get stuck on. */
+  const changeSnap = useCallback((next: Snap) => {
+    setSnap((current) => {
+      if (current !== next) track('sheet_toggled', { snap: next });
+      return next;
+    });
   }, []);
 
   useEffect(() => {
@@ -192,6 +218,7 @@ export default function FunnelShell() {
             </div>
           )}
           {step === 3 && <DesignHud />}
+          {step === 3 && <DesignCoach />}
           {step === 3 && <FaceSouth />}
           {step === 3 && <SizeToast />}
           {step === 3 && (
@@ -220,12 +247,18 @@ export default function FunnelShell() {
       >
         <BottomSheet
           snap={snap}
-          onSnapChange={setSnap}
+          onSnapChange={changeSnap}
           header={header}
           peekHeader={peekHeader}
           footer={footer}
           fullHeight={!showsMap}
         >
+          {(resume === 'expired' || resume === 'invalid') && (
+            <p data-testid="resume-failed" className="mb-4 text-[17px] text-neutral-800">
+              {resume === 'expired' ? UI.resumeExpired : UI.resumeInvalid}
+            </p>
+          )}
+
           {lockNotice && (
             <div data-testid="design-locked" className="mb-4 space-y-2">
               <p className="text-[17px] text-neutral-800">{UI.designLocked}</p>

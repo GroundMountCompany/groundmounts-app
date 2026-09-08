@@ -2,6 +2,7 @@
 
 import { useMemo } from 'react';
 import EducationCard from '@/components/shell/EducationCard';
+import FinishLater from '../FinishLater';
 import { STEPS, UI } from '@/config/copy';
 import { useQuoteStore } from '@/store/quoteStore';
 import { footprintFt } from '@/lib/geo/array';
@@ -129,6 +130,8 @@ export default function Step4Design({ showStepper = true }: Step4DesignProps) {
           </>
         }
       />
+
+      <FinishLater />
     </div>
   );
 }

@@ -68,7 +68,22 @@ export const LEAD_SCHEMA = {
   'Est Annual Production kWh': 'number',
   'Curve Source': 'select',
   Azimuth: 'number',
+  /** Which partner or page sent them. Unchanged; the UTM columns sit beside it. */
   Source: 'text',
+  /**
+   * The campaign, split into its five parts rather than concatenated.
+   *
+   * One column each so the owner can group by medium or by campaign in
+   * Airtable without parsing a string, which is the whole reason for asking
+   * for them separately.
+   */
+  'UTM Source': 'text',
+  'UTM Medium': 'text',
+  'UTM Campaign': 'text',
+  'UTM Term': 'text',
+  'UTM Content': 'text',
+  /** They asked for their design by email so they could come back to it. */
+  'Resume Requested': 'checkbox',
   Status: 'select',
   'Map Screenshot': 'attachment',
 } as const satisfies Record<string, FieldKind>;

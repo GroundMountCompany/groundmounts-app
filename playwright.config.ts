@@ -226,6 +226,26 @@ export default defineConfig({
       */
       NEXT_PUBLIC_DEMO_PARAMS: process.env.E2E_DEMO_PARAMS ?? '1',
 
+      /*
+        Analytics on by default, pointed at this server rather than at PostHog.
+
+        Two things at once. The key is a literal inlined at build time, exactly
+        like the flag above, so the on and off states are two builds and there
+        is no runtime signal that separates them — `E2E_POSTHOG_KEY= npx
+        playwright test -g "analytics is off"` on a spare port runs the other
+        half. See the RUNBOOK.
+
+        And the host is local, so nothing in the suite ever reaches
+        us.i.posthog.com: the requests land on this server as 404s, which is
+        harmless, offline, and interceptable with page.route.
+      */
+      NEXT_PUBLIC_POSTHOG_KEY: process.env.E2E_POSTHOG_KEY ?? 'phc_e2e_dummy',
+      NEXT_PUBLIC_POSTHOG_HOST: `${BASE_URL}/__posthog`,
+
+      // The resume links are signed with a known secret so the suite can forge
+      // an expired one and a tampered one without reaching for the real key.
+      RESUME_SECRET: process.env.E2E_RESUME_SECRET ?? 'e2e-resume-secret',
+
       // A real token when the machine has one, otherwise a dummy so the mocked
       // smoke suite still runs on a clean checkout with no secrets.
       NEXT_PUBLIC_MAPBOX_TOKEN: realToken ?? DUMMY_TOKEN,

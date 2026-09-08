@@ -2,6 +2,7 @@
 
 import Image from 'next/image';
 import EducationCard from '@/components/shell/EducationCard';
+import FinishLater from '../FinishLater';
 import { STEPS, UI, METER_EXAMPLES } from '@/config/copy';
 import { useQuoteStore } from '@/store/quoteStore';
 
@@ -36,6 +37,8 @@ export default function Step3Meter() {
       </p>
 
       <EducationCard copy={STEPS[2].education} />
+
+      <FinishLater />
     </div>
   );
 }

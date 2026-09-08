@@ -10,10 +10,14 @@ import type { PanelTier } from '@/config/pricing';
 import type { SlopeTier } from '@/lib/slope';
 import { TX_FALLBACK_CURVE, type ProductionCurve } from '@/lib/production';
 import { resetSiteIntel } from '@/lib/siteIntel';
+import type { Utm } from '@/lib/utm';
 import type { BillMonth } from '@/lib/billSchema';
 
 /** none -> reading -> review -> confirmed, with failure returning to none. */
 export type BillPhase = 'none' | 'reading' | 'review' | 'confirmed';
+
+/** Which way into step 2 the customer picked. Neither is the default. */
+export type BillPath = 'upload' | 'manual' | null;
 
 /**
  * Whether the panel count still belongs to the sizing maths.
@@ -137,6 +141,31 @@ export interface QuoteState {
   /** What was read but not yet confirmed, so a refresh mid-review keeps it. */
   billDraft: BillMonth[] | null;
   billDraftRate: number | null;
+  /**
+   * Which of the two paths through step 2 the customer took.
+   *
+   * `null` is nobody has chosen yet, which is what the step opens on: two
+   * equal offers and no default. Owner QA on first-timers — the upload button
+   * sat above the fields, so it read as the real way and typing read as
+   * giving up. Neither is.
+   */
+  billPath: BillPath;
+  /**
+   * Whether the customer has ever moved the array themselves.
+   *
+   * Drives the pulse on the design step: the array breathes until they touch
+   * it, and then stops for good. Persisted, so a reload does not start
+   * flashing at somebody who has already worked out what it is for.
+   */
+  arrayTouched: boolean;
+  /**
+   * The campaign that sent them, off the landing URL.
+   *
+   * Kept in the store rather than re-read at submit time: the parameters are
+   * stripped as the funnel advances, and the lead is filed several steps and
+   * possibly a reload later.
+   */
+  utm: Utm;
   slopePercent: number | null;
   slopeTier: SlopeTier;
   /**
@@ -215,6 +244,9 @@ interface QuoteActions {
   clearBillMonths: () => void;
   /** Where the upload has got to. Persisted so a refresh does not lose it. */
   setBillPhase: (phase: BillPhase) => void;
+  setBillPath: (path: BillPath) => void;
+  markArrayTouched: () => void;
+  setUtm: (utm: Utm) => void;
   /** What we read, before the customer has confirmed it. */
   setBillDraft: (months: BillMonth[], ratePerKwh: number | null) => void;
   setHighestValue: (v: number) => void;
@@ -301,6 +333,9 @@ const initialState: QuoteState = {
   billPhase: 'none',
   billDraft: null,
   billDraftRate: null,
+  billPath: null,
+  arrayTouched: false,
+  utm: {},
   slopePercent: null,
   slopeTier: 'Unknown',
   slopeSource: null,
@@ -363,9 +398,18 @@ export const useQuoteStore = create<QuoteStore>()(
           billDraft: null,
           billDraftRate: null,
           billPhase: 'none',
+          // The path they took stays. Throwing away a bill is a reason to be
+          // offered the two choices again, not to be dropped back to a screen
+          // with nothing on it.
         }),
 
       setBillPhase: (billPhase) => set({ billPhase }),
+      setBillPath: (billPath) => set({ billPath }),
+      markArrayTouched: () =>
+        set((s) => (s.arrayTouched ? s : { arrayTouched: true })),
+      // Merged, not replaced: a customer who lands with ?utm_source= and then
+      // reloads without it should keep the source that brought them.
+      setUtm: (utm) => set((s) => ({ utm: { ...s.utm, ...utm } })),
       setBillDraft: (billDraft, billDraftRate) =>
         set({ billDraft, billDraftRate, billPhase: 'review' }),
       setHighestValue: (highestValue) => set({ highestValue }),
@@ -516,6 +560,9 @@ export const useQuoteStore = create<QuoteStore>()(
         billPhase: state.billPhase,
         billDraft: state.billDraft,
         billDraftRate: state.billDraftRate,
+        billPath: state.billPath,
+        arrayTouched: state.arrayTouched,
+        utm: state.utm,
         slopePercent: state.slopePercent,
         slopeTier: state.slopeTier,
         slopeSource: state.slopeSource,

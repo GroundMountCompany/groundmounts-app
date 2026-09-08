@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from 'react';
 import { useQuoteStore, clearPersistedQuote } from '@/store/quoteStore';
+import { clearCoachSeen } from './coach';
 
 export const MAX_STEP = 5;
 
@@ -96,6 +97,9 @@ export function useStepUrl() {
 
     useQuoteStore.getState().resetQuote();
     clearPersistedQuote();
+    // The coach is keyed separately from the funnel, so wiping the funnel does
+    // not wipe it — but ?reset=1 means "show me this as a first-timer sees it".
+    clearCoachSeen();
 
     url.searchParams.delete('reset');
     url.searchParams.set('step', '0');

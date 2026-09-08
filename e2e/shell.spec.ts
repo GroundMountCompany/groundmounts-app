@@ -760,6 +760,25 @@ test('the options step asks four questions about the land', async ({ page }) => 
 test('the ground answers change the price, and the battery question does not', async ({
   page,
 }) => {
+  /*
+    Nine production page loads to make four price comparisons.
+
+    Each answer has to be set on step 5 and read on step 6, and the reading has
+    to survive a navigation or it would be reading a number the store still had
+    in memory rather than one the pricing produced. That is the test; the cost
+    is inherent to it.
+
+    Phase 11 added a fixed per-load cost — the analytics library boots on every
+    page — and that was enough to tip a test already close to the line. Measured
+    solo on this machine: 1.0s with analytics off, 1.3s with it on. Under CI's
+    four workers that 30% lands on a budget with little headroom left, and it
+    failed all three attempts rather than one, which is a budget and not a race.
+
+    test.slow() triples it. Sizing the budget to the work, the same call and the
+    same reasoning as the 44px audit below.
+  */
+  test.slow();
+
   await page.addInitScript((payload) => {
     if (window.localStorage.getItem('gmq:v3')) return;
     window.localStorage.setItem('gmq:v3', JSON.stringify(payload));

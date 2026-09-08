@@ -104,7 +104,9 @@ export function projectResults(input: ResultsInput): ResultsModel {
   const monthlyBill = Math.max(0, input.monthlyBillUsd);
   const systemPrice = Math.max(0, input.systemPriceUsd);
   // A design covering more than everything still only saves what is on the
-  // bill: the utility does not pay them for the surplus in this model.
+  // bill: the utility does not pay them for the surplus in this model. This
+  // cap is the residual-bill calculation's, not the customer's answer — see
+  // displayOffsetPct, which prints what they actually chose.
   const offset = Math.min(1, Math.max(0, input.offsetFraction));
 
   const rows: ResultsYear[] = [];
@@ -151,4 +153,17 @@ export function projectResults(input: ResultsInput): ResultsModel {
     inflationPct: input.inflationPct,
     assumptions,
   };
+}
+
+/**
+ * The offset to print, as the customer set it.
+ *
+ * projectResults caps at 100% because a surplus earns nothing in this model,
+ * and the assumptions panel was reusing that cap for its label — so somebody
+ * who chose 110% was shown 100% and told that was their input. It was not.
+ * The number they picked goes on screen; the cap stays where it belongs, in
+ * the arithmetic.
+ */
+export function displayOffsetPct(fraction: number): number {
+  return Math.round(Math.max(0, fraction) * 100);
 }

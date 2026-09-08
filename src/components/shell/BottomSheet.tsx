@@ -3,12 +3,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { UI } from '@/config/copy';
 
-export type Snap = 'peek' | 'half' | 'full';
+export type Snap = 'peek' | 'full';
 
 /** Sheet height at each snap point, as a fraction of the viewport. */
 const SNAP_FRACTION: Record<Snap, number> = {
   peek: 0,
-  half: 0.5,
   full: 0.88,
 };
 
@@ -19,10 +18,18 @@ const SNAP_FRACTION: Record<Snap, number> = {
  */
 const MIN_PEEK_PX = 120;
 
-const ORDER: Snap[] = ['peek', 'half', 'full'];
-
 /** Movement beyond this counts as a drag rather than a tap. */
 const DRAG_THRESHOLD_PX = 6;
+
+/**
+ * How far the handle has to travel before a drag changes the snap point.
+ *
+ * There are only two states now, so this is a direction test rather than a
+ * nearest-neighbour search: past this, the sheet goes wherever the finger was
+ * heading. Below it, it goes back where it was. Either way it lands on one of
+ * the two, never between them.
+ */
+const SNAP_THRESHOLD_PX = 40;
 
 /** Rounding slack so the footer never lands a pixel below the viewport. */
 const PEEK_SLACK_PX = 8;
@@ -58,8 +65,34 @@ function heightFor(snap: Snap, viewport: number, peekPx: number): number {
   return snap === 'peek' ? peekPx : Math.round(viewport * SNAP_FRACTION[snap]);
 }
 
+/** Points where the sheet is going, not where it is. */
+function Chevron({ up }: { up: boolean }) {
+  return (
+    <svg
+      width="12"
+      height="8"
+      viewBox="0 0 12 8"
+      fill="none"
+      aria-hidden="true"
+      className={up ? '' : 'rotate-180'}
+    >
+      <path
+        d="M1 6.5 6 1.5l5 5"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 /**
- * Bottom sheet with peek / half / full snap points.
+ * Bottom sheet with two snap points: peek and full.
+ *
+ * There used to be a half point between them. On a phone it was the state
+ * nobody wanted: too tall to see the map, too short to read the step, and a
+ * drag meant to open the sheet stopped there. Two states, one toggle.
  *
  * Dragging is bound to the grab handle only, never the sheet body or the map.
  * That is what keeps the two gestures from being confused: the map owns
@@ -197,19 +230,16 @@ export default function BottomSheet({
         return;
       }
 
-      // Snap from the release coordinate, not from the last rendered height:
-      // the two can differ by a frame, which was enough to land on the wrong
-      // snap point on a fast flick.
-      const released = Math.max(
-        peekPx,
-        Math.min(start.height + (start.y - e.clientY), viewport * SNAP_FRACTION.full)
-      );
-      const nearest = ORDER.reduce((best, candidate) =>
-        Math.abs(heightFor(candidate, viewport, peekPx) - released) <
-        Math.abs(heightFor(best, viewport, peekPx) - released)
-          ? candidate
-          : best
-      );
+      // Measure from the release coordinate, not from the last rendered
+      // height: the two can differ by a frame, which was enough to land on the
+      // wrong snap point on a fast flick.
+      const travel = start.y - e.clientY;
+      // Direction, not proximity. A nearest-snap search over two points would
+      // put the switch at the midpoint of an 88%-tall sheet — a 300px pull
+      // that does nothing, which is what "never landing in between" is really
+      // asking about.
+      const nearest: Snap =
+        Math.abs(travel) > SNAP_THRESHOLD_PX ? (travel > 0 ? 'full' : 'peek') : snap;
       setDragPx(null);
       try {
         (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
@@ -218,7 +248,7 @@ export default function BottomSheet({
       }
       if (nearest !== snap) onSnapChange(nearest);
     },
-    [viewport, peekPx, snap, onSnapChange]
+    [viewport, snap, onSnapChange]
   );
 
   // Track a sticky button inside the content so its height can be reserved.
@@ -275,16 +305,16 @@ export default function BottomSheet({
   }, []);
 
   /**
-   * Tap cycles the sheet open. Suppressed after a drag: the click that follows
-   * a pointer sequence used to fire straight after the snap and undo it, so a
-   * drag to half immediately became full.
+   * Tap toggles the sheet. Suppressed after a drag: the click that follows a
+   * pointer sequence used to fire straight after the snap and undo it, so a
+   * drag opening the sheet immediately closed it again.
    */
   const onClick = () => {
     if (dragged.current) {
       dragged.current = false;
       return;
     }
-    onSnapChange(snap === 'full' ? 'peek' : snap === 'half' ? 'full' : 'half');
+    onSnapChange(snap === 'full' ? 'peek' : 'full');
   };
 
   return (
@@ -316,15 +346,24 @@ export default function BottomSheet({
           <button
             type="button"
             data-testid="sheet-handle"
-            aria-label={UI.sheetHandleLabel}
             onPointerDown={onPointerDown}
             onPointerMove={onPointerMove}
             onPointerUp={onPointerUp}
             onPointerCancel={onPointerUp}
             onClick={onClick}
-            className="flex h-12 w-full shrink-0 touch-none items-center justify-center md:hidden"
+            className="flex min-h-[56px] w-full shrink-0 touch-none flex-col items-center justify-center gap-1 pt-2 md:hidden"
           >
             <span className="h-1.5 w-12 rounded-full bg-neutral-300" />
+            {/* The grabber alone never said what pulling it would do. Owner QA
+                on a phone: people tapped the map instead, looking for a way
+                back to it. */}
+            <span
+              data-testid="sheet-handle-label"
+              className="flex items-center gap-1 text-[15px] font-medium text-neutral-600"
+            >
+              <Chevron up={snap === 'peek'} />
+              {snap === 'peek' ? UI.sheetHandlePeek : UI.sheetHandleFull}
+            </span>
           </button>
         )}
 

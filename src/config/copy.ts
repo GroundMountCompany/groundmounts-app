@@ -319,6 +319,8 @@ export const UI = {
   resultsAssumptionsTitle: 'Our assumptions',
   resultsAssumptionBill: 'Your monthly bill, as you entered it',
   resultsAssumptionOffset: 'Share of your power this array covers',
+  resultsOffsetCushion:
+    'Anything past 100% is a cushion for cloudy years and future use. The payback math counts 100%.',
   resultsAssumptionInflation: 'Utility rate rise each year',
   resultsAssumptionDegradation: 'Panel output lost each year',
   resultsAssumptionHorizon: 'Years compared',
@@ -422,7 +424,8 @@ export const UI = {
 
   // Shell
   sheetLabel: 'Controls',
-  sheetHandleLabel: 'Resize controls',
+  sheetHandlePeek: 'Details',
+  sheetHandleFull: 'Back to map',
   progressLabel: 'Progress',
   progressNotYet: ' (not yet)',
   rotateHandle: 'Turn',

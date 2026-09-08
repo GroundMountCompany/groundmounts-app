@@ -314,21 +314,109 @@ test('sheet drags land on exact snap points and the map does not move', async ({
   expect(before.height, 'the map had no geometry to preserve').toBeGreaterThan(0);
   await expect(sheet).toHaveAttribute('data-snap', 'peek');
 
-  // peek -> half. A tap-cycle firing after the drag used to overshoot to full.
+  // Two states, and a drag past the threshold reaches the far one in one go.
+  // The half point used to sit here: a 260px pull opened the sheet halfway and
+  // the customer had to pull again.
   await dragHandle(-260);
-  await expect(sheet).toHaveAttribute('data-snap', 'half');
-
-  // half -> full
-  await dragHandle(-300);
   await expect(sheet).toHaveAttribute('data-snap', 'full');
 
-  // full -> peek, in one long drag down
+  // Down again, in one drag, from a drag that does not travel the whole way.
+  await dragHandle(200);
+  await expect(sheet).toHaveAttribute('data-snap', 'peek');
+
+  // A short drag is not a snap change. Under the 40px threshold it goes back
+  // where it came from rather than landing between the two.
+  await dragHandle(-25);
+  await expect(sheet).toHaveAttribute('data-snap', 'peek');
+
+  // And just past the threshold is.
+  await dragHandle(-55);
+  await expect(sheet).toHaveAttribute('data-snap', 'full');
+
+  await dragHandle(-400);
+  await expect(sheet, 'a drag up while already full moved it somewhere else').toHaveAttribute(
+    'data-snap',
+    'full'
+  );
+
   await dragHandle(600);
   await expect(sheet).toHaveAttribute('data-snap', 'peek');
 
   // Through all of it the map kept its own geometry and the page never scrolled.
   expect(await mapRect()).toEqual(before);
   expect(await scrollTop(page)).toBe(0);
+});
+
+test('the sheet has two states on every map step, and one tap reaches full', async ({
+  page,
+}, testInfo) => {
+  test.skip(!testInfo.project.name.startsWith('mobile'), 'phone layout');
+
+  await page.addInitScript((payload) => {
+    if (window.localStorage.getItem('gmq:v3')) return;
+    window.localStorage.setItem('gmq:v3', JSON.stringify(payload));
+  }, siteCurveSeed(3));
+  await mockGeocoding(page);
+
+  const sheet = page.getByTestId('bottom-sheet');
+  const handle = page.getByTestId('sheet-handle');
+  const label = page.getByTestId('sheet-handle-label');
+
+  // Steps 1, 3 and 4 in the owner's numbering — the ones with a map behind the
+  // sheet, and the only ones with snap points at all.
+  for (const step of [0, 2, 3]) {
+    await gotoStep(page, step);
+    await waitForSheet(page);
+
+    // Opens on the map, so the pin, meter or array is not under the sheet.
+    await expect(sheet, `step ${step} did not open at peek`).toHaveAttribute('data-snap', 'peek');
+    await expect(label).toHaveText('Details');
+
+    // One tap, all the way. There is no half to stop at.
+    await handle.click();
+    await expect(sheet, `step ${step} needed more than one tap to open`).toHaveAttribute(
+      'data-snap',
+      'full'
+    );
+    await expect(label).toHaveText('Back to map');
+
+    // And one tap back.
+    await handle.click();
+    await expect(sheet, `step ${step} did not close in one tap`).toHaveAttribute(
+      'data-snap',
+      'peek'
+    );
+    await expect(label).toHaveText('Details');
+
+    // Ten taps can only ever produce those two values, never a third.
+    const seen = new Set<string>();
+    for (let i = 0; i < 10; i++) {
+      await handle.click();
+      seen.add((await sheet.getAttribute('data-snap')) ?? '');
+    }
+    expect([...seen].sort(), `step ${step} reached a snap point that should not exist`).toEqual([
+      'full',
+      'peek',
+    ]);
+  }
+});
+
+test('a step with no map has no handle to pull', async ({ page }, testInfo) => {
+  test.skip(!testInfo.project.name.startsWith('mobile'), 'phone layout');
+
+  await page.addInitScript((payload) => {
+    if (window.localStorage.getItem('gmq:v3')) return;
+    window.localStorage.setItem('gmq:v3', JSON.stringify(payload));
+  }, siteCurveSeed(1));
+  await mockGeocoding(page);
+
+  // Steps 2 and 5 fill the screen already; a handle there resizes nothing.
+  for (const step of [1, 4]) {
+    await gotoStep(page, step);
+    await waitForSheet(page);
+    await expect(page.getByTestId('bottom-sheet')).toHaveAttribute('data-snap', 'full');
+    await expect(page.getByTestId('sheet-handle')).toHaveCount(0);
+  }
 });
 
 test('the phone back button goes back one step, not out of the page', async ({ page }) => {
@@ -369,7 +457,8 @@ test('the primary button is on screen at every snap point', async ({ page }, tes
 
   // The regression this guards: peek height was a fixed 168px, so growing the
   // peek row pushed the button below the fold and the customer had to hunt.
-  for (const snap of ['peek', 'half', 'full'] as const) {
+  for (const snap of ['peek', 'full'] as const) {
+    // One tap, not two: the handle toggles rather than cycling through a half.
     if (snap !== 'peek') await page.getByTestId('sheet-handle').click();
     await expect(page.getByTestId('bottom-sheet')).toHaveAttribute('data-snap', snap);
 
@@ -607,6 +696,47 @@ test('the options step asks four questions about the land', async ({ page }) => 
   await expect(page.getByTestId('rocky-yes')).toBeVisible();
   await expect(page.getByTestId('battery-interest-yes')).toBeVisible();
   await expect(page.getByTestId('battery-interest-no')).toBeVisible();
+
+  /*
+    Slope and rocky are percentage adders on the groundwork, and they used to
+    be labelled in dollars. That made the figure on a button move when an
+    unrelated answer changed — pressing "Rocky" re-priced all three slope
+    buttons — so the labels now read the percentage the config holds. Land
+    clearing is a flat charge, so it keeps its dollars.
+
+    Read from pricing.ts rather than hard-coded: the whole point is that the
+    label cannot drift from the number that prices the job.
+  */
+  const asPct = (fraction: number) => (fraction === 0 ? 'Included' : `+${Math.round(fraction * 100)}%`);
+
+  await expect(page.getByTestId('slope-answer-flat')).toContainText(
+    asPct(SITE.slopeAnswers.flat)
+  );
+  await expect(page.getByTestId('slope-answer-slight')).toContainText(
+    asPct(SITE.slopeAnswers.slight)
+  );
+  await expect(page.getByTestId('slope-answer-big')).toContainText(asPct(SITE.slopeAnswers.big));
+  await expect(page.getByTestId('rocky-no')).toContainText(asPct(0));
+  await expect(page.getByTestId('rocky-yes')).toContainText(asPct(SITE.rockyAdderPct));
+
+  // The seeded config, so a silent edit to it shows up here rather than
+  // quietly re-pointing the assertions above at whatever it now says.
+  expect({
+    slight: SITE.slopeAnswers.slight,
+    big: SITE.slopeAnswers.big,
+    rocky: SITE.rockyAdderPct,
+  }).toEqual({ slight: 0.05, big: 0.1, rocky: 0.1 });
+
+  // Not a percentage: a flat charge belongs in dollars.
+  if (SITE.vegetationClearing.enabled) {
+    await expect(page.getByTestId('clearing-yes')).toContainText('$');
+    await expect(page.getByTestId('clearing-yes')).not.toContainText('%');
+  }
+
+  // And the dollar figure on a percentage button is gone for good.
+  for (const id of ['slope-answer-slight', 'slope-answer-big', 'rocky-yes']) {
+    await expect(page.getByTestId(id), `${id} still prices in dollars`).not.toContainText('$');
+  }
 });
 
 test('the ground answers change the price, and the battery question does not', async ({
@@ -2002,6 +2132,90 @@ test('the assumptions are on the page, not just in our heads', async ({ page }) 
   await expect(page.getByTestId('results-assumptions')).toHaveCount(0);
 });
 
+test('an offset above 100% is reported as the customer set it', async ({ page }) => {
+  /*
+    Owner QA on production: the slider was set to 110% and the assumptions
+    panel said 100%. The model caps at 100 because a surplus earns nothing in
+    this model, and the panel was reusing that cap as the label — printing the
+    arithmetic's number back as though it were the customer's answer.
+  */
+  // Guarded: addInitScript runs on every navigation, and an unconditional
+  // write re-seeded the store on the way to step 6 — putting the offset back
+  // to 100 and making this test pass or fail for the wrong reason.
+  await page.addInitScript((payload) => {
+    if (window.localStorage.getItem('gmq:v3')) return;
+    window.localStorage.setItem('gmq:v3', JSON.stringify(payload));
+  }, siteCurveSeed(1));
+
+  await page.route('**/api/leads', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        ok: true,
+        leadFiled: true,
+        emailSent: true,
+        priceLow: 29_799,
+        priceHigh: 34_981,
+        lineItems: [{ key: 'equipment', label: 'Panels and installation', amount: 29_799 }],
+      }),
+    })
+  );
+  await mockGeocoding(page);
+
+  // Step 2 in the owner's numbering. Set on the slider itself rather than
+  // seeded, so this covers the path the customer actually takes.
+  await gotoStep(page, 1);
+  await expect(page.getByTestId('offset-value')).toHaveText('100%');
+
+  const thumb = page.getByRole('slider', { name: 'Offset percentage' });
+  await thumb.focus();
+  await thumb.press('ArrowRight');
+  await thumb.press('ArrowRight');
+  await expect(page.getByTestId('offset-value'), 'the slider did not reach 110').toHaveText(
+    '110%'
+  );
+
+  await gotoStep(page, 5);
+  await fillAndSubmit(page);
+  await expect(page.getByTestId('success-screen')).toBeVisible({ timeout: 15_000 });
+
+  await expect(page.getByTestId('results-assumptions-toggle')).toBeVisible({
+    timeout: RESULTS_CHUNK_TIMEOUT,
+  });
+  await page.getByTestId('results-assumptions-toggle').click();
+
+  // The row, read exactly: toContainText('110%') would also pass on "100%"
+  // sitting somewhere else in the panel.
+  const offsetRow = page
+    .getByTestId('results-assumptions')
+    .locator('div', { hasText: 'Share of your power this array covers' })
+    .last();
+  await expect(offsetRow.locator('dd')).toHaveText('110%');
+
+  // And the cap is stated rather than silently applied.
+  await expect(page.getByTestId('results-offset-cushion')).toContainText(
+    'The payback math counts 100%.'
+  );
+});
+
+test('an ordinary offset says nothing about a cushion', async ({ page }) => {
+  await page.addInitScript(
+    (payload) => window.localStorage.setItem('gmq:v3', JSON.stringify(payload)),
+    contactStepSeed('b2c3d4e5-6f7a-4b8c-9d1e-2f3a4b5c6d7e')
+  );
+
+  await submitWithServerPrice(page, 29_799, 34_981);
+  await expect(page.getByTestId('results-assumptions-toggle')).toBeVisible({
+    timeout: RESULTS_CHUNK_TIMEOUT,
+  });
+  await page.getByTestId('results-assumptions-toggle').click();
+
+  // The seed is at 100, so the note has nothing to explain.
+  await expect(page.getByTestId('results-assumptions')).toContainText('100%');
+  await expect(page.getByTestId('results-offset-cushion')).toHaveCount(0);
+});
+
 test('a filed lead restores read-only contact details, and Start over clears them', async ({
   page,
 }) => {
@@ -2262,7 +2476,7 @@ test('the address suggestions clear the sheet and the keyboard', async ({ page }
   // Start with the sheet pulled up, which is where the owner found it: the
   // list has to make its own room rather than assume it.
   await page.getByTestId('sheet-handle').click();
-  await expect(page.getByTestId('bottom-sheet')).toHaveAttribute('data-snap', 'half');
+  await expect(page.getByTestId('bottom-sheet')).toHaveAttribute('data-snap', 'full');
 
   await page.locator('#address').click();
   await page.locator('#address').fill('123 Main St');

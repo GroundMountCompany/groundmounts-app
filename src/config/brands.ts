@@ -21,7 +21,6 @@ export type BrandConfig = {
   // Contact
   phone: string;
   email: string;
-  calendlyUrl: string;
 
   /**
    * The From address on the customer's quote email.
@@ -59,7 +58,6 @@ export const brands: Record<string, BrandConfig> = {
     email: "info@groundmounts.com",
     fromEmail: "The Ground Mount Company <quotes@groundmounts.com>",
     replyTo: "info@groundmounts.com",
-    calendlyUrl: "https://calendly.com/groundmounts/consultation",
     headline: "Design Your Ground Mount System",
     subheadline: "Skip the roof. Own your power.",
     trustBadges: ["Licensed Electrician", "25-Year Warranty", "100+ Installs", "No Roof Damage"],
@@ -89,7 +87,6 @@ export const brands: Record<string, BrandConfig> = {
     email: "info@groundmounts.com",
     fromEmail: "Ground Mount Solar <quotes@groundmounts.com>",
     replyTo: "info@groundmounts.com",
-    calendlyUrl: "https://calendly.com/groundmounts/consultation",
     headline: "Design your ground mount system",
     subheadline: "Plan your installation and get a ballpark price",
     trustBadges: ["No Roof Damage", "Optimal Sun Angle", "25-Year Warranty", "Texas Local"],

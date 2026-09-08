@@ -100,6 +100,280 @@ async function query(sql: string): Promise<QueryResult> {
 
 const num = (v: unknown): number => (Number.isFinite(Number(v)) ? Number(v) : 0);
 
+// --- Airtable ---------------------------------------------------------------
+
+interface LeadRecord {
+  id: string;
+  fields: Record<string, unknown>;
+}
+
+/**
+ * Every lead in the window, one page at a time.
+ *
+ * The reporting reads Airtable directly rather than going through
+ * `src/lib/airtable.ts`: that module writes, and its one exported call is an
+ * upsert. A report has no business importing something that can PATCH the
+ * owner's base.
+ *
+ * `filterByFormula` on the created time rather than fetching everything and
+ * filtering here — the base grows and the pages do not.
+ */
+async function fetchLeads(days: number): Promise<LeadRecord[]> {
+  const key = process.env.AIRTABLE_API_KEY?.trim();
+  const base = process.env.AIRTABLE_BASE_ID?.trim();
+  if (!key || !base) return [];
+
+  const since = new Date(Date.now() - days * 86_400_000).toISOString();
+  const out: LeadRecord[] = [];
+  let offset: string | undefined;
+
+  do {
+    const url = new URL(`https://api.airtable.com/v0/${base}/Leads`);
+    url.searchParams.set('pageSize', '100');
+    url.searchParams.set('filterByFormula', `IS_AFTER(CREATED_TIME(), '${since}')`);
+    if (offset) url.searchParams.set('offset', offset);
+
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${key}` } });
+    if (!res.ok) {
+      throw new Error(`Airtable ${res.status}: ${(await res.text()).slice(0, 200)}`);
+    }
+    const json = (await res.json()) as { records?: LeadRecord[]; offset?: string };
+    out.push(...(json.records ?? []));
+    offset = json.offset;
+  } while (offset);
+
+  return out;
+}
+
+/** The middle value. Returns null for an empty set rather than 0, which lies. */
+function median(values: number[]): number | null {
+  if (!values.length) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+}
+
+/** The value below which `p` of the set falls. */
+function percentile(values: number[], p: number): number | null {
+  if (!values.length) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  const index = Math.min(sorted.length - 1, Math.max(0, Math.round((sorted.length - 1) * p)));
+  return sorted[index];
+}
+
+const signedPct = (fraction: number): string =>
+  `${fraction >= 0 ? '+' : ''}${(fraction * 100).toFixed(1)}%`;
+
+/**
+ * Fewer than this and the answer is noise dressed as a number.
+ *
+ * Five is the owner's figure. It is low, and deliberately so — the point of
+ * the section is to start being able to see the error, not to publish it.
+ */
+const MIN_ACCURACY_RECORDS = 5;
+
+/**
+ * How wrong the estimate was, once somebody went and looked.
+ *
+ * `Actual Quote` and `Actual Trench Ft` are filled in by the owner after a
+ * site visit and by nothing else — no code path writes them, which is the
+ * whole point: a column the app could write would eventually be written by the
+ * app, and then it would be measuring itself.
+ *
+ * Reported as a signed fraction of the actual, so "+12%" reads as "we quoted
+ * twelve per cent high". The spread is the 10th and 90th percentile rather
+ * than a standard deviation: with a handful of records the distribution is not
+ * normal and nobody should pretend it is.
+ */
+async function estimateAccuracy(days: number): Promise<string> {
+  let leads: LeadRecord[];
+  try {
+    leads = await fetchLeads(days);
+  } catch (error) {
+    return `_Airtable could not be read: ${error instanceof Error ? error.message : error}_`;
+  }
+
+  const priced = leads
+    .map((r) => {
+      const low = num(r.fields['Price Low']);
+      const high = num(r.fields['Price High']);
+      const actual = num(r.fields['Actual Quote']);
+      // The midpoint is the estimate the server filed; low and high are that
+      // figure spread either side by a fixed percentage.
+      return { estimate: (low + high) / 2, actual };
+    })
+    .filter((r) => r.estimate > 0 && r.actual > 0)
+    .map((r) => (r.estimate - r.actual) / r.actual);
+
+  const trench = leads
+    .map((r) => ({
+      estimate: num(r.fields['Trenching Distance ft']),
+      actual: num(r.fields['Actual Trench Ft']),
+    }))
+    .filter((r) => r.estimate > 0 && r.actual > 0)
+    .map((r) => (r.estimate - r.actual) / r.actual);
+
+  const lines: string[] = [];
+
+  for (const [label, set] of [
+    ['Price', priced],
+    ['Trench feet', trench],
+  ] as const) {
+    if (set.length < MIN_ACCURACY_RECORDS) {
+      lines.push(
+        `- **${label}:** not enough data — ${set.length} of ${MIN_ACCURACY_RECORDS} needed.`
+      );
+      continue;
+    }
+    const mid = median(set)!;
+    const low = percentile(set, 0.1)!;
+    const high = percentile(set, 0.9)!;
+    lines.push(
+      `- **${label}:** median ${signedPct(mid)}, ` +
+        `10th-90th ${signedPct(low)} to ${signedPct(high)} (n=${set.length}).`
+    );
+  }
+
+  lines.push('');
+  lines.push(
+    '> Positive means the estimate was **above** what the job actually came to. ' +
+      'Percentiles rather than a standard deviation: with this few records the ' +
+      'distribution is not normal and should not be described as if it were.'
+  );
+  return lines.join('\n');
+}
+
+/**
+ * Where the leads came from, and what became of them.
+ *
+ * Source and UTM Source are separate columns and separate questions — `source`
+ * is which partner funnel they walked through, `utm_source` is which ad paid
+ * for it — so this reports both rather than merging them into a guess.
+ */
+async function outcomesBySource(days: number): Promise<string> {
+  let leads: LeadRecord[];
+  try {
+    leads = await fetchLeads(days);
+  } catch (error) {
+    return `_Airtable could not be read: ${error instanceof Error ? error.message : error}_`;
+  }
+  if (!leads.length) return '_No leads in this window._';
+
+  const statuses = [...new Set(leads.map((r) => String(r.fields.Status ?? 'unset')))].sort();
+
+  const table = (column: string, title: string): string => {
+    const byKey = new Map<string, Map<string, number>>();
+    for (const record of leads) {
+      const key = String(record.fields[column] ?? '(none)') || '(none)';
+      const status = String(record.fields.Status ?? 'unset');
+      const row = byKey.get(key) ?? new Map<string, number>();
+      row.set(status, (row.get(status) ?? 0) + 1);
+      byKey.set(key, row);
+    }
+
+    const header = `| ${title} | ${statuses.join(' | ')} | Total |`;
+    const rule = `| --- | ${statuses.map(() => '---:').join(' | ')} | ---: |`;
+    const rows = [...byKey.entries()]
+      .map(([key, counts]) => {
+        const total = [...counts.values()].reduce((a, b) => a + b, 0);
+        return { key, counts, total };
+      })
+      .sort((a, b) => b.total - a.total)
+      .map(
+        ({ key, counts, total }) =>
+          `| \`${key}\` | ${statuses.map((s) => counts.get(s) ?? 0).join(' | ')} | ${total} |`
+      );
+
+    return [header, rule, ...rows].join('\n');
+  };
+
+  return [table('Source', 'Source'), '', table('UTM Source', 'UTM Source')].join('\n');
+}
+
+/**
+ * What broke, and where people gave up.
+ *
+ * Two questions that belong together: an abandon with an exception a moment
+ * before it is a bug, and an abandon without one is the screen being wrong.
+ * Separating them into different sections would mean nobody ever looked at
+ * both at once.
+ */
+async function errorsAndAbandons(days: number): Promise<string> {
+  const exceptions = (
+    await query(`
+      SELECT
+        concat(
+          coalesce(toString(properties.$browser), 'unknown'),
+          ' / ',
+          coalesce(toString(properties.$device_type), 'unknown')
+        ) AS where_,
+        coalesce(toString(properties.$exception_message), '(no message)') AS message,
+        count() AS n
+      FROM events
+      WHERE event = '$exception' AND timestamp > now() - INTERVAL ${days} DAY
+      GROUP BY where_, message
+      ORDER BY n DESC
+      LIMIT 15
+    `)
+  ).results;
+
+  /*
+    The last thing somebody did before they stopped.
+
+    Restricted to funnels that reached step 4 — earlier than that an abandon is
+    somebody who was never going to finish, and the interesting ones are the
+    people who drew an array and then did not send it. `argMax` over the whole
+    funnel rather than a window function, because there is exactly one answer
+    per lead and no frame to reason about.
+  */
+  const abandons = (
+    await query(`
+      SELECT last_event, count() AS n FROM (
+        SELECT
+          properties.leadId AS lead,
+          max(toInt(properties.step)) AS furthest,
+          argMax(event, timestamp) AS last_event,
+          countIf(event = 'lead_filed') AS filed
+        FROM events
+        WHERE timestamp > now() - INTERVAL ${days} DAY
+          AND notEmpty(toString(properties.leadId))
+        GROUP BY lead
+      )
+      WHERE furthest >= 3 AND filed = 0
+      GROUP BY last_event
+      ORDER BY n DESC
+      LIMIT 15
+    `)
+  ).results;
+
+  const parts: string[] = ['#### Exceptions'];
+  if (!exceptions.length) {
+    parts.push('_None. Nothing threw._');
+  } else {
+    parts.push('| Browser / device | Message | Count |', '| --- | --- | ---: |');
+    for (const row of exceptions) {
+      parts.push(
+        `| ${String(row[0]).slice(0, 40)} | ${String(row[1]).replace(/\|/g, '\\|').slice(0, 90)} | ${num(row[2])} |`
+      );
+    }
+  }
+
+  parts.push('', '#### Reached the design step and never filed');
+  if (!abandons.length) {
+    parts.push('_Nobody got that far and left._');
+  } else {
+    parts.push('| Last thing they did | People |', '| --- | ---: |');
+    for (const row of abandons) parts.push(`| \`${String(row[0])}\` | ${num(row[1])} |`);
+    parts.push('');
+    parts.push(
+      '> Step 4 is where the array is drawn. Somebody who got that far and did ' +
+        'not send it had already done the work, so the last event is worth reading.'
+    );
+  }
+
+  return parts.join('\n');
+}
+
 /** People who reached each step, and how many of the previous step were lost. */
 async function dropOff(days: number): Promise<string> {
   const rows = (
@@ -277,12 +551,15 @@ async function leads(days: number): Promise<number> {
 }
 
 async function section(days: number): Promise<string> {
-  const [drop, timing, bills, rage, count] = await Promise.all([
+  const [drop, timing, bills, rage, count, accuracy, outcomes, errors] = await Promise.all([
     dropOff(days),
     timePerStep(days),
     billSuccess(days),
     rageClicks(days),
     leads(days),
+    estimateAccuracy(days),
+    outcomesBySource(days),
+    errorsAndAbandons(days),
   ]);
 
   return `## Last ${days} days
@@ -304,6 +581,18 @@ ${bills}
 ### Rage clicks
 
 ${rage}
+
+### Estimate accuracy
+
+${accuracy}
+
+### Outcomes by source
+
+${outcomes}
+
+### Errors and abandons
+
+${errors}
 `;
 }
 
@@ -325,8 +614,10 @@ async function main(): Promise<void> {
 
   const body = `# Funnel report — ${today}
 
-Generated by \`scripts/funnel-report.ts\` from PostHog. Every figure counts
-distinct lead ids, not browsers: one person who reloads four times is one.
+Generated by \`scripts/funnel-report.ts\`. Behaviour comes from PostHog and
+counts distinct lead ids rather than browsers — one person who reloads four
+times is one. Estimate accuracy and outcomes come from Airtable, which is the
+only place the owner's own figures live.
 
 ${sections.join('\n')}
 `;

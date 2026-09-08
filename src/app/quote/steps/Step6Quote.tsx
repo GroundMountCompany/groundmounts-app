@@ -6,6 +6,7 @@ import EducationCard from '@/components/shell/EducationCard';
 import { STEPS, UI } from '@/config/copy';
 import { useQuoteStore, clearPersistedQuote } from '@/store/quoteStore';
 import { track, trackLeadFiled } from '@/lib/analytics';
+import CallTimeAsk from '../CallTimeAsk';
 import dynamic from 'next/dynamic';
 
 /*
@@ -72,6 +73,16 @@ export default function Step6Quote() {
   const [company, setCompany] = useState(''); // honeypot
   const [submitting, setSubmitting] = useState(false);
   const [done, setDone] = useState(false);
+  /*
+    The id of the lead that was actually filed.
+
+    Held here rather than read from the store on the success screen, because
+    `clearPersistedQuote()` runs a line before `setDone(true)` — the store is
+    deliberately empty by the time this screen renders, so that a shared or
+    kiosk phone does not hand the next visitor somebody else's design. The
+    call-time answer still has to reach the right record.
+  */
+  const [filedLeadId, setFiledLeadId] = useState<string | null>(null);
   /**
    * What the server actually filed and emailed.
    *
@@ -196,6 +207,7 @@ export default function Step6Quote() {
         value: Math.round(((body?.priceLow ?? 0) + (body?.priceHigh ?? 0)) / 2),
       });
 
+      setFiledLeadId(payload.id);
       clearPersistedQuote();
       setDone(true);
     } catch {
@@ -260,15 +272,10 @@ export default function Step6Quote() {
 
         <h3 className="text-[22px] font-semibold text-neutral-900">{UI.successTitle}</h3>
         <p className="text-[17px] text-neutral-700">{UI.successBody}</p>
-        <a
-          href={brand.calendlyUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          onClick={() => track('book_call_tapped')}
-          className="flex h-14 w-full items-center justify-center rounded-xl bg-green-700 text-[17px] font-semibold text-white"
-        >
-          {UI.bookCall}
-        </a>
+
+        {/* The lead id, not the store's current one: the store is cleared on
+            this screen, and the answer belongs to the lead that was filed. */}
+        <CallTimeAsk leadId={filedLeadId} />
       </div>
     );
   }

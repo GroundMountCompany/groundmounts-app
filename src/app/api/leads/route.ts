@@ -29,6 +29,8 @@ import {
 } from "@/lib/server/redis";
 import { parseUtm, UTM_FIELDS, UTM_KEYS, type Utm } from "@/lib/utm";
 import { parseSnapshot, RESUME_PREFIX } from "@/lib/resumeSnapshot";
+import { EMAIL_LEAD_PREFIX, SUBMIT_PREFIX } from "@/lib/leadKeys";
+import { CALL_TIMES } from "@/lib/callTime";
 import { RESUME_TTL_SECONDS, resumeConfigured, signResume } from "@/lib/server/resumeToken";
 import ResumeEmail from "@/components/common/ResumeEmail";
 import { RESUME_EMAIL } from "@/config/copy";
@@ -92,6 +94,15 @@ const NOTIFICATION_EMAIL = process.env.NOTIFY_EMAIL || "bert@groundmounts.com";
  */
 const RESUME_SNAPSHOT_TTL_SECONDS = RESUME_TTL_SECONDS;
 
+/**
+ * How long Resend's email id stays linked to a lead.
+ *
+ * Longer than any of these events take to arrive — a bounce is minutes, a
+ * complaint can be days — and matched to everything else that outlives the
+ * browser so there is one number to reason about.
+ */
+const EMAIL_LINK_TTL_SECONDS = 30 * 24 * 60 * 60;
+
 /** How long a completed submit is remembered, so a repeat is a no-op. */
 const SUBMIT_TTL_SECONDS = 24 * 60 * 60;
 /**
@@ -101,7 +112,8 @@ const SUBMIT_TTL_SECONDS = 24 * 60 * 60;
  * mid-flight does not lock the customer out for the afternoon.
  */
 const LEASE_TTL_SECONDS = 60;
-const SUBMIT_PREFIX = "gm:submit:";
+// Shared with /api/call-time, which has to be able to tell a filed lead from
+// a stranger holding a uuid. One definition, so the two cannot drift.
 /** The only steps a partial may claim: address found, meter placed, design done. */
 const PARTIAL_STEPS = [1, 3, 4];
 const LEASE_PREFIX = "gm:submit:lease:";
@@ -499,6 +511,27 @@ function utmFields(utm: Utm): Partial<Record<string, string>> {
   return out;
 }
 
+/**
+ * The three "when's a good time?" links for the quote email.
+ *
+ * Signed with the same secret and the same format as the resume links, on
+ * purpose: this is the identical problem — a URL arriving from an inbox with
+ * no session behind it — and a second scheme would be a second thing to get
+ * wrong. Returns an empty list when RESUME_SECRET is unset, and the email then
+ * omits the section rather than printing links that cannot work.
+ */
+function callTimeLinksFor(leadId: string): Array<{ label: string; href: string }> {
+  const token = signResume(leadId);
+  if (!token) return [];
+  const base = publicBaseUrl();
+  return CALL_TIMES.map((label) => ({
+    label,
+    href:
+      `${base}/api/call-time?id=${encodeURIComponent(leadId)}` +
+      `&when=${encodeURIComponent(label)}&t=${encodeURIComponent(token)}`,
+  }));
+}
+
 /** Stable per lead, so a repeat of the same send is recognised as one. */
 function quoteEmailKey(leadId: string): string {
   return `gm:quote:${leadId}`;
@@ -551,7 +584,7 @@ async function sendQuoteEmail(
         month: 'short',
         year: 'numeric',
       }),
-      calendlyUrl: brand.calendlyUrl,
+      callTimeLinks: callTimeLinksFor(leadId),
       brandName: brand.name,
       brandColor: brand.primaryColor,
       brandLogoUrl: brand.logoUrl,
@@ -559,7 +592,7 @@ async function sendQuoteEmail(
       results,
     }) as ReactElement;
 
-    const { error } = await resend.emails.send(
+    const { data, error } = await resend.emails.send(
       {
         from: brand.fromEmail,
         replyTo: brand.replyTo,
@@ -582,6 +615,21 @@ async function sendQuoteEmail(
     if (error) {
       console.error('[QUOTE_EMAIL_ERROR]', error);
       return false;
+    }
+
+    /*
+      Remember which lead this email is, for the webhook.
+
+      Resend's events name the email, not the customer, so without this a
+      bounce is an id with nothing behind it. Best-effort on purpose: the email
+      has already gone, and failing to record the mapping is a lost status
+      column, not a lost quote.
+    */
+    if (data?.id) {
+      await cacheSet(EMAIL_LEAD_PREFIX + data.id, leadId, EMAIL_LINK_TTL_SECONDS);
+      // The initial state, so an out-of-order `delivered` has something to
+      // outrank and the column is never blank for an email that did send.
+      await cacheSet(`gm:emailstatus:${leadId}`, 'sent', EMAIL_LINK_TTL_SECONDS);
     }
     return true;
   } catch (error) {

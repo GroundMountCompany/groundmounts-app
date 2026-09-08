@@ -70,5 +70,9 @@ export function verifyResume(leadId: string, token: string, now = Date.now()): R
     return 'invalid';
   }
 
-  return Math.floor(now / 1000) > expiresAt ? 'expired' : 'ok';
+  // `>=`, not `>`. The token names the second it expires, so that second is
+  // already outside it — a link honoured at exactly its own deadline is valid
+  // for one second longer than it claims, and the boundary is the only place
+  // an off-by-one here is ever observable.
+  return Math.floor(now / 1000) >= expiresAt ? 'expired' : 'ok';
 }

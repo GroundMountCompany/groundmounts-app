@@ -28,6 +28,7 @@ import {
   StoreUnavailable,
 } from "@/lib/server/redis";
 import { parseUtm, UTM_FIELDS, UTM_KEYS, type Utm } from "@/lib/utm";
+import { INTERNAL_COOKIE, isInternalCookie } from "@/lib/internalVisit";
 import { parseSnapshot, RESUME_PREFIX } from "@/lib/resumeSnapshot";
 import { EMAIL_LEAD_PREFIX, SUBMIT_PREFIX } from "@/lib/leadKeys";
 import { CALL_TIMES } from "@/lib/callTime";
@@ -649,7 +650,11 @@ async function sendQuoteEmail(
  * Upserted on Lead ID, so the four saves a session makes are one row that
  * fills in as the customer goes.
  */
-async function savePartial(raw: Record<string, unknown>, ip: string): Promise<NextResponse> {
+async function savePartial(
+  raw: Record<string, unknown>,
+  ip: string,
+  internal: boolean
+): Promise<NextResponse> {
   if (!isLeadId(raw.id)) {
     return NextResponse.json({ ok: false, error: 'invalid_lead_id' }, { status: 400 });
   }
@@ -735,7 +740,7 @@ async function savePartial(raw: Record<string, unknown>, ip: string): Promise<Ne
    * the two things that have to be atomic: the authoritative check that the
    * funnel has not finished, and the write.
    */
-  const fields = await partialFields(raw, stepReached);
+  const fields = await partialFields(raw, stepReached, internal);
 
   /*
     An email on a partial, and the only one there will ever be.
@@ -813,11 +818,13 @@ async function savePartial(raw: Record<string, unknown>, ip: string): Promise<Ne
  */
 async function partialFields(
   raw: Record<string, unknown>,
-  stepReached: number
+  stepReached: number,
+  internal: boolean
 ): Promise<LeadFields> {
   const fields: LeadFields = {
     'Step Reached': stepReached,
-    Status: 'Partial',
+    // The owner's own visits are tests from the first save (see internalVisit).
+    Status: internal ? 'Test' : 'Partial',
     Source: slug(raw.source),
   };
 
@@ -1024,6 +1031,7 @@ export async function POST(req: NextRequest) {
     }
 
     const partial = isPartial || raw.partial === true;
+    const internal = isInternalCookie(req.cookies.get(INTERNAL_COOKIE)?.value);
 
     /**
      * A resend needs an id and nothing else.
@@ -1045,7 +1053,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    if (partial) return await savePartial(raw, ip);
+    if (partial) return await savePartial(raw, ip, internal);
 
     const lead = wantsResend ? validateResend(raw) : validateLead(raw);
     console.log("[LEADS_VALIDATED]", lead.id);
@@ -1366,8 +1374,9 @@ export async function POST(req: NextRequest) {
       Azimuth: inputs.azimuth,
       Source: lead.source || undefined,
       ...utmFields(lead.utm),
-      // The funnel is finished, so the row stops being a partial.
-      Status: 'New',
+      // The funnel is finished, so the row stops being a partial — unless it
+      // is the owner testing, which nobody should answer.
+      Status: internal ? 'Test' : 'New',
       'Step Reached': 6,
 
     };

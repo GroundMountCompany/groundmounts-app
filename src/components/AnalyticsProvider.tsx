@@ -3,6 +3,7 @@
 import { useEffect } from 'react';
 import { useQuoteStore } from '@/store/quoteStore';
 import { identify, startAnalytics, utmFromSearch } from '@/lib/analytics';
+import { internalCookieFor } from '@/lib/internalVisit';
 
 /**
  * Start analytics, and keep the person attached to their lead.
@@ -30,6 +31,11 @@ export default function AnalyticsProvider() {
     */
     const utm = utmFromSearch(window.location.search);
     if (Object.keys(utm).length > 0) setUtm(utm);
+
+    // `?internal=1` marks this browser as the owner's, so its leads file as
+    // tests. A cookie rather than the store, because the server decides.
+    const cookie = internalCookieFor(window.location.search, window.location.protocol === 'https:');
+    if (cookie) document.cookie = cookie;
   }, [setUtm]);
 
   // A lead id appears partway through, so this cannot be done once on mount.

@@ -269,7 +269,8 @@ export const SELECT_CHOICES: Partial<Record<LeadFieldName, string[]>> = {
   'Slope Answer': ['Flat', 'Slight', 'Big'],
   // Matches SiteResponse.curveSource exactly; deliberately not renamed.
   'Curve Source': ['pvwatts', 'fallback'],
-  Status: ['Partial', 'New', 'Contacted', 'Quoted', 'Won', 'Lost'],
+  // "Test" is written for the owner's own visits (see internalVisit).
+  Status: ['Partial', 'New', 'Contacted', 'Quoted', 'Won', 'Lost', 'Test'],
   // The three the success screen and the quote email offer, and nothing else:
   // the value is decided by us, not typed by the customer.
   'Preferred Call Time': ['Morning', 'Afternoon', 'Evening'],

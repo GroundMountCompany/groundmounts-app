@@ -26,6 +26,7 @@ when a variable is missing, because "required" is rarely the whole truth.
 | `ALLOWED_FRAME_ORIGINS` | Vercel (optional) | `frame-ancestors *`, which is deliberate: partner funnels embed this. Set a space-separated origin list to lock it down. |
 | `RESEND_WEBHOOK_SECRET` | Vercel | The email webhook refuses every delivery with a 401, so `Email Status` and `Email Opened At` stay blank. Quotes still send; only the reporting on them stops. |
 | `RESUME_SECRET` | Vercel + `.env.local` | **Finish later stops working.** The button reports a failure and `/api/resume` refuses every link with a 401 — deliberately, because a link that cannot be verified must not be honoured. Nothing else is affected. Rotating it invalidates every link already sitting in somebody's inbox. |
+| `UNSUBSCRIBE_SECRET` | Vercel | `/unsubscribe` refuses every link ("That link didn't work"), so **no follow-up email may go out without it**. Separate from `RESUME_SECRET` on purpose: rotating this one breaks every unsubscribe link already sent, so don't. |
 | `NEXT_PUBLIC_POSTHOG_KEY`<br>`NEXT_PUBLIC_POSTHOG_HOST` | Vercel | No analytics at all: no events, no session replay, and the ~280KB library is never even fetched. The funnel is unaffected — that is the point, and the e2e proves it. |
 | `META_CAPI_TOKEN` | Vercel (optional) | The server does not report conversions to Meta. The browser pixel still fires, so Meta sees leads from browsers that were not blocking it. Setting it adds the server-side half, deduplicated against the pixel on the lead id. |
 | `NEXT_PUBLIC_SITE_URL` | Vercel (optional) | Resume links are built from `VERCEL_URL`, then from the production host. Set it if the funnel is served from a domain neither of those names. |
@@ -444,6 +445,28 @@ which is logged and acknowledged; the TTL is thirty days.
 
 Anything the route cannot act on is **acknowledged, not rejected** — a 4xx has
 Resend retrying for hours.
+
+### Unsubscribe
+
+`/unsubscribe?t=<recordId>.<hmac>` is the footer link for the follow-up emails.
+Nothing sends those yet; this is the page they will point at.
+
+- **The token.** HMAC-SHA256 over the Airtable record id with
+  `UNSUBSCRIBE_SECRET`. Record id, not Lead ID, because leads from the phone
+  agent have no Lead ID. **No expiry**: an unsubscribe link has to work however
+  old the email is. Build one with `signUnsubscribe(recordId)` in
+  `src/lib/server/unsubscribeToken.ts`.
+- **GET shows a button, POST writes.** Mail scanners open every link in an
+  email; a GET that wrote would unsubscribe people who never clicked. The POST
+  also answers the one-click `List-Unsubscribe-Post: List-Unsubscribe=One-Click`
+  header, so the sender can put the same URL in `List-Unsubscribe`.
+- **What it writes.** `email_status` = `unsubscribed`, and
+  `disqualify_reason` gets `asked not to be contacted (email, YYYY-MM-DD)`
+  appended. That phrase is the one the phone agent (tgmc-agent) writes and
+  checks, so an email opt-out stops calls and texts too, and a STOP text shows
+  up the same way here. `Status` is not touched. A second click writes nothing.
+- A bad or forged token is a 400 with the same page either way, so record ids
+  can't be probed. Rate-limited to 10/min per IP.
 
 ### Estimate accuracy
 

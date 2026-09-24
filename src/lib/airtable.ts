@@ -82,6 +82,51 @@ export async function upsertLeadByLeadId(fields: LeadFields, leadId: string) {
   return { id: record?.id as string | undefined, created };
 }
 
+function recordUrl(recordId: string): string {
+  if (!AIRTABLE_API_KEY || !AIRTABLE_BASE_ID) {
+    console.error('[AIRTABLE_CONFIG_ERROR] Missing:', {
+      hasApiKey: !!AIRTABLE_API_KEY,
+      hasBaseId: !!AIRTABLE_BASE_ID,
+    });
+    throw new Error('Airtable configuration missing');
+  }
+  return `https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${encodeURIComponent(AIRTABLE_TABLE_NAME)}/${encodeURIComponent(recordId)}`;
+}
+
+/**
+ * One lead by its Airtable record id, for the routes that are handed one in a
+ * signed link rather than a funnel Lead ID. Fields only; never logged.
+ */
+export async function getLeadRecord(recordId: string): Promise<Record<string, unknown>> {
+  const response = await fetch(recordUrl(recordId), {
+    headers: { Authorization: `Bearer ${AIRTABLE_API_KEY}` },
+  });
+  if (!response.ok) {
+    const reason = airtableErrorReason(await response.text());
+    console.error('[AIRTABLE_ERROR] getLeadRecord', recordId, 'status:', response.status, 'reason:', reason);
+    throw new Error(`Airtable error: ${response.status} - ${reason}`);
+  }
+  const record = await response.json();
+  return (record?.fields ?? {}) as Record<string, unknown>;
+}
+
+/** Change only the named fields on one lead. PATCH, so nothing else is touched. */
+export async function updateLeadRecord(recordId: string, fields: LeadFields): Promise<void> {
+  const response = await fetch(recordUrl(recordId), {
+    method: 'PATCH',
+    headers: {
+      Authorization: `Bearer ${AIRTABLE_API_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ fields, typecast: true }),
+  });
+  if (!response.ok) {
+    const reason = airtableErrorReason(await response.text());
+    console.error('[AIRTABLE_ERROR] updateLeadRecord', recordId, 'status:', response.status, 'reason:', reason);
+    throw new Error(`Airtable error: ${response.status} - ${reason}`);
+  }
+}
+
 // State name to abbreviation mapping
 const STATE_ABBREVIATIONS: Record<string, string> = {
   'alabama': 'AL', 'alaska': 'AK', 'arizona': 'AZ', 'arkansas': 'AR', 'california': 'CA',

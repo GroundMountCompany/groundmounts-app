@@ -37,6 +37,8 @@ export const ROUTE_LIMITS: Record<string, number> = {
   "resume-request": 5,
   // Three chips on one screen, and an email link somebody may open twice.
   "call-time": 10,
+  // A signed link somebody opens once. Tight for the same reason as resume.
+  unsubscribe: 10,
   // Resend's own retries, plus a burst when a campaign lands. Generous,
   // because dropping a webhook loses a fact we cannot ask for again.
   "email-webhook": 240,

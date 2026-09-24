@@ -471,6 +471,29 @@ test('Finish later is on the three steps in the middle and nowhere else', async 
   }
 });
 
+test('On the options step, Finish later is an offer in its own box', async ({ page }) => {
+  await mockGeocoding(page);
+  await seed(page, DESIGN_SEED(4));
+
+  // The design is done and the next screen asks for a phone number: this is
+  // where the design-funnel report saw people leave, so the way out is plain.
+  await page.goto('/quote?step=4');
+  await waitForHydration(page);
+  const offer = page.getByTestId('finish-later-offer');
+  await expect(offer).toBeVisible();
+  await expect(offer.getByTestId('finish-later')).toHaveText('Email me my design');
+  await offer.getByTestId('finish-later').click();
+  await expect(page.getByTestId('finish-later-form')).toBeVisible();
+
+  // The steps before it keep the quiet link.
+  for (const step of [2, 3]) {
+    await page.goto(`/quote?step=${step}`);
+    await waitForHydration(page);
+    await expect(page.getByTestId('finish-later')).toBeVisible();
+    await expect(page.getByTestId('finish-later-offer'), `offer box on step ${step}`).toHaveCount(0);
+  }
+});
+
 // --- D. Analytics -----------------------------------------------------------
 
 /** The key playwright.config.ts builds the server with. */

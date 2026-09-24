@@ -17,8 +17,14 @@ type Phase = 'link' | 'asking' | 'sending' | 'sent' | 'failed';
  *
  * Small and quiet on purpose: it must not compete with Continue. It is a link,
  * not a button, and it is the last thing on the step rather than the first.
+ *
+ * Except on the options step (`offer`). There the design is finished and the
+ * next screen asks for a name and phone. The funnel report of 2026-09-24 found
+ * the one real person who drew an array left right here, so the way out is
+ * said plainly in its own box. Still outlined, never filled: Continue stays
+ * the only solid button.
  */
-export default function FinishLater() {
+export default function FinishLater({ offer = false }: { offer?: boolean }) {
   const [phase, setPhase] = useState<Phase>('link');
   const [email, setEmail] = useState('');
 
@@ -40,6 +46,26 @@ export default function FinishLater() {
       <p data-testid="finish-later-sent" className="text-[16px] text-neutral-700">
         {UI.finishLaterSent}
       </p>
+    );
+  }
+
+  if (phase === 'link' && offer) {
+    return (
+      <div
+        data-testid="finish-later-offer"
+        className="space-y-2 rounded-xl border border-neutral-200 p-4"
+      >
+        <p className="text-[17px] font-semibold text-neutral-900">{UI.finishLaterCardTitle}</p>
+        <p className="text-[16px] text-neutral-600">{UI.finishLaterCardBody}</p>
+        <button
+          type="button"
+          data-testid="finish-later"
+          onClick={() => setPhase('asking')}
+          className="min-h-[48px] w-full rounded-xl border border-neutral-900 px-4 text-[16px] font-semibold text-neutral-900"
+        >
+          {UI.finishLaterCardButton}
+        </button>
+      </div>
     );
   }
 

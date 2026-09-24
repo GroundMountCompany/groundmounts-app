@@ -164,6 +164,11 @@ export const UI = {
   finishLaterSent: 'Sent. Check your inbox for a link back to this design.',
   finishLaterFailed: 'That did not send. Check the address and try again.',
   finishLaterNote: 'Only to send you the link. No calls.',
+  // The options step, where the design is done and the next screen asks for a
+  // name and phone. Said as an offer in its own box, not a faint link.
+  finishLaterCardTitle: 'Not ready to hand over a phone number?',
+  finishLaterCardBody: 'We can email you this design and you can pick it up later.',
+  finishLaterCardButton: 'Email me my design',
   resumeExpired: 'That link has expired. Start again and it will only take a minute.',
   resumeInvalid: 'That link did not work. Start again and it will only take a minute.',
   coachAnimationAlt: 'A hand dragging the panels, then turning them with the compass',

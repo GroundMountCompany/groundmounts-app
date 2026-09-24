@@ -1,6 +1,7 @@
 import { useQuoteStore } from '@/store/quoteStore';
 import type { QuoteInputs } from './quoteInputs';
 import type { ResumeSnapshot } from './resumeSnapshot';
+import { internalFromUrl } from './internalVisit';
 
 /**
  * Save the design as the customer goes.
@@ -116,6 +117,7 @@ export function savePartialLead(step: number): void {
       utm: s.utm,
       snapshot: snapshotFrom(s),
       ...(inputs ? { inputs } : {}),
+      ...(internalFromUrl() ? { internal: true } : {}),
     }),
   }).catch(() => {
     // Deliberately silent. Let the next step try again.
@@ -152,6 +154,7 @@ export async function requestResumeEmail(email: string): Promise<boolean> {
         utm: s.utm,
         coordinates: s.coordinates,
         snapshot: snapshotFrom(s),
+        ...(internalFromUrl() ? { internal: true } : {}),
       }),
     });
     const json = (await res.json().catch(() => ({}))) as { ok?: boolean; sent?: boolean };

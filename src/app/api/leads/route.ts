@@ -28,7 +28,7 @@ import {
   StoreUnavailable,
 } from "@/lib/server/redis";
 import { parseUtm, UTM_FIELDS, UTM_KEYS, type Utm } from "@/lib/utm";
-import { INTERNAL_COOKIE, isInternalCookie } from "@/lib/internalVisit";
+import { INTERNAL_COOKIE, isInternalRequest } from "@/lib/internalVisit";
 import { parseSnapshot, RESUME_PREFIX } from "@/lib/resumeSnapshot";
 import { EMAIL_LEAD_PREFIX, SUBMIT_PREFIX } from "@/lib/leadKeys";
 import { CALL_TIMES } from "@/lib/callTime";
@@ -1031,7 +1031,9 @@ export async function POST(req: NextRequest) {
     }
 
     const partial = isPartial || raw.partial === true;
-    const internal = isInternalCookie(req.cookies.get(INTERNAL_COOKIE)?.value);
+    // The cookie, or `internal: true` in the body from inside the iframe,
+    // where the cookie is third-party and never arrives.
+    const internal = isInternalRequest(req.cookies.get(INTERNAL_COOKIE)?.value, raw.internal);
 
     /**
      * A resend needs an id and nothing else.

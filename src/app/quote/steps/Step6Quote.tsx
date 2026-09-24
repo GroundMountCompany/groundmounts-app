@@ -22,6 +22,7 @@ const ResultsSection = dynamic(() => import('@/components/results/ResultsSection
 });
 import { buildLeadPayload } from '@/lib/leadPayload';
 import { enqueueOrSend } from '@/lib/leadQueue';
+import { internalFromUrl } from '@/lib/internalVisit';
 import { useBrand } from '@/contexts/BrandContext';
 import { PANELS } from '@/config/pricing';
 import { annualKwh } from '@/lib/production';
@@ -147,6 +148,9 @@ export default function Step6Quote() {
         // Identity: what the email says it is from.
         brand: searchParams.get('brand') || undefined,
         honeypot: company,
+        // The owner testing. Sent in the body because inside the
+        // groundmounts.com iframe the gm_internal cookie never arrives.
+        internal: internalFromUrl(),
       },
       Date.now()
     );

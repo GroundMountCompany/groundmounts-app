@@ -270,6 +270,24 @@ describe('POST /api/leads', () => {
     expect(written[0]['Step Reached']).toBe(6);
   });
 
+  it("files the owner's submit from inside the groundmounts.com iframe as a Test", async () => {
+    // No cookie: in a cross-site iframe the browser never sends it. The page
+    // was opened with ?internal=1, so the body says so instead.
+    const res = await POST(post({ ...validLead(), internal: true }));
+    expect(res.status).toBe(200);
+    expect(written[0].Status).toBe('Test');
+  });
+
+  it('files a submit as New when the body only looks like the mark', async () => {
+    for (const internal of ['true', 1, '1']) {
+      written.length = 0;
+      store.clear();
+      __resetRateLimits();
+      await POST(post({ ...validLead(), internal }));
+      expect(written[0].Status, JSON.stringify(internal)).toBe('New');
+    }
+  });
+
   it('files an ordinary submit as New, whatever else is in the cookie', async () => {
     for (const cookie of ['gm_internal=0', 'gm_internal=', 'gm_internal=true', 'other=1']) {
       written.length = 0;
@@ -606,6 +624,13 @@ describe('partial saves', () => {
     expect(res.status).toBe(200);
     expect(written[0].Status).toBe('Test');
     expect(written[0]['Step Reached']).toBe(4);
+  });
+
+  it("files the owner's visit from inside the iframe as a Test, not a Partial", async () => {
+    const res = await POST(post({ ...partial(), internal: true }));
+
+    expect(res.status).toBe(200);
+    expect(written[0].Status).toBe('Test');
   });
 
   it('saves a step 1 with coordinates and no design yet', async () => {

@@ -54,6 +54,8 @@ export interface LeadPayload {
   honeypot: string;
   ttc_ms: number;
   mapScreenshot?: string;
+  /** The owner testing (`?internal=1`), for when the cookie cannot reach the server. */
+  internal?: boolean;
 }
 
 type QuoteState = ReturnType<typeof useQuoteStore.getState>;
@@ -68,6 +70,8 @@ export interface LeadContact {
   /** Which brand the funnel wears. Never derived from `source`. */
   brand?: string;
   honeypot: string;
+  /** Opened with `?internal=1`: file it as a test (see internalVisit). */
+  internal?: boolean;
 }
 
 /**
@@ -134,6 +138,7 @@ export function buildLeadPayload(
     honeypot: contact.honeypot,
     ttc_ms: now - s.startedAt,
     mapScreenshot: s.mapScreenshot ?? undefined,
+    ...(contact.internal ? { internal: true } : {}),
   };
 }
 

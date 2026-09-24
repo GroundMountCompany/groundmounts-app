@@ -1,10 +1,16 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   INTERNAL_COOKIE_MAX_AGE_SECONDS,
   internalCookieFor,
+  internalFromUrl,
   internalParam,
   isInternalCookie,
+  isInternalRequest,
 } from './internalVisit';
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 describe('internal visits', () => {
   it('reads only ?internal=1 and ?internal=0 from the landing URL', () => {
@@ -40,6 +46,29 @@ describe('internal visits', () => {
     expect(isInternalCookie('1')).toBe(true);
     for (const value of [undefined, '', '0', 'true', ' 1']) {
       expect(isInternalCookie(value), String(value)).toBe(false);
+    }
+  });
+
+  it('reads ?internal=1 off this page load, the way the iframe gets it', () => {
+    vi.stubGlobal('window', { location: { search: '?source=groundmounts.com&internal=1&step=3' } });
+    expect(internalFromUrl()).toBe(true);
+    vi.stubGlobal('window', { location: { search: '?internal=0&step=3' } });
+    expect(internalFromUrl()).toBe(false);
+    vi.stubGlobal('window', { location: { search: '?step=3' } });
+    expect(internalFromUrl()).toBe(false);
+  });
+
+  it('says no on the server, where there is no page URL', () => {
+    expect(internalFromUrl()).toBe(false);
+  });
+
+  it('counts a save as the owner\'s from the cookie or from the body', () => {
+    expect(isInternalRequest('1', undefined)).toBe(true);
+    expect(isInternalRequest(undefined, true)).toBe(true);
+    expect(isInternalRequest(undefined, undefined)).toBe(false);
+    // Only a real boolean true: nothing a sloppy client might send by accident.
+    for (const flag of ['true', 1, '1', 'yes', {}, null, false]) {
+      expect(isInternalRequest(undefined, flag), JSON.stringify(flag)).toBe(false);
     }
   });
 });

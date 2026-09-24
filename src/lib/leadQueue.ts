@@ -18,6 +18,7 @@ type Payload = {
   ttc_ms?: number;       // time to complete (milliseconds)
   mapScreenshot?: string; // base64 PNG of map with panel placement
   resend?: boolean;      // email-only retry for a lead that is already filed
+  internal?: boolean;    // owner's test (?internal=1); kept so a retry still files as Test
   _retries?: number;     // internal retry count
 };
 

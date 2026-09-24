@@ -154,4 +154,13 @@ describe('lead payload carries the design the customer actually saw', () => {
     expect(payload.ttc_ms).toBe(60_000);
     expect(payload.id).toBe('lead-1234-5678');
   });
+
+  it("carries the owner's test mark only when the page was opened with it", () => {
+    // Inside the groundmounts.com iframe the cookie never reaches the server,
+    // so the body is the only way a test submit says it is one.
+    const s = useQuoteStore.getState();
+    expect(buildLeadPayload(s, { ...contact, internal: true }, 1_060_000).internal).toBe(true);
+    expect('internal' in buildLeadPayload(s, contact, 1_060_000)).toBe(false);
+    expect('internal' in buildLeadPayload(s, { ...contact, internal: false }, 1_060_000)).toBe(false);
+  });
 });

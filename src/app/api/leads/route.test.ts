@@ -204,10 +204,10 @@ const validLead = (quoteExtra: Record<string, unknown> = {}) => ({
   ttc_ms: 60_000,
 });
 
-function post(body: Record<string, unknown>): NextRequest {
+function post(body: Record<string, unknown>, headers: Record<string, string> = {}): NextRequest {
   return new NextRequest('http://localhost/api/leads', {
     method: 'POST',
-    headers: { 'content-type': 'application/json', 'x-forwarded-for': '203.0.113.9' },
+    headers: { 'content-type': 'application/json', 'x-forwarded-for': '203.0.113.9', ...headers },
     body: JSON.stringify(body),
   });
 }
@@ -259,6 +259,25 @@ describe('POST /api/leads', () => {
     expect(fields['Total Investment']).toBe(
       Math.round((expected.quote.low + expected.quote.high) / 2)
     );
+  });
+
+  it("files the owner's own submit as a Test, not a New lead", async () => {
+    // New is what the inbound rep answers. A test that files as New is a test
+    // somebody calls back.
+    const res = await POST(post(validLead(), { cookie: 'gm_internal=1' }));
+    expect(res.status).toBe(200);
+    expect(written[0].Status).toBe('Test');
+    expect(written[0]['Step Reached']).toBe(6);
+  });
+
+  it('files an ordinary submit as New, whatever else is in the cookie', async () => {
+    for (const cookie of ['gm_internal=0', 'gm_internal=', 'gm_internal=true', 'other=1']) {
+      written.length = 0;
+      store.clear();
+      __resetRateLimits();
+      await POST(post(validLead(), { cookie }));
+      expect(written[0].Status, cookie).toBe('New');
+    }
   });
 
   it('ignores a price the client tried to name', async () => {
@@ -579,6 +598,14 @@ describe('partial saves', () => {
     // And no price: nobody has been quoted anything yet.
     expect(fields['Price Low']).toBeUndefined();
     expect(fields['Price High']).toBeUndefined();
+  });
+
+  it("files the owner's own visit as a Test, not a Partial", async () => {
+    const res = await POST(post(partial(), { cookie: 'gm_internal=1' }));
+
+    expect(res.status).toBe(200);
+    expect(written[0].Status).toBe('Test');
+    expect(written[0]['Step Reached']).toBe(4);
   });
 
   it('saves a step 1 with coordinates and no design yet', async () => {

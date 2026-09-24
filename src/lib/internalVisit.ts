@@ -1,0 +1,42 @@
+/**
+ * The owner's own test visits, marked so nobody treats them as customers.
+ *
+ * Visiting any quote URL with `?internal=1` sets a cookie on that browser, and
+ * every lead it files from then on lands with Status "Test" instead of
+ * "Partial" or "New". `?internal=0` takes it off again.
+ *
+ * Status rather than a new column because "Test" is already a choice on the
+ * live table (the owner added it 2026-09-24) and the seats that read Leads —
+ * the inbound rep, the reports — already skip it. A test that files as "New"
+ * is a test somebody might answer.
+ *
+ * Not a secret, and does not need to be: the worst a stranger can do with it
+ * is file their own lead as a test. It is a label, not a permission.
+ */
+
+export const INTERNAL_COOKIE = 'gm_internal';
+
+/** A year: long enough that the owner sets it once per phone. */
+export const INTERNAL_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 365;
+
+/** What the landing URL asks for: mark this browser, unmark it, or neither. */
+export function internalParam(search: string): 'on' | 'off' | null {
+  const value = new URLSearchParams(search).get('internal');
+  if (value === '1') return 'on';
+  if (value === '0') return 'off';
+  return null;
+}
+
+/** The Set-Cookie string for `document.cookie`, or null when the URL says nothing. */
+export function internalCookieFor(search: string, secure: boolean): string | null {
+  const wanted = internalParam(search);
+  if (!wanted) return null;
+  const maxAge = wanted === 'on' ? INTERNAL_COOKIE_MAX_AGE_SECONDS : 0;
+  const value = wanted === 'on' ? '1' : '';
+  return `${INTERNAL_COOKIE}=${value}; Path=/; Max-Age=${maxAge}; SameSite=Lax${secure ? '; Secure' : ''}`;
+}
+
+/** Whether a request came from a browser marked as the owner's. */
+export function isInternalCookie(value: string | undefined): boolean {
+  return value === '1';
+}

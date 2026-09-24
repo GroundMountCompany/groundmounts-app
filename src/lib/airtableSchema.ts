@@ -97,6 +97,17 @@ export const LEAD_SCHEMA = {
   'Email Status': 'select',
   'Email Opened At': 'date',
   /*
+    Written by the unsubscribe page only, and only these two.
+
+    Lowercase because they were created that way for the follow-up emails and
+    the phone agent, which own the rest of what goes in them. `email_status`
+    is the follow-up's state ("unsubscribed" is the one value this app
+    writes); `disqualify_reason` carries the "asked not to be contacted"
+    phrase the phone agent checks before it reaches out.
+  */
+  email_status: 'select',
+  disqualify_reason: 'text',
+  /*
     Filled in by the owner after a site visit, never by the app.
 
     The whole point is to be able to ask how wrong the estimate was. A column
@@ -270,6 +281,8 @@ export const SELECT_CHOICES: Partial<Record<LeadFieldName, string[]>> = {
     same word.
   */
   'Email Status': ['sent', 'delivered', 'opened', 'clicked', 'bounced', 'complained'],
+  // Only the value this app writes; the follow-up emails own the others.
+  email_status: ['unsubscribed'],
 };
 
 /** Decimal places for the numeric columns. Money is whole dollars. */

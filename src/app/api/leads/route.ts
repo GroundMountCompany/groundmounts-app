@@ -1419,19 +1419,23 @@ export async function POST(req: NextRequest) {
       Meta's, so this and the browser's copy describe one conversion rather
       than two.
     */
-    void captureServer('lead_filed', lead.id, {
-      priceLow: priced.quote.low,
-      priceHigh: priced.quote.high,
-      panels: inputs.panelCount,
-      source: lead.source || undefined,
-      ...lead.utm,
-    });
-    void metaLead(lead.id, {
-      email: lead.email,
-      phone: lead.phone,
-      value: midpoint(priced.quote.low, priced.quote.high),
-      sourceUrl: req.headers.get('referer') ?? undefined,
-    });
+    // The owner's tests (Status "Test") are not conversions: reporting them would
+    // teach Meta and PostHog that Bert is the customer to find more of.
+    if (!internal) {
+      void captureServer('lead_filed', lead.id, {
+        priceLow: priced.quote.low,
+        priceHigh: priced.quote.high,
+        panels: inputs.panelCount,
+        source: lead.source || undefined,
+        ...lead.utm,
+      });
+      void metaLead(lead.id, {
+        email: lead.email,
+        phone: lead.phone,
+        value: midpoint(priced.quote.low, priced.quote.high),
+        sourceUrl: req.headers.get('referer') ?? undefined,
+      });
+    }
 
     // Now that the record exists, and only now, the screenshot is worth
     // storing. The row is then patched with the attachment; a failure here

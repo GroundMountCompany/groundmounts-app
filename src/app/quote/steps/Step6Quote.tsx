@@ -22,7 +22,7 @@ const ResultsSection = dynamic(() => import('@/components/results/ResultsSection
 });
 import { buildLeadPayload } from '@/lib/leadPayload';
 import { enqueueOrSend } from '@/lib/leadQueue';
-import { internalFromUrl } from '@/lib/internalVisit';
+import { internalFromUrl, internalBrowser } from '@/lib/internalVisit';
 import { useBrand } from '@/contexts/BrandContext';
 import { PANELS } from '@/config/pricing';
 import { annualKwh } from '@/lib/production';
@@ -207,9 +207,12 @@ export default function Step6Quote() {
         submission and already idempotent server-side, so Meta and PostHog
         both de-duplicate on it rather than counting the lead twice.
       */
-      trackLeadFiled(payload.id, {
-        value: Math.round(((body?.priceLow ?? 0) + (body?.priceHigh ?? 0)) / 2),
-      });
+      // The owner's own tests are not conversions (see internalVisit).
+      if (!payload.internal && !internalBrowser()) {
+        trackLeadFiled(payload.id, {
+          value: Math.round(((body?.priceLow ?? 0) + (body?.priceHigh ?? 0)) / 2),
+        });
+      }
 
       setFiledLeadId(payload.id);
       clearPersistedQuote();

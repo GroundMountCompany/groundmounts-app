@@ -256,7 +256,7 @@ export default function Step5Options() {
 
       <EducationCard copy={STEPS[4].education} />
 
-      <FinishLater />
+      <FinishLater offer />
     </div>
   );
 }

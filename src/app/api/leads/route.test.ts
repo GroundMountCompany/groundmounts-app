@@ -10,6 +10,14 @@ import { TX_FALLBACK_CURVE } from '@/lib/production';
 import type { LeadFields } from '@/lib/airtableSchema';
 import type { SiteResponse } from '@/lib/server/siteLookup';
 
+/** Conversion reporting, spied: the owner's tests must never count as conversions. */
+const conversions = vi.hoisted(() => ({ capture: vi.fn(), meta: vi.fn() }));
+vi.mock('@/lib/server/analytics', async (orig) => ({
+  ...(await orig<typeof import('@/lib/server/analytics')>()),
+  captureServer: conversions.capture,
+  metaLead: conversions.meta,
+}));
+
 /** The durable store, stubbed. Real Redis is not a unit-test dependency. */
 const store = new Map<string, unknown>();
 /** Flipped on by the cases that need a configured-but-unreachable store. */
@@ -268,6 +276,29 @@ describe('POST /api/leads', () => {
     expect(res.status).toBe(200);
     expect(written[0].Status).toBe('Test');
     expect(written[0]['Step Reached']).toBe(6);
+  });
+
+  const leadFiled = () => conversions.capture.mock.calls.filter((c) => c[0] === 'lead_filed');
+
+  it("never reports the owner's test (cookie) as a conversion to PostHog or Meta", async () => {
+    conversions.capture.mockClear(); conversions.meta.mockClear();
+    await POST(post(validLead(), { cookie: 'gm_internal=1' }));
+    expect(leadFiled()).toEqual([]);
+    expect(conversions.meta).not.toHaveBeenCalled();
+  });
+
+  it("never reports the owner's test from the iframe (body flag) as a conversion", async () => {
+    conversions.capture.mockClear(); conversions.meta.mockClear();
+    await POST(post({ ...validLead(), internal: true }));
+    expect(leadFiled()).toEqual([]);
+    expect(conversions.meta).not.toHaveBeenCalled();
+  });
+
+  it('still reports a real lead as a conversion', async () => {
+    conversions.capture.mockClear(); conversions.meta.mockClear();
+    await POST(post(validLead()));
+    expect(leadFiled()).toHaveLength(1);
+    expect(conversions.meta).toHaveBeenCalledTimes(1);
   });
 
   it("files the owner's submit from inside the groundmounts.com iframe as a Test", async () => {

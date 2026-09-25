@@ -65,3 +65,13 @@ export function isInternalCookie(value: string | undefined): boolean {
 export function isInternalRequest(cookie: string | undefined, bodyFlag: unknown): boolean {
   return isInternalCookie(cookie) || bodyFlag === true;
 }
+
+/**
+ * Whether this browser is the owner's, as far as the page itself can tell: this load was opened
+ * with `?internal=1`, or the app's own first-party cookie is set. Used to keep the owner's tests
+ * out of the browser-side conversion events.
+ */
+export function internalBrowser(): boolean {
+  if (typeof document === 'undefined') return false;
+  return internalFromUrl() || document.cookie.split(';').some((c) => c.trim() === `${INTERNAL_COOKIE}=1`);
+}

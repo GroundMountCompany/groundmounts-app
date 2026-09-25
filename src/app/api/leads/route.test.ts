@@ -90,8 +90,20 @@ vi.mock('@/lib/airtable', async () => {
       written.push({ ...fields, 'Lead ID': leadId });
       return { id: 'recTest123', created: true };
     },
+    leadIsMarkedTest: async (leadId: string) => {
+      statusReads.push(leadId);
+      if (failStatusRead) throw new Error('Airtable error: 503 - upstream');
+      return markedTest.has(leadId);
+    },
   };
 });
+
+/** Lead IDs whose Airtable row the owner already marked Status "Test". */
+const markedTest = new Set<string>();
+/** Every Status read the route made, by Lead ID. */
+const statusReads: string[] = [];
+/** Set by the test that needs the Status read to fail. */
+let failStatusRead = false;
 
 /** Blob uploads, counted. Nothing should reach storage before Airtable agrees. */
 const blobs: string[] = [];
@@ -228,6 +240,9 @@ beforeEach(() => {
   storeDown = false;
   failWrite = false;
   written.length = 0;
+  markedTest.clear();
+  statusReads.length = 0;
+  failStatusRead = false;
   curveCalls.length = 0;
   siteFacts = { ...NOTHING_KNOWN, curve: SITE_CURVE, curveSource: 'pvwatts' };
   failEmail = false;
@@ -690,6 +705,74 @@ describe('partial saves', () => {
   it('sends no email of any kind', async () => {
     await POST(post(partial()));
     expect(notifications, 'a partial save emailed somebody').toHaveLength(0);
+  });
+});
+
+describe('a row already marked Test stays Test', () => {
+  // A resumed design keeps its Lead ID. Without this, recjeQJcPdQAAj4Oq went
+  // from Test back to Partial on 9/24 and landed in the inbound rep's queue.
+  const PARTIAL_ID = '2b9d6d7e-1f4a-4f8b-8c21-9a7d5e3f0b11';
+  const partial = (extra: Record<string, unknown> = {}) => ({
+    partial: true,
+    id: PARTIAL_ID,
+    stepReached: 4,
+    source: 'groundmounts.com',
+    coordinates: { latitude: 32.7555, longitude: -97.3208 },
+    inputs: INPUTS,
+    utm: { utm_source: 'phone-agent' },
+    ...extra,
+  });
+
+  it('keeps Test on a partial re-save from an ordinary visitor', async () => {
+    markedTest.add(PARTIAL_ID);
+    const res = await POST(post(partial()));
+    expect(res.status).toBe(200);
+    expect(written[0].Status).toBe('Test');
+    expect(written[0]['Step Reached']).toBe(4);
+  });
+
+  it('keeps Test on a "Finish later" resume request', async () => {
+    vi.stubEnv('RESUME_SECRET', 'test-secret');
+    markedTest.add(PARTIAL_ID);
+    const res = await POST(post(partial({ resumeRequest: true, email: 'someone@example.com' })));
+    expect(res.status).toBe(200);
+    expect(written[0].Status).toBe('Test');
+  });
+
+  it('keeps Test on the final submit, and reports no conversion', async () => {
+    conversions.capture.mockClear(); conversions.meta.mockClear();
+    const lead = validLead();
+    markedTest.add(lead.id);
+    const res = await POST(post(lead));
+    expect(res.status).toBe(200);
+    expect(written[0].Status).toBe('Test');
+    expect(written[0]['Step Reached']).toBe(6);
+    expect(conversions.capture.mock.calls.filter((c) => c[0] === 'lead_filed')).toEqual([]);
+    expect(conversions.meta).not.toHaveBeenCalled();
+  });
+
+  it('still files an unmarked row as Partial, then New', async () => {
+    await POST(post(partial()));
+    expect(written[0].Status).toBe('Partial');
+    await POST(post(validLead()));
+    expect(written[1].Status).toBe('New');
+  });
+
+  it("doesn't read Airtable for the owner's own visit: it's a Test already", async () => {
+    await POST(post(partial(), { cookie: 'gm_internal=1' }));
+    await POST(post(validLead(), { cookie: 'gm_internal=1' }));
+    expect(statusReads).toEqual([]);
+    expect(written.map((w) => w.Status)).toEqual(['Test', 'Test']);
+  });
+
+  it('still saves the lead when the Status read fails', async () => {
+    failStatusRead = true;
+    markedTest.add(PARTIAL_ID);
+    expect((await POST(post(partial()))).status).toBe(200);
+    expect(written[0].Status).toBe('Partial');
+    const res = await POST(post(validLead()));
+    expect(res.status).toBe(200);
+    expect(written[1].Status).toBe('New');
   });
 });
 

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { upsertLeadByLeadId, parseAddress, LeadFields } from "@/lib/airtable";
+import { upsertLeadByLeadId, leadIsMarkedTest, parseAddress, LeadFields } from "@/lib/airtable";
 import { getClientIp, rateLimitOkAsync, isBotHoneypot, minTimeOk } from "@/lib/guard";
 import { getResendOrThrow } from "@/lib/resendSafe";
 import { put, del } from "@vercel/blob";
@@ -740,7 +740,7 @@ async function savePartial(
    * the two things that have to be atomic: the authoritative check that the
    * funnel has not finished, and the write.
    */
-  const fields = await partialFields(raw, stepReached, internal);
+  const fields = await partialFields(raw, stepReached, await staysTest(id, internal));
 
   /*
     An email on a partial, and the only one there will ever be.
@@ -877,6 +877,28 @@ async function partialFields(
   }
 
   return fields;
+}
+
+/**
+ * Whether this save files as a Test.
+ *
+ * The owner's own visits are, from the cookie or the iframe flag. So is any
+ * row somebody already marked Test by hand: a resumed design keeps its Lead ID,
+ * and without this its next save would turn the test back into a Partial or a
+ * New that the inbound rep then calls. Only asked when the request itself
+ * isn't marked, so the owner's visits cost no extra read.
+ *
+ * If Airtable can't be read, the save goes ahead as it always did. A missed
+ * label is fixed by hand; a dropped lead is not.
+ */
+async function staysTest(id: string, internal: boolean): Promise<boolean> {
+  if (internal) return true;
+  try {
+    return await leadIsMarkedTest(id);
+  } catch {
+    console.warn('[LEAD_TEST_CHECK] Status unreadable, saving as usual', id);
+    return false;
+  }
 }
 
 /**
@@ -1307,6 +1329,9 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // A row already marked Test finishes as one, and isn't reported as a conversion.
+    const test = await staysTest(lead.id, internal);
+
     // Parse address components
     const addressParts = lead.address ? parseAddress(lead.address) : {};
 
@@ -1378,7 +1403,7 @@ export async function POST(req: NextRequest) {
       ...utmFields(lead.utm),
       // The funnel is finished, so the row stops being a partial — unless it
       // is the owner testing, which nobody should answer.
-      Status: internal ? 'Test' : 'New',
+      Status: test ? 'Test' : 'New',
       'Step Reached': 6,
 
     };
@@ -1421,7 +1446,7 @@ export async function POST(req: NextRequest) {
     */
     // The owner's tests (Status "Test") are not conversions: reporting them would
     // teach Meta and PostHog that Bert is the customer to find more of.
-    if (!internal) {
+    if (!test) {
       void captureServer('lead_filed', lead.id, {
         priceLow: priced.quote.low,
         priceHigh: priced.quote.high,

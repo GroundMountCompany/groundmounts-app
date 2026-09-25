@@ -82,7 +82,31 @@ export async function upsertLeadByLeadId(fields: LeadFields, leadId: string) {
   return { id: record?.id as string | undefined, created };
 }
 
-function recordUrl(recordId: string): string {
+/**
+ * Whether the row for this funnel is already marked Status "Test".
+ *
+ * An upsert overwrites Status, so a test the owner labeled by hand would turn
+ * back into a Partial or a New the moment the same design was resumed and
+ * saved again. The saves ask this first and keep the label. Throws when
+ * Airtable can't be read; the caller decides what that costs.
+ */
+export async function leadIsMarkedTest(leadId: string): Promise<boolean> {
+  const formula = `{Lead ID}='${leadId.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`;
+  const params = new URLSearchParams({ filterByFormula: formula, maxRecords: '1' });
+  params.append('fields[]', 'Status');
+  const response = await fetch(`${tableUrl()}?${params}`, {
+    headers: { Authorization: `Bearer ${AIRTABLE_API_KEY}` },
+  });
+  if (!response.ok) {
+    const reason = airtableErrorReason(await response.text());
+    console.error('[AIRTABLE_ERROR] leadIsMarkedTest', leadId, 'status:', response.status, 'reason:', reason);
+    throw new Error(`Airtable error: ${response.status} - ${reason}`);
+  }
+  const result = await response.json();
+  return result.records?.[0]?.fields?.Status === 'Test';
+}
+
+function tableUrl(): string {
   if (!AIRTABLE_API_KEY || !AIRTABLE_BASE_ID) {
     console.error('[AIRTABLE_CONFIG_ERROR] Missing:', {
       hasApiKey: !!AIRTABLE_API_KEY,
@@ -90,7 +114,11 @@ function recordUrl(recordId: string): string {
     });
     throw new Error('Airtable configuration missing');
   }
-  return `https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${encodeURIComponent(AIRTABLE_TABLE_NAME)}/${encodeURIComponent(recordId)}`;
+  return `https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${encodeURIComponent(AIRTABLE_TABLE_NAME)}`;
+}
+
+function recordUrl(recordId: string): string {
+  return `${tableUrl()}/${encodeURIComponent(recordId)}`;
 }
 
 /**

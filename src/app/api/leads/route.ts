@@ -1,5 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
-import { upsertLeadByLeadId, leadIsMarkedTest, parseAddress, LeadFields } from "@/lib/airtable";
+import {
+  upsertLeadByLeadId,
+  updateLeadRecord,
+  leadIsMarkedTest,
+  findPhoneLeads,
+  pickPhoneLead,
+  last10,
+  parseAddress,
+  LeadFields,
+  type PhoneLeadRow,
+} from "@/lib/airtable";
 import { getClientIp, rateLimitOkAsync, isBotHoneypot, minTimeOk } from "@/lib/guard";
 import { getResendOrThrow } from "@/lib/resendSafe";
 import { put, del } from "@vercel/blob";
@@ -902,6 +912,55 @@ async function staysTest(id: string, internal: boolean): Promise<boolean> {
 }
 
 /**
+ * The phone agent's row for this customer, if their design belongs on it.
+ *
+ * Somebody who called or texted already has a row, and the design link the
+ * agent texts them files a second one on submit. Two rows is one lead counted
+ * twice and a rep who can't see the call next to the design. Matched on the
+ * last ten digits of the phone they typed; see pickPhoneLead for which row.
+ *
+ * A test never lands on a real caller's row. If the lookup fails the design is
+ * filed on its own row, as it always was: a duplicate is fixed by hand, a lost
+ * lead is not.
+ */
+async function phoneLeadFor(lead: LeadPayload, test: boolean): Promise<PhoneLeadRow | null> {
+  if (!last10(lead.phone)) return null;
+  let rows: PhoneLeadRow[];
+  try {
+    rows = await findPhoneLeads(lead.phone ?? '');
+  } catch {
+    console.warn('[LEAD_PHONE_MATCH] lookup failed, filing on its own row', lead.id);
+    return null;
+  }
+  const row = pickPhoneLead(rows, {
+    now: Date.now(),
+    fromAgentLink: lead.utm.utm_source === 'phone-agent',
+  });
+  if (row && test && row.fields?.Status !== 'Test') return null;
+  return row;
+}
+
+/**
+ * The design, written onto the caller's existing row.
+ *
+ * The row keeps what the phone agent and the inbound rep put there: Source,
+ * Status (a New stays New, a Test stays Test), first_response_at and Phone are
+ * not written. Lead ID isn't either — the design's partial saves already hold
+ * it on their own row, and two rows with one merge key would break every later
+ * upsert. Instead Notes gets a line naming it.
+ */
+async function fileOnPhoneRow(row: PhoneLeadRow, fields: LeadFields, leadId: string): Promise<{ id: string }> {
+  const design: LeadFields = { ...fields };
+  delete design.Status;
+  delete design.Source;
+  delete design.Phone;
+  const current = row.fields?.Notes ?? '';
+  const line = `${new Date().toISOString().slice(0, 10)} design tool: finished a design online (design Lead ID ${leadId}).`;
+  await updateLeadRecord(row.id, { ...design, Notes: `${current}${current ? '\n' : ''}${line}` });
+  return { id: row.id };
+}
+
+/**
  * A partial save, with the lease already held.
  *
  * Split out so the lease cannot be forgotten on an early return: every path
@@ -1330,7 +1389,10 @@ export async function POST(req: NextRequest) {
     }
 
     // A row already marked Test finishes as one, and isn't reported as a conversion.
-    const test = await staysTest(lead.id, internal);
+    const markedTest = await staysTest(lead.id, internal);
+    // A caller who then designs stays one lead: their phone row takes the design.
+    const phoneRow = await phoneLeadFor(lead, markedTest);
+    const test = markedTest || phoneRow?.fields?.Status === 'Test';
 
     // Parse address components
     const addressParts = lead.address ? parseAddress(lead.address) : {};
@@ -1422,7 +1484,10 @@ export async function POST(req: NextRequest) {
     // again rather than being told their submit is already in progress.
     let result: { id?: string };
     try {
-      result = await upsertLeadByLeadId(cleanFields, lead.id);
+      result = phoneRow
+        ? await fileOnPhoneRow(phoneRow, cleanFields, lead.id)
+        : await upsertLeadByLeadId(cleanFields, lead.id);
+      if (phoneRow) console.log('[LEAD_PHONE_MATCH] filed on the caller\'s row', lead.id, phoneRow.id);
     } catch (error) {
       await releaseLease(leaseKey, leaseToken);
       heldLease = null;
@@ -1470,7 +1535,10 @@ export async function POST(req: NextRequest) {
       mapScreenshotUrl = await uploadScreenshot(lead.id, lead.mapScreenshot);
       if (mapScreenshotUrl) {
         try {
-          await upsertLeadByLeadId({ 'Map Screenshot': [{ url: mapScreenshotUrl }] }, lead.id);
+          // Onto whichever row took the design.
+          const picture: LeadFields = { 'Map Screenshot': [{ url: mapScreenshotUrl }] };
+          if (phoneRow) await updateLeadRecord(phoneRow.id, picture);
+          else await upsertLeadByLeadId(picture, lead.id);
         } catch (error) {
           console.error(
             '[MAP_SCREENSHOT_ATTACH_ERROR]',

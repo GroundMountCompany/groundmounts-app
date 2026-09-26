@@ -114,6 +114,12 @@ export const LEAD_SCHEMA = {
     the app could write would eventually be written by the app, and then it
     would be measuring itself.
   */
+  /*
+    The running log tgmc-agent keeps on a caller's row. This app only appends
+    to it, and only when a caller's design is filed onto their phone row: the
+    line names the design's Lead ID so the inbound rep can see both.
+  */
+  Notes: 'longText',
   'Actual Quote': 'currency',
   'Actual Trench Ft': 'number',
   'Actual Notes': 'longText',

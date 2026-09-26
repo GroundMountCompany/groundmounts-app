@@ -95,8 +95,25 @@ vi.mock('@/lib/airtable', async () => {
       if (failStatusRead) throw new Error('Airtable error: 503 - upstream');
       return markedTest.has(leadId);
     },
+    findPhoneLeads: async (phone: string) => {
+      phoneLookups.push(phone);
+      if (failPhoneLookup) throw new Error('Airtable error: 503 - upstream');
+      return phoneRows;
+    },
+    updateLeadRecord: async (recordId: string, fields: LeadFields) => {
+      if (failWrite) throw new Error('Airtable error: 503 - upstream');
+      patched.push({ recordId, fields });
+    },
   };
 });
+
+/** Rows the phone agent filed for the submitted number. Empty unless a test sets them. */
+let phoneRows: Array<{ id: string; createdTime: string; fields: { Status?: string; Notes?: string } }> = [];
+/** Every phone lookup the route made. */
+const phoneLookups: string[] = [];
+let failPhoneLookup = false;
+/** Writes to an existing row by record id, rather than an upsert on Lead ID. */
+const patched: Array<{ recordId: string; fields: LeadFields }> = [];
 
 /** Lead IDs whose Airtable row the owner already marked Status "Test". */
 const markedTest = new Set<string>();
@@ -243,6 +260,10 @@ beforeEach(() => {
   markedTest.clear();
   statusReads.length = 0;
   failStatusRead = false;
+  phoneRows = [];
+  phoneLookups.length = 0;
+  failPhoneLookup = false;
+  patched.length = 0;
   curveCalls.length = 0;
   siteFacts = { ...NOTHING_KNOWN, curve: SITE_CURVE, curveSource: 'pvwatts' };
   failEmail = false;
@@ -773,6 +794,131 @@ describe('a row already marked Test stays Test', () => {
     const res = await POST(post(validLead()));
     expect(res.status).toBe(200);
     expect(written[1].Status).toBe('New');
+  });
+});
+
+describe('a caller who then designs stays one lead', () => {
+  const DAY = 24 * 60 * 60 * 1000;
+  const ago = (days: number) => new Date(Date.now() - days * DAY).toISOString();
+  const phoneRow = (days: number, fields: { Status?: string; Notes?: string } = {}) => ({
+    id: 'recPhone1',
+    createdTime: ago(days),
+    fields: { Status: 'Contacted', Notes: 'First contact by phone call 2026-09-20.', ...fields },
+  });
+  const fromAgent = () => ({ ...validLead(), utm: { utm_source: 'phone-agent', utm_medium: 'sms' } });
+
+  it('files the design from the texted link onto the caller\'s row, however old', async () => {
+    phoneRows = [phoneRow(90)];
+    const res = await POST(post(fromAgent()));
+    expect(res.status).toBe(200);
+    expect(written, 'a second row was filed').toHaveLength(0);
+    expect(patched).toHaveLength(1);
+    const { recordId, fields } = patched[0];
+    expect(recordId).toBe('recPhone1');
+    expect(fields.Panels).toBe(16);
+    expect(fields['Price Low']).toBeGreaterThan(0);
+    expect(fields['UTM Source']).toBe('phone-agent');
+    expect(fields.Email).toBe('bert@example.com');
+    // The phone row's own Source, Status, Phone and merge key are left alone.
+    expect(fields).not.toHaveProperty('Status');
+    expect(fields).not.toHaveProperty('Source');
+    expect(fields).not.toHaveProperty('Phone');
+    expect(fields).not.toHaveProperty('Lead ID');
+    expect(fields).not.toHaveProperty('first_response_at');
+    expect(fields.Notes).toMatch(
+      /^First contact by phone call 2026-09-20\.\n\d{4}-\d{2}-\d{2} design tool: finished a design online \(design Lead ID 8f14e45f-ceea-467a-9f34-2c8c3b1a77de\)\.$/
+    );
+    expect(phoneLookups).toEqual(['469-555-0100']);
+  });
+
+  it('files any design onto a caller\'s row from the last 30 days', async () => {
+    phoneRows = [phoneRow(29, { Status: 'New' })];
+    await POST(post(validLead()));
+    expect(written).toHaveLength(0);
+    expect(patched[0].recordId).toBe('recPhone1');
+    // New stays New: the route writes no Status at all.
+    expect(patched[0].fields).not.toHaveProperty('Status');
+  });
+
+  it('picks the newest of several rows for the number', async () => {
+    phoneRows = [{ ...phoneRow(20), id: 'recOlder' }, { ...phoneRow(2), id: 'recNewer' }];
+    await POST(post(validLead()));
+    expect(patched[0].recordId).toBe('recNewer');
+  });
+
+  it('files a new row, as today, when the call was more than 30 days ago', async () => {
+    phoneRows = [phoneRow(31)];
+    await POST(post(validLead()));
+    expect(patched).toHaveLength(0);
+    expect(written).toHaveLength(1);
+    expect(written[0].Status).toBe('New');
+  });
+
+  it('never touches a Customer\'s row', async () => {
+    phoneRows = [phoneRow(3, { Status: 'Customer' })];
+    await POST(post(fromAgent()));
+    expect(patched).toHaveLength(0);
+    expect(written).toHaveLength(1);
+    expect(written[0].Status).toBe('New');
+  });
+
+  it('keeps a caller\'s Test row Test, and reports no conversion', async () => {
+    conversions.capture.mockClear(); conversions.meta.mockClear();
+    phoneRows = [phoneRow(1, { Status: 'Test' })];
+    await POST(post(fromAgent()));
+    expect(patched).toHaveLength(1);
+    expect(patched[0].fields).not.toHaveProperty('Status');
+    expect(conversions.capture.mock.calls.filter((c) => c[0] === 'lead_filed')).toEqual([]);
+    expect(conversions.meta).not.toHaveBeenCalled();
+  });
+
+  it("never puts the owner's test onto a real caller's row", async () => {
+    phoneRows = [phoneRow(1)];
+    await POST(post(fromAgent(), { cookie: 'gm_internal=1' }));
+    expect(patched).toHaveLength(0);
+    expect(written[0].Status).toBe('Test');
+  });
+
+  it('files a new row, as today, when nobody called from that number', async () => {
+    await POST(post(validLead()));
+    expect(patched).toHaveLength(0);
+    expect(written).toHaveLength(1);
+    expect(written[0].Status).toBe('New');
+    expect(written[0]['Lead ID']).toBe('8f14e45f-ceea-467a-9f34-2c8c3b1a77de');
+  });
+
+  it('files a new row rather than losing the lead when the lookup fails', async () => {
+    failPhoneLookup = true;
+    phoneRows = [phoneRow(1)];
+    const res = await POST(post(fromAgent()));
+    expect(res.status).toBe(200);
+    expect(patched).toHaveLength(0);
+    expect(written).toHaveLength(1);
+  });
+
+  it("doesn't look anything up without a usable phone number", async () => {
+    await POST(post({ ...validLead(), phone: '555-0100' }));
+    expect(phoneLookups).toEqual([]);
+    expect(written).toHaveLength(1);
+  });
+
+  it("answers with the caller's row, which the owner's Airtable link opens", async () => {
+    phoneRows = [phoneRow(1)];
+    const res = await POST(post(fromAgent()));
+    expect((await res.json()).airtableId).toBe('recPhone1');
+  });
+
+  it("puts the map screenshot on the caller's row too", async () => {
+    phoneRows = [phoneRow(1)];
+    const png =
+      'data:image/png;base64,' +
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+    await POST(post({ ...fromAgent(), mapScreenshot: png }));
+    expect(written).toHaveLength(0);
+    expect(patched.map((p) => p.recordId)).toEqual(['recPhone1', 'recPhone1']);
+    expect(patched[1].fields['Map Screenshot']).toEqual([
+      { url: 'https://blob.example/map-screenshots/8f14e45f-ceea-467a-9f34-2c8c3b1a77de.png' },
+    ]);
   });
 });
 

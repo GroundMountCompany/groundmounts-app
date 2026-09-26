@@ -196,9 +196,10 @@ export function trackStepView(step: number): void {
  * the same id, for the same reason.
  */
 export function trackLeadFiled(eventId: string, props: Props = {}): void {
+  const value = typeof props.value === 'number' ? props.value : 0;
   track('lead_filed', { ...props, eventId });
-  safe(() => fbqSafe('track', 'Lead', { value: props.value ?? 0, currency: 'USD' }, { eventID: eventId }));
-  postLeadToParent(eventId);
+  safe(() => fbqSafe('track', 'Lead', { value, currency: 'USD' }, { eventID: eventId }));
+  postLeadToParent(eventId, value);
 }
 
 /** Test seam: forget the client and the queue between cases. */

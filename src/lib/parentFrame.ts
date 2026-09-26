@@ -19,7 +19,7 @@ export const PARENT_ORIGIN = 'https://groundmounts.com';
 
 export type ParentMessage =
   | { type: 'designer:step'; step: number }
-  | { type: 'designer:complete'; eventId: string };
+  | { type: 'designer:complete'; eventId: string; value: number };
 
 function post(message: ParentMessage): void {
   try {
@@ -37,8 +37,12 @@ export function postStepToParent(step: number): void {
   post({ type: 'designer:step', step });
 }
 
-/** The lead was filed. `eventId` is the lead id, the pixel and CAPI's event id. */
-export function postLeadToParent(eventId: string): void {
+/**
+ * The lead was filed. `eventId` is the lead id, the pixel and CAPI's event id,
+ * and `value` the same one this pixel's Lead carries, so whichever copy Meta
+ * keeps has it.
+ */
+export function postLeadToParent(eventId: string, value: number): void {
   if (!eventId) return;
-  post({ type: 'designer:complete', eventId });
+  post({ type: 'designer:complete', eventId, value });
 }

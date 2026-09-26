@@ -28,11 +28,11 @@ describe('messages to the embedding site', () => {
     expect(PARENT_ORIGIN).not.toBe('*');
   });
 
-  it('posts the filed lead with its lead id as the event id', () => {
+  it('posts the filed lead with its lead id as the event id, and its value', () => {
     const postMessage = framed();
-    postLeadToParent('8f14e45f-ceea-467a-9f34-2c8c3b1a77de');
+    postLeadToParent('8f14e45f-ceea-467a-9f34-2c8c3b1a77de', 41250);
     expect(postMessage).toHaveBeenCalledWith(
-      { type: 'designer:complete', eventId: '8f14e45f-ceea-467a-9f34-2c8c3b1a77de' },
+      { type: 'designer:complete', eventId: '8f14e45f-ceea-467a-9f34-2c8c3b1a77de', value: 41250 },
       PARENT_ORIGIN
     );
   });
@@ -40,12 +40,12 @@ describe('messages to the embedding site', () => {
   it('sends nothing for the owner testing (?internal=1 or the cookie)', () => {
     let postMessage = framed({ search: '?source=groundmounts.com&internal=1' });
     postStepToParent(1);
-    postLeadToParent('8f14e45f-ceea-467a-9f34-2c8c3b1a77de');
+    postLeadToParent('8f14e45f-ceea-467a-9f34-2c8c3b1a77de', 41250);
     expect(postMessage).not.toHaveBeenCalled();
 
     postMessage = framed({ cookie: 'other=1; gm_internal=1' });
     postStepToParent(1);
-    postLeadToParent('8f14e45f-ceea-467a-9f34-2c8c3b1a77de');
+    postLeadToParent('8f14e45f-ceea-467a-9f34-2c8c3b1a77de', 41250);
     expect(postMessage).not.toHaveBeenCalled();
   });
 
@@ -56,13 +56,13 @@ describe('messages to the embedding site', () => {
     vi.stubGlobal('window', win);
     vi.stubGlobal('document', { cookie: '' });
     postStepToParent(2);
-    postLeadToParent('8f14e45f-ceea-467a-9f34-2c8c3b1a77de');
+    postLeadToParent('8f14e45f-ceea-467a-9f34-2c8c3b1a77de', 41250);
     expect(postMessage).not.toHaveBeenCalled();
   });
 
   it('never posts a lead without an id', () => {
     const postMessage = framed();
-    postLeadToParent('');
+    postLeadToParent('', 41250);
     expect(postMessage).not.toHaveBeenCalled();
   });
 
@@ -72,6 +72,6 @@ describe('messages to the embedding site', () => {
       throw new Error('blocked');
     });
     expect(() => postStepToParent(4)).not.toThrow();
-    expect(() => postLeadToParent('8f14e45f-ceea-467a-9f34-2c8c3b1a77de')).not.toThrow();
+    expect(() => postLeadToParent('8f14e45f-ceea-467a-9f34-2c8c3b1a77de', 41250)).not.toThrow();
   });
 });

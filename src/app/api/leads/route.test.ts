@@ -316,6 +316,38 @@ describe('POST /api/leads', () => {
     expect(conversions.meta).toHaveBeenCalledTimes(1);
   });
 
+  it("hands Meta the ad click id, the customer's IP and user agent", async () => {
+    conversions.meta.mockClear();
+    const fbc = 'fb.1.1790000000000.IwAR3x_Y-9z';
+    await POST(
+      post(
+        { ...validLead(), fbc },
+        { 'x-forwarded-for': '198.51.100.7, 10.0.0.1', 'user-agent': 'Mozilla/5.0 (iPhone)' }
+      )
+    );
+    expect(conversions.meta).toHaveBeenCalledTimes(1);
+    expect(conversions.meta.mock.calls[0][1]).toMatchObject({
+      fbc,
+      clientIp: '198.51.100.7',
+      userAgent: 'Mozilla/5.0 (iPhone)',
+    });
+    // Sent to Meta only. Nothing new reaches the owner's record.
+    expect(JSON.stringify(written)).not.toContain('IwAR3x_Y-9z');
+  });
+
+  it('drops a malformed click id and sends the Lead without it', async () => {
+    conversions.meta.mockClear();
+    await POST(post({ ...validLead(), fbc: 'fb.1.now.<script>' }));
+    expect(conversions.meta).toHaveBeenCalledTimes(1);
+    expect(conversions.meta.mock.calls[0][1].fbc).toBeUndefined();
+  });
+
+  it('never hands Meta the click id of an owner test', async () => {
+    conversions.meta.mockClear();
+    await POST(post({ ...validLead(), fbc: 'fb.1.1790000000000.clickA', internal: true }));
+    expect(conversions.meta).not.toHaveBeenCalled();
+  });
+
   it("files the owner's submit from inside the groundmounts.com iframe as a Test", async () => {
     // No cookie: in a cross-site iframe the browser never sends it. The page
     // was opened with ?internal=1, so the body says so instead.

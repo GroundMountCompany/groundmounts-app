@@ -10,7 +10,7 @@ import type { PanelTier } from '@/config/pricing';
 import type { SlopeTier } from '@/lib/slope';
 import { TX_FALLBACK_CURVE, type ProductionCurve } from '@/lib/production';
 import { resetSiteIntel } from '@/lib/siteIntel';
-import type { Utm } from '@/lib/utm';
+import { nextFbc, type Utm } from '@/lib/utm';
 import type { BillMonth } from '@/lib/billSchema';
 
 /** none -> reading -> review -> confirmed, with failure returning to none. */
@@ -166,6 +166,8 @@ export interface QuoteState {
    * possibly a reload later.
    */
   utm: Utm;
+  /** Meta's click id as its `fbc` value (see lib/utm), kept with the tags. */
+  fbc: string | null;
   slopePercent: number | null;
   slopeTier: SlopeTier;
   /**
@@ -247,6 +249,7 @@ interface QuoteActions {
   setBillPath: (path: BillPath) => void;
   markArrayTouched: () => void;
   setUtm: (utm: Utm) => void;
+  setFbc: (fbc: string) => void;
   /** What we read, before the customer has confirmed it. */
   setBillDraft: (months: BillMonth[], ratePerKwh: number | null) => void;
   setHighestValue: (v: number) => void;
@@ -336,6 +339,7 @@ const initialState: QuoteState = {
   billPath: null,
   arrayTouched: false,
   utm: {},
+  fbc: null,
   slopePercent: null,
   slopeTier: 'Unknown',
   slopeSource: null,
@@ -410,6 +414,7 @@ export const useQuoteStore = create<QuoteStore>()(
       // Merged, not replaced: a customer who lands with ?utm_source= and then
       // reloads without it should keep the source that brought them.
       setUtm: (utm) => set((s) => ({ utm: { ...s.utm, ...utm } })),
+      setFbc: (fbc) => set((s) => ({ fbc: nextFbc(s.fbc, fbc) })),
       setBillDraft: (billDraft, billDraftRate) =>
         set({ billDraft, billDraftRate, billPhase: 'review' }),
       setHighestValue: (highestValue) => set({ highestValue }),
@@ -563,6 +568,7 @@ export const useQuoteStore = create<QuoteStore>()(
         billPath: state.billPath,
         arrayTouched: state.arrayTouched,
         utm: state.utm,
+        fbc: state.fbc,
         slopePercent: state.slopePercent,
         slopeTier: state.slopeTier,
         slopeSource: state.slopeSource,

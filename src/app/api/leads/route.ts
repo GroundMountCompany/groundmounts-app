@@ -27,7 +27,7 @@ import {
   releaseLease,
   StoreUnavailable,
 } from "@/lib/server/redis";
-import { parseUtm, UTM_FIELDS, UTM_KEYS, type Utm } from "@/lib/utm";
+import { parseFbc, parseUtm, UTM_FIELDS, UTM_KEYS, type Utm } from "@/lib/utm";
 import { INTERNAL_COOKIE, isInternalRequest } from "@/lib/internalVisit";
 import { parseSnapshot, RESUME_PREFIX } from "@/lib/resumeSnapshot";
 import { EMAIL_LEAD_PREFIX, SUBMIT_PREFIX } from "@/lib/leadKeys";
@@ -202,6 +202,8 @@ interface LeadPayload {
   source?: string;
   /** The campaign, five separate parameters. Attribution detail, never PII. */
   utm: Utm;
+  /** Meta's click id as `fbc`. Sent to Meta with the Lead, never written to Airtable. */
+  fbc?: string;
   /** Which brand the funnel wore. Attribution is `source`, and separate. */
   brand?: string;
   quote?: {
@@ -378,6 +380,7 @@ function validateLead(data: unknown): LeadPayload {
     source: slug(obj.source) ?? '',
     brand: typeof obj.brand === 'string' ? obj.brand : undefined,
     utm: parseUtm(obj.utm),
+    fbc: parseFbc(obj.fbc),
     quote: validateContext(obj.quote),
     ts: obj.ts,
     honeypot: obj.honeypot as string,
@@ -510,6 +513,12 @@ function utmFields(utm: Utm): Partial<Record<string, string>> {
     if (value) out[UTM_FIELDS[key]] = value;
   }
   return out;
+}
+
+/** The customer's IP for Meta's matching: the first forwarded hop, or none. */
+function clientIpForMeta(req: NextRequest): string | undefined {
+  const ip = getClientIp(req);
+  return ip === '0.0.0.0' ? undefined : ip;
 }
 
 /**
@@ -1459,6 +1468,11 @@ export async function POST(req: NextRequest) {
         phone: lead.phone,
         value: midpoint(priced.quote.low, priced.quote.high),
         sourceUrl: req.headers.get('referer') ?? undefined,
+        // What Meta matches a lead to its ad click with. The customer's own
+        // browser made this request, so its address and agent are theirs.
+        fbc: lead.fbc,
+        clientIp: clientIpForMeta(req),
+        userAgent: req.headers.get('user-agent') ?? undefined,
       });
     }
 

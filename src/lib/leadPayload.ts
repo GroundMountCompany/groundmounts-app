@@ -49,6 +49,8 @@ export interface LeadPayload {
   brand?: string;
   /** The campaign that produced this lead, kept since the landing page. */
   utm: Utm;
+  /** Meta's click id as `fbc`, when an ad click brought them. Never stored. */
+  fbc?: string;
   quote: LeadQuote;
   ts: number;
   honeypot: string;
@@ -112,6 +114,7 @@ export function buildLeadPayload(
     address: s.address,
     source: contact.source,
     utm: s.utm,
+    ...(s.fbc ? { fbc: s.fbc } : {}),
     brand: contact.brand,
     quote: {
       inputs,

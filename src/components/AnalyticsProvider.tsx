@@ -4,6 +4,7 @@ import { useEffect } from 'react';
 import { useQuoteStore } from '@/store/quoteStore';
 import { identify, startAnalytics, utmFromSearch } from '@/lib/analytics';
 import { internalCookieFor } from '@/lib/internalVisit';
+import { fbcFromSearch } from '@/lib/utm';
 
 /**
  * Start analytics, and keep the person attached to their lead.
@@ -16,6 +17,7 @@ import { internalCookieFor } from '@/lib/internalVisit';
 export default function AnalyticsProvider() {
   const leadId = useQuoteStore((s) => s.leadId);
   const setUtm = useQuoteStore((s) => s.setUtm);
+  const setFbc = useQuoteStore((s) => s.setFbc);
 
   useEffect(() => {
     startAnalytics();
@@ -31,12 +33,15 @@ export default function AnalyticsProvider() {
     */
     const utm = utmFromSearch(window.location.search);
     if (Object.keys(utm).length > 0) setUtm(utm);
+    // Meta's click id, kept the same way for the server's Lead (see lib/utm).
+    const fbc = fbcFromSearch(window.location.search, Date.now());
+    if (fbc) setFbc(fbc);
 
     // `?internal=1` marks this browser as the owner's, so its leads file as
     // tests. A cookie rather than the store, because the server decides.
     const cookie = internalCookieFor(window.location.search, window.location.protocol === 'https:');
     if (cookie) document.cookie = cookie;
-  }, [setUtm]);
+  }, [setUtm, setFbc]);
 
   // A lead id appears partway through, so this cannot be done once on mount.
   useEffect(() => {

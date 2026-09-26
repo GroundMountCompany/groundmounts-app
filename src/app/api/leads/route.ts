@@ -46,6 +46,7 @@ import { RESUME_TTL_SECONDS, resumeConfigured, signResume } from "@/lib/server/r
 import ResumeEmail from "@/components/common/ResumeEmail";
 import { RESUME_EMAIL } from "@/config/copy";
 import { captureServer, metaLead } from "@/lib/server/analytics";
+import { rememberPhoneRow } from "@/lib/server/leadRow";
 
 /**
  * The twenty-five year comparison, from server figures only.
@@ -1487,7 +1488,12 @@ export async function POST(req: NextRequest) {
       result = phoneRow
         ? await fileOnPhoneRow(phoneRow, cleanFields, lead.id)
         : await upsertLeadByLeadId(cleanFields, lead.id);
-      if (phoneRow) console.log('[LEAD_PHONE_MATCH] filed on the caller\'s row', lead.id, phoneRow.id);
+      if (phoneRow) {
+        console.log('[LEAD_PHONE_MATCH] filed on the caller\'s row', lead.id, phoneRow.id);
+        // Before the submit record, so /api/call-time (which waits on that
+        // record) and the email webhook find the caller's row too.
+        await rememberPhoneRow(lead.id, phoneRow.id);
+      }
     } catch (error) {
       await releaseLease(leaseKey, leaseToken);
       heldLease = null;

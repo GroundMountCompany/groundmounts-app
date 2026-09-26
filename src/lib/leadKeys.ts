@@ -18,3 +18,6 @@ export const EMAIL_LEAD_PREFIX = 'gm:emaillead:';
 
 /** One webhook delivery, by Svix message id, so a retry is not a second write. */
 export const EMAIL_EVENT_PREFIX = 'gm:emailevent:';
+
+/** A design's Lead ID to the phone agent's row it was filed onto, if it was. */
+export const PHONE_ROW_PREFIX = 'gm:phonerow:';

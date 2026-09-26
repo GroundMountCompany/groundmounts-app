@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
-import { upsertLeadByLeadId } from '@/lib/airtable';
 import type { LeadFields } from '@/lib/airtable';
+import { writeLeadFields } from '@/lib/server/leadRow';
 import { getClientIp, rateLimitOkAsync } from '@/lib/guard';
 import { storeGet, storeSet, acquireLease, releaseLease } from '@/lib/server/redis';
 import { parseCallTime } from '@/lib/callTime';
@@ -85,7 +85,8 @@ async function record(
     }
 
     const fields: LeadFields = { 'Preferred Call Time': when };
-    await upsertLeadByLeadId(fields, leadId);
+    // Onto the caller's row if the design was filed there.
+    await writeLeadFields(fields, leadId);
 
     // Only after the write, so a failed write is retried next time rather than
     // silently remembered as done.

@@ -50,9 +50,13 @@ vi.mock('@/lib/server/redis', async () => {
       if (store.get(key) === token) store.delete(key);
     },
     cacheGet: async () => null,
-    cacheSet: async () => undefined,
+    cacheSet: async (key: string, value: unknown) => {
+      cached.set(key, value);
+    },
   };
 });
+/** Best-effort writes, recorded but never read back (cacheGet always misses). */
+const cached = new Map<string, unknown>();
 
 /**
  * What actually reaches Airtable.
@@ -254,6 +258,7 @@ beforeEach(() => {
   deletedBlobs.length = 0;
   failAttach = false;
   store.clear();
+  cached.clear();
   storeDown = false;
   failWrite = false;
   written.length = 0;
@@ -900,6 +905,17 @@ describe('a caller who then designs stays one lead', () => {
     await POST(post({ ...validLead(), phone: '555-0100' }));
     expect(phoneLookups).toEqual([]);
     expect(written).toHaveLength(1);
+  });
+
+  it("links the design to the caller's row, so the call-time pick and email events follow it", async () => {
+    phoneRows = [phoneRow(1)];
+    await POST(post(fromAgent()));
+    expect(cached.get('gm:phonerow:8f14e45f-ceea-467a-9f34-2c8c3b1a77de')).toBe('recPhone1');
+  });
+
+  it('links nothing when the design was filed on its own row', async () => {
+    await POST(post(validLead()));
+    expect([...cached.keys()].filter((k) => k.startsWith('gm:phonerow:'))).toEqual([]);
   });
 
   it("answers with the caller's row, which the owner's Airtable link opens", async () => {

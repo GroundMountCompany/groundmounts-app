@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
-import { upsertLeadByLeadId } from '@/lib/airtable';
 import type { LeadFields } from '@/lib/airtable';
+import { writeLeadFields } from '@/lib/server/leadRow';
 import { getClientIp, rateLimitOkAsync } from '@/lib/guard';
 import { cacheGet, storeSet } from '@/lib/server/redis';
 import { readSvixHeaders, verifySvix } from '@/lib/server/svix';
@@ -143,7 +143,8 @@ export async function POST(req: Request): Promise<NextResponse> {
   }
 
   try {
-    await upsertLeadByLeadId(fields, leadId);
+    // Onto the caller's row if the design was filed there.
+    await writeLeadFields(fields, leadId);
     await storeSet(statusKey(leadId), status, SEEN_TTL_SECONDS);
     if (svixId) await storeSet(eventKey, true, SEEN_TTL_SECONDS);
     console.log('[EMAIL_WEBHOOK]', leadId, status);

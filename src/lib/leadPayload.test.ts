@@ -163,4 +163,14 @@ describe('lead payload carries the design the customer actually saw', () => {
     expect('internal' in buildLeadPayload(s, contact, 1_060_000)).toBe(false);
     expect('internal' in buildLeadPayload(s, { ...contact, internal: false }, 1_060_000)).toBe(false);
   });
+
+  it('carries the Meta click id only when an ad click brought them', () => {
+    useQuoteStore.setState({ fbc: null });
+    expect('fbc' in buildLeadPayload(useQuoteStore.getState(), contact, 1_060_000)).toBe(false);
+
+    useQuoteStore.setState({ fbc: 'fb.1.1790000000000.clickA' });
+    expect(buildLeadPayload(useQuoteStore.getState(), contact, 1_060_000).fbc).toBe(
+      'fb.1.1790000000000.clickA'
+    );
+  });
 });

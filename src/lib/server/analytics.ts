@@ -93,12 +93,24 @@ function hashed(value: string | undefined): string | undefined {
  * `eventID`. Meta collapses the pair into one conversion — without it the
  * owner would see every lead twice and bid against their own numbers.
  *
+ * `fbc` (the ad's click id), the customer's IP and their browser's user agent
+ * are what let Meta tie this Lead to the click that paid for it. Each is sent
+ * only when present; none of them is hashed, per Meta's spec.
+ *
  * Skipped cleanly when META_CAPI_TOKEN is absent, which is the state on every
  * preview deployment and on a local machine.
  */
 export async function metaLead(
   eventId: string,
-  input: { email?: string; phone?: string; value?: number; sourceUrl?: string }
+  input: {
+    email?: string;
+    phone?: string;
+    value?: number;
+    sourceUrl?: string;
+    fbc?: string;
+    clientIp?: string;
+    userAgent?: string;
+  }
 ): Promise<void> {
   const token = process.env.META_CAPI_TOKEN?.trim();
   if (!token || !eventId) return;
@@ -124,6 +136,9 @@ export async function metaLead(
               user_data: {
                 em: hashed(input.email),
                 ph: hashed(input.phone?.replace(/\D/g, '')),
+                fbc: input.fbc || undefined,
+                client_ip_address: input.clientIp || undefined,
+                client_user_agent: input.userAgent || undefined,
               },
               custom_data: { value: input.value ?? 0, currency: 'USD' },
             },

@@ -41,6 +41,39 @@ export const UTM_FIELDS: Record<UtmKey, string> = {
   utm_content: 'UTM Content',
 };
 
+/*
+ * Meta's click id, as the `fbc` value its Conversions API matches on.
+ *
+ * An ad click lands with `?fbclid=`. Meta wants it back on the server's Lead as
+ * `fb.1.<ms the click id was first seen>.<fbclid>`; without it a lead from a
+ * browser that blocked the pixel cannot be tied to the ad that paid for it.
+ * Kept next to the UTM tags for the same reason they are kept: the URL is
+ * stripped as the funnel advances. Never written to Airtable.
+ */
+const FBCLID_PATTERN = /^[A-Za-z0-9_-]{1,500}$/;
+const FBC_PATTERN = /^fb\.1\.\d{13}\.[A-Za-z0-9_-]{1,500}$/;
+
+/** The `fbc` for this URL's `fbclid`, first seen at `now`, or none. */
+export function fbcFromSearch(search: string, now: number): string | undefined {
+  const fbclid = new URLSearchParams(search).get('fbclid')?.trim();
+  if (!fbclid || !FBCLID_PATTERN.test(fbclid)) return undefined;
+  return `fb.1.${Math.floor(now)}.${fbclid}`;
+}
+
+/**
+ * Which `fbc` to keep. The same click id seen again (a reload) keeps its first
+ * timestamp; a different one is a newer ad click and replaces it, as Meta asks.
+ */
+export function nextFbc(current: string | null, incoming: string): string {
+  const clickId = (fbc: string) => fbc.split('.').slice(3).join('.');
+  return current && clickId(current) === clickId(incoming) ? current : incoming;
+}
+
+/** Read an `fbc` off an untrusted request body. Anything malformed is dropped. */
+export function parseFbc(value: unknown): string | undefined {
+  return typeof value === 'string' && FBC_PATTERN.test(value) ? value : undefined;
+}
+
 /** Read a UTM object off an untrusted request body. */
 export function parseUtm(value: unknown): Utm {
   if (!value || typeof value !== 'object') return {};

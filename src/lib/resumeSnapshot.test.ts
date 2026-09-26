@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { parseSnapshot } from './resumeSnapshot';
-import { UTM_KEYS, parseUtm, utmFromSearch } from './utm';
+import { UTM_KEYS, fbcFromSearch, nextFbc, parseFbc, parseUtm, utmFromSearch } from './utm';
+import { useQuoteStore } from '@/store/quoteStore';
 
 const GOOD = {
   version: 1,
@@ -125,5 +126,44 @@ describe('campaign parameters', () => {
     // So adding a sixth parameter cannot land with nowhere to put it.
     const all = Object.fromEntries(UTM_KEYS.map((k) => [k, k]));
     expect(parseUtm(all)).toEqual(all);
+  });
+});
+
+describe('Meta click id', () => {
+  const SEEN = 1_790_000_000_000;
+
+  it('turns ?fbclid= into the fbc Meta matches on, stamped when first seen', () => {
+    expect(fbcFromSearch('?utm_source=meta&fbclid=IwAR3x_Y-9z', SEEN)).toBe(
+      `fb.1.${SEEN}.IwAR3x_Y-9z`
+    );
+  });
+
+  it('ignores a missing, blank or odd-looking click id', () => {
+    expect(fbcFromSearch('?utm_source=meta', SEEN)).toBeUndefined();
+    expect(fbcFromSearch('?fbclid=', SEEN)).toBeUndefined();
+    expect(fbcFromSearch('?fbclid=abc%3Cscript%3E', SEEN)).toBeUndefined();
+    expect(fbcFromSearch(`?fbclid=${'a'.repeat(501)}`, SEEN)).toBeUndefined();
+  });
+
+  it('keeps the first timestamp on a reload, and takes a newer click', () => {
+    const first = `fb.1.${SEEN}.clickA`;
+    expect(nextFbc(null, first)).toBe(first);
+    expect(nextFbc(first, `fb.1.${SEEN + 60_000}.clickA`)).toBe(first);
+    expect(nextFbc(first, `fb.1.${SEEN + 60_000}.clickB`)).toBe(`fb.1.${SEEN + 60_000}.clickB`);
+  });
+
+  it('is kept in the store the same way', () => {
+    useQuoteStore.setState({ fbc: null });
+    useQuoteStore.getState().setFbc(`fb.1.${SEEN}.clickA`);
+    useQuoteStore.getState().setFbc(`fb.1.${SEEN + 1}.clickA`);
+    expect(useQuoteStore.getState().fbc).toBe(`fb.1.${SEEN}.clickA`);
+  });
+
+  it('accepts only a well-formed fbc off the request body', () => {
+    expect(parseFbc(`fb.1.${SEEN}.clickA`)).toBe(`fb.1.${SEEN}.clickA`);
+    expect(parseFbc('fb.1.123.clickA')).toBeUndefined();
+    expect(parseFbc(`fb.1.${SEEN}.a b`)).toBeUndefined();
+    expect(parseFbc(42)).toBeUndefined();
+    expect(parseFbc(undefined)).toBeUndefined();
   });
 });

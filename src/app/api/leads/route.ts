@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+import { after, NextRequest, NextResponse } from "next/server";
 import { upsertLeadByLeadId, leadIsMarkedTest, parseAddress, LeadFields } from "@/lib/airtable";
 import { getClientIp, rateLimitOkAsync, isBotHoneypot, minTimeOk } from "@/lib/guard";
 import { getResendOrThrow } from "@/lib/resendSafe";
@@ -996,6 +996,20 @@ async function uploadScreenshot(leadId: string, dataUrl: string): Promise<string
   }
 }
 
+/**
+ * Work that must finish but must not hold up the customer's response. On Vercel,
+ * next/server's after() keeps the function alive until it completes; a bare
+ * `void` promise can be frozen mid-request. Outside a request (unit tests) after()
+ * throws, so the work just starts.
+ */
+function afterResponse(work: () => Promise<unknown>): void {
+  try {
+    after(work);
+  } catch {
+    void work();
+  }
+}
+
 export async function POST(req: NextRequest) {
   // Hoisted so an unexpected throw anywhere below still gives the lease back —
   // and only ours, never a newer holder's.
@@ -1447,19 +1461,24 @@ export async function POST(req: NextRequest) {
     // The owner's tests (Status "Test") are not conversions: reporting them would
     // teach Meta and PostHog that Bert is the customer to find more of.
     if (!test) {
-      void captureServer('lead_filed', lead.id, {
+      // after(): run once the response is sent, but the platform keeps the
+      // function alive until they finish. A bare `void` could be frozen mid-request
+      // on Vercel and the conversion lost without a trace.
+      afterResponse(() => captureServer('lead_filed', lead.id, {
         priceLow: priced.quote.low,
         priceHigh: priced.quote.high,
         panels: inputs.panelCount,
         source: lead.source || undefined,
         ...lead.utm,
-      });
-      void metaLead(lead.id, {
+      }));
+      afterResponse(() => metaLead(lead.id, {
         email: lead.email,
         phone: lead.phone,
         value: midpoint(priced.quote.low, priced.quote.high),
         sourceUrl: req.headers.get('referer') ?? undefined,
-      });
+        ip: (ip => (ip === '0.0.0.0' ? undefined : ip))(getClientIp(req)),
+        userAgent: req.headers.get('user-agent') ?? undefined,
+      }));
     }
 
     // Now that the record exists, and only now, the screenshot is worth

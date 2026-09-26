@@ -173,6 +173,24 @@ export default function Step6Quote() {
 
       if (result.body?.leadFiled) store.setLeadFiled(payload.id);
 
+      /*
+        Both counts, once, sharing an id, the moment the lead is filed.
+
+        The same conversion is reported by the browser and by the server — the
+        browser's can be blocked and the server's cannot, so neither alone is
+        reliable. `payload.id` is the lead id, already unique per submission
+        and idempotent server-side, so Meta and PostHog de-duplicate on it.
+        Fired on the lead, not the email: a lead whose quote email failed is
+        still a lead. A resend of an already-filed lead is not a new one.
+      */
+      // The owner's own tests are not conversions (see internalVisit).
+      if (result.body?.leadFiled && !alreadyFiled && !payload.internal && !internalBrowser()) {
+        const b = result.body;
+        trackLeadFiled(payload.id, {
+          value: Math.round(((b?.priceLow ?? 0) + (b?.priceHigh ?? 0)) / 2),
+        });
+      }
+
       if (!result.ok) {
         setError(
           useQuoteStore.getState().leadFiled === payload.id
@@ -197,22 +215,6 @@ export default function Step6Quote() {
         return;
       }
       useQuoteStore.getState().setEmailSent(payload.id);
-
-      /*
-        Both counts, once, sharing an id.
-
-        The same conversion is reported by the browser and by the server — the
-        browser's can be blocked and the server's cannot, so neither alone is
-        reliable. `payload.id` is the lead id, which is already unique per
-        submission and already idempotent server-side, so Meta and PostHog
-        both de-duplicate on it rather than counting the lead twice.
-      */
-      // The owner's own tests are not conversions (see internalVisit).
-      if (!payload.internal && !internalBrowser()) {
-        trackLeadFiled(payload.id, {
-          value: Math.round(((body?.priceLow ?? 0) + (body?.priceHigh ?? 0)) / 2),
-        });
-      }
 
       setFiledLeadId(payload.id);
       clearPersistedQuote();

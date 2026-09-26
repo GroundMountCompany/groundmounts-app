@@ -2,6 +2,7 @@
 
 import { useQuoteStore } from '@/store/quoteStore';
 import { fbqSafe } from './fb';
+import { postLeadToParent, postStepToParent } from './parentFrame';
 import { utmFromSearch } from './utm';
 
 export { utmFromSearch };
@@ -186,15 +187,18 @@ export function track(event: AnalyticsEvent, props: Props = {}): void {
 export function trackStepView(step: number): void {
   track('step_viewed', { step });
   safe(() => fbqSafe('track', 'ViewContent', { content_name: `step-${step}` }));
+  postStepToParent(step);
 }
 
 /**
  * The lead, on both. `eventId` is shared with the server's Conversions API
- * call so Meta counts one conversion rather than two.
+ * call so Meta counts one conversion rather than two. The embedding site gets
+ * the same id, for the same reason.
  */
 export function trackLeadFiled(eventId: string, props: Props = {}): void {
   track('lead_filed', { ...props, eventId });
   safe(() => fbqSafe('track', 'Lead', { value: props.value ?? 0, currency: 'USD' }, { eventID: eventId }));
+  postLeadToParent(eventId);
 }
 
 /** Test seam: forget the client and the queue between cases. */

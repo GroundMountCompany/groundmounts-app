@@ -73,7 +73,7 @@ export async function captureServer(
 // --- Meta Conversions API ---------------------------------------------------
 
 const META_PIXEL_ID = '1711326086132514';
-const META_API_VERSION = 'v21.0';
+const META_API_VERSION = 'v25.0';
 
 export function metaCapiEnabled(): boolean {
   return (process.env.META_CAPI_TOKEN?.trim() ?? '') !== '';

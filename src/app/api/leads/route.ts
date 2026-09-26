@@ -1459,6 +1459,8 @@ export async function POST(req: NextRequest) {
         phone: lead.phone,
         value: midpoint(priced.quote.low, priced.quote.high),
         sourceUrl: req.headers.get('referer') ?? undefined,
+        ip: (ip => (ip === '0.0.0.0' ? undefined : ip))(getClientIp(req)),
+        userAgent: req.headers.get('user-agent') ?? undefined,
       });
     }
 

@@ -98,7 +98,7 @@ function hashed(value: string | undefined): string | undefined {
  */
 export async function metaLead(
   eventId: string,
-  input: { email?: string; phone?: string; value?: number; sourceUrl?: string }
+  input: { email?: string; phone?: string; value?: number; sourceUrl?: string; ip?: string; userAgent?: string }
 ): Promise<void> {
   const token = process.env.META_CAPI_TOKEN?.trim();
   if (!token || !eventId) return;
@@ -107,7 +107,7 @@ export async function metaLead(
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), CAPTURE_TIMEOUT_MS);
     try {
-      await fetch(`https://graph.facebook.com/${META_API_VERSION}/${META_PIXEL_ID}/events`, {
+      const res = await fetch(`https://graph.facebook.com/${META_API_VERSION}/${META_PIXEL_ID}/events`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         signal: controller.signal,
@@ -124,16 +124,25 @@ export async function metaLead(
               user_data: {
                 em: hashed(input.email),
                 ph: hashed(input.phone?.replace(/\D/g, '')),
+                // Unhashed by Meta's rules; they improve matching the lead to the ad click.
+                client_ip_address: input.ip || undefined,
+                client_user_agent: input.userAgent || undefined,
               },
               custom_data: { value: input.value ?? 0, currency: 'USD' },
             },
           ],
         }),
       });
+      // A rejected event (expired token, wrong pixel) must be visible in the logs,
+      // not look delivered. Still never thrown: analytics never breaks a submit.
+      if (!res.ok) {
+        const body = await res.text().catch(() => '');
+        console.error('[META_CAPI_FAILED]', res.status, body.slice(0, 300));
+      }
     } finally {
       clearTimeout(timer);
     }
-  } catch {
-    /* Same rule. Analytics never breaks a submit. */
+  } catch (err) {
+    console.error('[META_CAPI_FAILED]', err instanceof Error ? err.message : 'error');
   }
 }

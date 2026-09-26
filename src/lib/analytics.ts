@@ -186,6 +186,23 @@ export function track(event: AnalyticsEvent, props: Props = {}): void {
 export function trackStepView(step: number): void {
   track('step_viewed', { step });
   safe(() => fbqSafe('track', 'ViewContent', { content_name: `step-${step}` }));
+  tellParent({ type: 'designer:step', step });
+}
+
+/**
+ * groundmounts.com hosts this app in an iframe and runs the Meta pixel as a
+ * first party, where its cookies (including the ad click's _fbc) survive. The
+ * pixel in here is third-party and loses them in Safari and in-app browsers.
+ * So the host is told each step and the finished lead, and fires the events
+ * itself. Only these origins ever receive a message.
+ */
+const PARENT_ORIGINS = ['https://groundmounts.com', 'https://www.groundmounts.com'];
+
+function tellParent(message: Record<string, unknown>): void {
+  safe(() => {
+    if (typeof window === 'undefined' || window.parent === window) return;
+    for (const origin of PARENT_ORIGINS) window.parent.postMessage(message, origin);
+  });
 }
 
 /**
@@ -195,6 +212,8 @@ export function trackStepView(step: number): void {
 export function trackLeadFiled(eventId: string, props: Props = {}): void {
   track('lead_filed', { ...props, eventId });
   safe(() => fbqSafe('track', 'Lead', { value: props.value ?? 0, currency: 'USD' }, { eventID: eventId }));
+  // Same eventId, so Meta folds the host's copy into this one and the server's.
+  tellParent({ type: 'designer:complete', leadId: eventId, value: props.value ?? 0 });
 }
 
 /** Test seam: forget the client and the queue between cases. */

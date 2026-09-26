@@ -106,6 +106,71 @@ export async function leadIsMarkedTest(leadId: string): Promise<boolean> {
   return result.records?.[0]?.fields?.Status === 'Test';
 }
 
+/** The Source values tgmc-agent writes on the row it files for a caller or texter. */
+export const PHONE_SOURCES = ['Phone call', 'Text message'] as const;
+
+/** How far back a caller's row still counts as the same lead when the design link isn't the agent's. */
+export const PHONE_LEAD_WINDOW_DAYS = 30;
+
+export interface PhoneLeadRow {
+  id: string;
+  createdTime: string;
+  fields: { Status?: string; Notes?: string };
+}
+
+/** The last ten digits of a phone number, or null if it has fewer. */
+export function last10(phone: string | undefined): string | null {
+  const digits = String(phone ?? '').replace(/\D/g, '');
+  return digits.length >= 10 ? digits.slice(-10) : null;
+}
+
+/**
+ * The rows the phone agent filed for this number, any age.
+ *
+ * Matched the way tgmc-agent matches a caller: punctuation stripped, last ten
+ * digits compared, so "(469) 555-0100" and "+14695550100" are one person. The
+ * formula only ever sees digits, so nothing typed into the form can reach it.
+ */
+export async function findPhoneLeads(phone: string): Promise<PhoneLeadRow[]> {
+  const ten = last10(phone);
+  if (!ten) return [];
+  const sources = PHONE_SOURCES.map((s) => `{Source}='${s}'`).join(', ');
+  const formula = `AND(RIGHT(REGEX_REPLACE({Phone}&"", "[^0-9]", ""), 10)='${ten}', OR(${sources}))`;
+  const params = new URLSearchParams({ filterByFormula: formula, maxRecords: '10' });
+  params.append('fields[]', 'Status');
+  params.append('fields[]', 'Notes');
+  const response = await fetch(`${tableUrl()}?${params}`, {
+    headers: { Authorization: `Bearer ${AIRTABLE_API_KEY}` },
+  });
+  if (!response.ok) {
+    const reason = airtableErrorReason(await response.text());
+    console.error('[AIRTABLE_ERROR] findPhoneLeads', 'status:', response.status, 'reason:', reason);
+    throw new Error(`Airtable error: ${response.status} - ${reason}`);
+  }
+  const result = await response.json();
+  return (result.records ?? []) as PhoneLeadRow[];
+}
+
+/**
+ * Which phone-agent row a finished design belongs on, if any.
+ *
+ * The newest one, if it's recent enough — or any age when the design came from
+ * the link the agent texted, because that link is the proof it's the same
+ * person. Never a Customer: somebody who already bought is not a lead to
+ * refill, so a Customer anywhere in the list means file the design on its own.
+ */
+export function pickPhoneLead(
+  rows: PhoneLeadRow[],
+  { now, fromAgentLink }: { now: number; fromAgentLink: boolean }
+): PhoneLeadRow | null {
+  if (rows.some((r) => r.fields?.Status === 'Customer')) return null;
+  const cutoff = now - PHONE_LEAD_WINDOW_DAYS * 24 * 60 * 60 * 1000;
+  const eligible = rows
+    .filter((r) => fromAgentLink || Date.parse(r.createdTime) >= cutoff)
+    .sort((a, b) => Date.parse(b.createdTime) - Date.parse(a.createdTime));
+  return eligible[0] ?? null;
+}
+
 function tableUrl(): string {
   if (!AIRTABLE_API_KEY || !AIRTABLE_BASE_ID) {
     console.error('[AIRTABLE_CONFIG_ERROR] Missing:', {
